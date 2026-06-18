@@ -1,0 +1,32 @@
+{
+	"name": "meetily-codex-bridge",
+	"version": "0.1.0",
+	"description": "Codex wrappers for the repo-local agents commands and workflows used by Meetily.",
+	"author": {
+		"name": "Meetily",
+		"email": "dev@meetily.local",
+		"url": "https://github.com/Zackriya-Solutions/meeting-minutes"
+	},
+	"homepage": "https://github.com/Zackriya-Solutions/meeting-minutes",
+	"repository": "https://github.com/Zackriya-Solutions/meeting-minutes",
+	"license": "MIT",
+	"keywords": ["meetily", "agents", "codex", "workflow", "tauri", "audio", "transcription"],
+	"skills": "./skills/",
+	"interface": {
+		"displayName": "Meetily Codex Bridge",
+		"shortDescription": "Use Meetily repo-local agent workflows from Codex.",
+		"longDescription": "Provides Codex-facing wrappers for Meetily's canonical .agents commands and workflows. AGENTS.md and nearest AGENTS.md files remain the source of truth for codebase context routing.",
+		"developerName": "Meetily",
+		"category": "Coding",
+		"capabilities": ["Interactive", "Read", "Write"],
+		"websiteURL": "https://github.com/Zackriya-Solutions/meeting-minutes",
+		"privacyPolicyURL": "https://github.com/Zackriya-Solutions/meeting-minutes/blob/main/PRIVACY_POLICY.md",
+		"termsOfServiceURL": "https://github.com/Zackriya-Solutions/meeting-minutes",
+		"defaultPrompt": [
+			"Use the Meetily agent workflow for this task.",
+			"Run /review on the current diff.",
+			"Use /review-and-fix before wrapping up substantive work."
+		],
+		"brandColor": "#0F766E"
+	}
+}

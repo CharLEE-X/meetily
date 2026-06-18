@@ -1,0 +1,20 @@
+{
+	"name": "meetily",
+	"interface": {
+		"displayName": "Meetily"
+	},
+	"plugins": [
+		{
+			"name": "meetily-codex-bridge",
+			"source": {
+				"source": "local",
+				"path": "./plugins/meetily-codex-bridge"
+			},
+			"policy": {
+				"installation": "INSTALLED_BY_DEFAULT",
+				"authentication": "ON_USE"
+			},
+			"category": "Coding"
+		}
+	]
+}

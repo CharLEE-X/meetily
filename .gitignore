@@ -74,6 +74,9 @@ node_modules/
 *.sw?
 experiments/
 .cursor/
+.agents/worktrees/
+.agents/state/
+.agents/tmp/
 target/
 
 frontend/src-tauri/binaries/
