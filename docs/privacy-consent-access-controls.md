@@ -94,3 +94,58 @@ Future implementation and QA issues must include regression cases for:
 * Expiring MCP access logs, provider history, diagnostic logs, and agent skill installer logs without deleting meeting content.
 * Removing model caches without deleting unrelated user-selected files.
 * Handling missing local files gracefully when metadata remains.
+
+## MCP Access Control and Audit Policy
+
+The local Meetily MCP server must not expose meeting content until the user explicitly enables MCP in Settings and authorizes at least one client.
+
+Server rules:
+
+* Bind only to loopback by default: `127.0.0.1` for IPv4 and `::1` for IPv6. Binding to any non-loopback interface is prohibited unless a future enterprise setting adds a separate explicit warning, access control review, and release gate waiver.
+* Start disabled. The server may start only after the user enables MCP, and it must stop when MCP is disabled, the app exits, or the user revokes the last active client.
+* Use an OS-assigned local port by default or a user-selected local port with conflict handling. The active port must be visible in Settings.
+* Apply conservative per-client and per-tool rate limits to sensitive calls. Rate-limit denials must not include meeting content.
+* Never print tokens, meeting content, transcript text, screenshots, summaries, prompts, or embeddings to stdout, logs, crash reports, or audit records.
+
+Client authorization:
+
+* Each client must complete an in-app authorization flow before tool access. The app must show the client name when available, requested permission scopes, expiration, and whether the client can read or write data.
+* Client credentials expire after 30 days by default, with an optional shorter expiration. Renewal requires an in-app confirmation that repeats the requested scopes.
+* Client trust is represented by a revocable random token or equivalent OS-protected credential. Tokens must be stored in app-managed secure storage where available. If secure storage is unavailable, MCP must either store encrypted credentials protected by OS user-scope file permissions or refuse to enable MCP; plaintext token storage is prohibited.
+* Authorization is per client and per scope. Revoking a client terminates active sessions and invalidates the credential immediately.
+* A global "Disable MCP" control must stop the server, revoke active sessions, and leave prior audit metadata visible until the configured retention window expires or the user clears logs.
+
+Initial tool policy:
+
+| Tool category | Initial status | Permission scope | Notes |
+| --- | --- | --- | --- |
+| Server health and capability discovery | Allowed after client authorization | `mcp:read_status` | No meeting content or file paths |
+| List meetings | Allowed after explicit read scope | `meetings:list` | Return IDs, titles, dates, and status only |
+| Read transcript or summary | Disabled until user grants meeting read scope | `meetings:read_content` | Client must request content access and logs must include meeting IDs |
+| Search/chat over meeting index | Disabled until chat/index feature and MCP scope are enabled | `meetings:query_index` | Must not expose excluded meetings |
+| Export or write meeting data | Disabled initially | `meetings:write` | Requires a later issue and separate security review |
+| Delete or mutate meetings | Prohibited initially | None | Requires a future release gate and stronger confirmation model |
+
+MCP audit logs must record minimal accountability metadata:
+
+* Timestamp.
+* Client ID or token fingerprint.
+* Tool name and permission scope.
+* Opaque meeting IDs accessed, when applicable. Audit records must not mirror meeting titles, dates, transcript snippets, or summary text.
+* Result status, such as allowed, denied, revoked, failed, or rate-limited.
+* Reason for denial when applicable.
+
+MCP audit logs must not store prompts, transcript text, summary bodies, screenshots, embeddings, exported file content, or raw authorization tokens.
+
+Implementation and QA issues for MCP must include tests for:
+
+* Server disabled by default and not listening before enablement.
+* Unauthorized clients receive no meeting content.
+* Revoked clients cannot reuse old credentials.
+* Per-tool scopes deny transcript, summary, query, export, and mutation calls without explicit permission.
+* Audit logs record allowed and denied sensitive calls without content payloads.
+* Server binds only to loopback by default.
+* Port conflicts are reported without falling back to non-loopback binding.
+* Non-loopback IPv4 and IPv6 bind attempts are rejected.
+* Disabling MCP terminates in-flight sessions.
+* Tokens, scopes beyond explicit permission names, meeting titles, transcript text, summaries, and prompts never appear in logs or UI beyond allowed token fingerprints and opaque IDs.
