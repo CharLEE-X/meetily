@@ -224,6 +224,50 @@ tokens. The agent configuration file receives the raw token because the agent
 needs it to call the local server, but Meetily should never display that token in
 Settings or audit logs.
 
+## Agent Skill Pack and Post-Meeting Workflows
+
+Meetily also provides a local agent skill pack from `Settings -> MCP`. The skill
+pack is default-off, reversible, and stores only workflow templates plus MCP
+endpoint references. It must not write meeting content, raw client tokens, API
+keys, or secrets into agent configuration files.
+
+The first skill pack contains workflows for:
+
+* meeting search and meeting lookup through the authorized MCP server;
+* summary review and missing-context checks;
+* follow-up and action extraction;
+* Linear follow-up issue proposals;
+* follow-up message drafting;
+* manual agent handoff prompts.
+
+Post-meeting workflows have three modes:
+
+| Mode | Behavior |
+| --- | --- |
+| Off | No post-meeting agent workflow is prepared or run. |
+| Ask before running | Meetily prepares a bounded handoff after summary completion and asks the user to copy/run it. |
+| Prepare handoff automatically | Meetily prepares the handoff automatically after summary completion, but external writes still require approval. |
+
+Linear follow-up workflows are proposal-only by default. They ask the selected
+agent to return reviewable issue drafts with title, description, owner if known,
+priority suggestion, source meeting reference, and confidence. Meetily must not
+create Linear issues unless the user explicitly reviews and approves the write in
+a future authorized Linear write flow.
+
+### Agent Invocation Support Matrix
+
+| Agent target | MCP setup | Direct invocation from Meetily | Fallback |
+| --- | --- | --- | --- |
+| Codex | Meetily can write a `meetily` MCP server entry to `~/.codex/config.toml`. | Not launched directly in this release. | Copy the generated prompt into Codex; the prompt references the local MCP endpoint. |
+| Claude Desktop | Meetily can write a `meetily` MCP server entry to Claude Desktop config. | Not launched directly in this release. | Open Claude and paste the generated prompt after setup. |
+| Cursor | Meetily can write a `meetily` MCP server entry to `~/.cursor/mcp.json`. | Not launched directly in this release. | Open Cursor and paste the generated prompt after setup. |
+| Manual MCP client | User configures the documented MCP endpoint and trusted client token flow. | Manual only. | Copy the generated prompt into any authorized local MCP client. |
+
+Unsupported direct-invocation paths must degrade to manual handoff instead of
+pretending the workflow has run. Local workflow logs may store meeting id, agent,
+action template, mode, status, and timestamp, but must not store transcript text,
+summary bodies, screenshots, prompts, raw tokens, or external credentials.
+
 ## Connection
 
 When enabled, the server URL is:

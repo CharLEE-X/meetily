@@ -1,9 +1,24 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Bot, CheckCircle2, CircleAlert, CircleDashed, Play, Power, RefreshCw, ShieldCheck, Wrench } from "lucide-react"
+import { Bot, CheckCircle2, CircleAlert, CircleDashed, Play, Power, RefreshCw, ShieldCheck, Trash2, Wrench } from "lucide-react"
 import { Switch } from "./ui/switch"
 import { mcpService, AgentKind, AgentSetupStatus, McpAuditEvent, McpClient, McpStatus } from "@/services/mcpService"
+import {
+  AGENT_SUPPORT_MATRIX,
+  AGENT_WORKFLOW_ACTIONS,
+  AgentTarget,
+  AgentWorkflowRun,
+  AgentWorkflowSettings,
+  WorkflowActionId,
+  WorkflowMode,
+  getAgentWorkflowSettings,
+  installMeetilySkillPack,
+  listAgentWorkflowRuns,
+  MEETILY_SKILL_PACK_VERSION,
+  removeMeetilySkillPack,
+  saveAgentWorkflowSettings,
+} from "@/services/agentWorkflowService"
 
 function statusText(status: McpStatus | null): string {
   if (!status) return "Loading"
@@ -44,6 +59,8 @@ export function McpSettings() {
   const [clients, setClients] = useState<McpClient[]>([])
   const [auditEvents, setAuditEvents] = useState<McpAuditEvent[]>([])
   const [agentStatuses, setAgentStatuses] = useState<AgentSetupStatus[]>([])
+  const [workflowSettings, setWorkflowSettings] = useState<AgentWorkflowSettings>(() => getAgentWorkflowSettings())
+  const [workflowRuns, setWorkflowRuns] = useState<AgentWorkflowRun[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -62,6 +79,8 @@ export function McpSettings() {
       setClients(nextClients)
       setAuditEvents(nextAuditEvents)
       setAgentStatuses(nextAgentStatuses)
+      setWorkflowSettings(getAgentWorkflowSettings())
+      setWorkflowRuns(listAgentWorkflowRuns())
     } catch (error) {
       setMessage(friendlyError(error))
     } finally {
@@ -137,6 +156,42 @@ export function McpSettings() {
     }
   }
 
+  const updateWorkflowSettings = (updater: (current: AgentWorkflowSettings) => AgentWorkflowSettings) => {
+    const nextSettings = saveAgentWorkflowSettings(updater(workflowSettings))
+    setWorkflowSettings(nextSettings)
+    setMessage("Agent workflow settings saved.")
+  }
+
+  const handleSkillPackInstall = () => {
+    setWorkflowSettings(installMeetilySkillPack(workflowSettings))
+    setMessage("Meetily agent skill pack installed.")
+  }
+
+  const handleSkillPackRemove = () => {
+    setWorkflowSettings(removeMeetilySkillPack(workflowSettings))
+    setMessage("Meetily agent skill pack removed and post-meeting workflows disabled.")
+  }
+
+  const handleDefaultAgentChange = (defaultAgent: AgentTarget) => {
+    updateWorkflowSettings((current) => ({ ...current, defaultAgent }))
+  }
+
+  const handleWorkflowModeChange = (mode: WorkflowMode) => {
+    updateWorkflowSettings((current) => ({ ...current, mode }))
+  }
+
+  const handleActionToggle = (actionId: WorkflowActionId, enabled: boolean) => {
+    updateWorkflowSettings((current) => {
+      const nextActions = enabled
+        ? Array.from(new Set([...current.enabledActions, actionId]))
+        : current.enabledActions.filter((id) => id !== actionId)
+      return {
+        ...current,
+        enabledActions: nextActions.length ? nextActions : current.enabledActions,
+      }
+    })
+  }
+
   const handleRevokeClient = async (clientId: string) => {
     setIsSaving(true)
     setMessage(null)
@@ -154,6 +209,9 @@ export function McpSettings() {
 
   const currentStatus = statusText(status)
   const serverUrl = status?.url ?? `http://127.0.0.1:${status?.port ?? 43118}/mcp`
+  const selectedAgentStatus = agentStatuses.find((agent) => agent.agent === workflowSettings.defaultAgent)
+  const selectedAgentNeedsSetup = workflowSettings.defaultAgent !== "manual" && !selectedAgentStatus?.configured
+  const selectedAgentLabel = AGENT_SUPPORT_MATRIX.find((agent) => agent.agent === workflowSettings.defaultAgent)?.label ?? workflowSettings.defaultAgent
 
   return (
     <div className="space-y-6">
@@ -277,6 +335,138 @@ export function McpSettings() {
         </div>
       </div>
 
+      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Meetily agent skill pack</h3>
+            <p className="mt-1 max-w-2xl text-sm text-gray-600">
+              Installs local workflow templates for meeting search, summary review, follow-up extraction, Linear issue drafting, and manual agent handoff. The pack stores MCP references only; it does not embed meeting content or secrets.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              onClick={handleSkillPackInstall}
+              disabled={isSaving}
+            >
+              <Wrench className="h-4 w-4" />
+              {workflowSettings.skillPackInstalled ? "Update pack" : "Install pack"}
+            </button>
+            <button
+              className="inline-flex items-center gap-2 rounded-md border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+              onClick={handleSkillPackRemove}
+              disabled={!workflowSettings.skillPackInstalled || isSaving}
+            >
+              <Trash2 className="h-4 w-4" />
+              Remove
+            </button>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <div className="text-sm font-medium text-gray-900">Status</div>
+            <p className="mt-2 text-sm text-gray-600">
+              {workflowSettings.skillPackInstalled
+                ? `Installed (${workflowSettings.skillPackVersion ?? MEETILY_SKILL_PACK_VERSION})`
+                : "Not installed"}
+            </p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <label className="text-sm font-medium text-gray-900" htmlFor="default-agent">Default agent</label>
+            <select
+              id="default-agent"
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+              value={workflowSettings.defaultAgent}
+              onChange={(event) => handleDefaultAgentChange(event.target.value as AgentTarget)}
+            >
+              <option value="manual">Manual MCP handoff</option>
+              <option value="codex">Codex</option>
+              <option value="claude">Claude Desktop</option>
+              <option value="cursor">Cursor</option>
+            </select>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <label className="text-sm font-medium text-gray-900" htmlFor="workflow-mode">Post-meeting mode</label>
+            <select
+              id="workflow-mode"
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+              value={workflowSettings.mode}
+              onChange={(event) => handleWorkflowModeChange(event.target.value as WorkflowMode)}
+              disabled={!workflowSettings.skillPackInstalled}
+            >
+              <option value="off">Off</option>
+              <option value="ask">Ask before running</option>
+              <option value="auto">Prepare handoff automatically</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          {AGENT_WORKFLOW_ACTIONS.map((action) => {
+            const checked = workflowSettings.enabledActions.includes(action.id)
+            return (
+              <label key={action.id} className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-gray-300"
+                  checked={checked}
+                  disabled={!workflowSettings.skillPackInstalled}
+                  onChange={(event) => handleActionToggle(action.id, event.target.checked)}
+                />
+                <span>
+                  <span className="flex flex-wrap items-center gap-2 text-sm font-medium text-gray-900">
+                    {action.label}
+                    {action.requiresApproval && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">approval required</span>
+                    )}
+                  </span>
+                  <span className="mt-1 block text-sm text-gray-600">{action.description}</span>
+                </span>
+              </label>
+            )
+          })}
+        </div>
+
+        {selectedAgentNeedsSetup && (
+          <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            The selected default agent is not configured yet. Run Agent setup for {selectedAgentLabel} before enabling post-meeting handoffs for that target.
+          </div>
+        )}
+
+        <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          External write workflows, including Linear issue creation, are proposal-only by default. Meetily prepares reviewable drafts and requires explicit approval before anything is created outside the app.
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-gray-900">Agent support matrix</h3>
+        <p className="mt-1 text-sm text-gray-600">
+          Meetily can configure MCP for supported local agents, but direct task invocation depends on each client. Unsupported launch paths degrade to copyable handoff prompts.
+        </p>
+        <div className="mt-4 overflow-hidden rounded-lg border border-gray-200">
+          <table className="w-full table-fixed text-left text-sm">
+            <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+              <tr>
+                <th className="w-36 px-4 py-3">Agent</th>
+                <th className="px-4 py-3">Setup</th>
+                <th className="px-4 py-3">Invocation</th>
+                <th className="px-4 py-3">Fallback</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {AGENT_SUPPORT_MATRIX.map((row) => (
+                <tr key={row.agent} className="align-top">
+                  <td className="px-4 py-3 font-medium text-gray-900">{row.label}</td>
+                  <td className="px-4 py-3 text-gray-600">{row.setup}</td>
+                  <td className="px-4 py-3 text-gray-600">{row.invocation}</td>
+                  <td className="px-4 py-3 text-gray-600">{row.handoff}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <div className="flex items-center gap-2">
@@ -342,6 +532,31 @@ export function McpSettings() {
               ))
             )}
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-gray-900">Post-meeting workflow log</h3>
+        <div className="mt-4 space-y-3">
+          {workflowRuns.length === 0 ? (
+            <p className="text-sm text-gray-600">No agent workflow runs yet.</p>
+          ) : (
+            workflowRuns.slice(0, 6).map((run) => (
+              <div key={run.id} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="font-medium text-gray-900">{run.meetingTitle}</div>
+                    <p className="mt-1 text-xs text-gray-500">{new Date(run.createdAt).toLocaleString()}</p>
+                  </div>
+                  <span className="rounded-full bg-gray-200 px-2 py-1 text-xs text-gray-700">{run.status}</span>
+                </div>
+                <p className="mt-2 text-sm text-gray-600">{run.message}</p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Agent: {run.agent}; actions: {run.actions.join(", ")}
+                </p>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
