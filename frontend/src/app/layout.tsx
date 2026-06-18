@@ -25,6 +25,7 @@ import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcess
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
+import { isTauriRuntime } from '@/lib/tauri'
 
 
 const sourceSans3 = Source_Sans_3({
@@ -68,6 +69,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
+  const [runtimeReady, setRuntimeReady] = useState(true)
+  const [nativeRuntime, setNativeRuntime] = useState(() => isTauriRuntime())
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [onboardingCompleted, setOnboardingCompleted] = useState(false)
 
@@ -77,6 +80,13 @@ export default function RootLayout({
   const [importFilePath, setImportFilePath] = useState<string | null>(null)
 
   useEffect(() => {
+    setNativeRuntime(isTauriRuntime())
+    setRuntimeReady(true)
+  }, [])
+
+  useEffect(() => {
+    if (!runtimeReady || !nativeRuntime) return
+
     // Check onboarding status first
     invoke<{ completed: boolean } | null>('get_onboarding_status')
       .then((status) => {
@@ -96,7 +106,7 @@ export default function RootLayout({
         setShowOnboarding(true)
         setOnboardingCompleted(false)
       })
-  }, [])
+  }, [runtimeReady, nativeRuntime])
 
   // Disable context menu in production
   useEffect(() => {
@@ -107,6 +117,8 @@ export default function RootLayout({
     }
   }, []);
   useEffect(() => {
+    if (!nativeRuntime) return
+
     // Listen for tray recording toggle request
     const unlisten = listen('request-recording-toggle', () => {
       console.log('[Layout] Received request-recording-toggle from tray');
@@ -125,7 +137,7 @@ export default function RootLayout({
     return () => {
       unlisten.then(fn => fn());
     };
-  }, [showOnboarding]);
+  }, [showOnboarding, nativeRuntime]);
 
   // Handle file drop for audio import
   const handleFileDrop = useCallback((paths: string[]) => {
@@ -158,6 +170,7 @@ export default function RootLayout({
 
   // Listen for drag-drop events
   useEffect(() => {
+    if (!nativeRuntime) return
     if (showOnboarding) return; // Don't handle drops during onboarding
 
     const unlisteners: UnlistenFn[] = [];
@@ -206,7 +219,7 @@ export default function RootLayout({
       cleanedUpRef.current = true;
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [showOnboarding, handleFileDrop]);
+  }, [showOnboarding, handleFileDrop, nativeRuntime]);
 
   // Handle import dialog close
   const handleImportDialogClose = useCallback((open: boolean) => {
@@ -228,6 +241,43 @@ export default function RootLayout({
     setOnboardingCompleted(true)
     // Optionally reload the window to ensure all state is fresh
     window.location.reload()
+  }
+
+  if (runtimeReady && !nativeRuntime) {
+    return (
+      <html lang="en">
+        <body className={`${sourceSans3.variable} font-sans antialiased`}>
+          <main className="min-h-screen bg-gray-50 text-gray-900">
+            <div className="mx-auto flex min-h-screen max-w-3xl flex-col justify-center px-6 py-16">
+              <div className="space-y-5">
+                <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">Web preview</p>
+                <h1 className="text-4xl font-semibold tracking-normal text-gray-950">Meetily desktop app</h1>
+                <p className="max-w-2xl text-lg text-gray-600">
+                  This localhost view is running outside the Tauri desktop shell, so native recording,
+                  file system, updater, and model-management APIs are unavailable here.
+                </p>
+              </div>
+
+              <div className="mt-10 grid gap-4 sm:grid-cols-3">
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <h2 className="text-sm font-semibold text-gray-950">Frontend</h2>
+                  <p className="mt-2 text-sm text-gray-600">Next.js is serving correctly on port 3118.</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <h2 className="text-sm font-semibold text-gray-950">Desktop runtime</h2>
+                  <p className="mt-2 text-sm text-gray-600">Run the Tauri app to test native workflows.</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <h2 className="text-sm font-semibold text-gray-950">Build status</h2>
+                  <p className="mt-2 text-sm text-gray-600">The app compiles with the configured toolchain.</p>
+                </div>
+              </div>
+            </div>
+          </main>
+          <Toaster position="bottom-center" richColors closeButton />
+        </body>
+      </html>
+    )
   }
 
   return (

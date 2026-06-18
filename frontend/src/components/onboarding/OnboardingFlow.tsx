@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { isTauriRuntime } from '@/lib/tauri';
 import {
   WelcomeStep,
   PermissionsStep,
@@ -18,6 +19,11 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   useEffect(() => {
     // Check if running on macOS
     const checkPlatform = async () => {
+      if (!isTauriRuntime()) {
+        setIsMac(navigator.userAgent.includes('Mac'));
+        return;
+      }
+
       try {
         // Dynamic import to avoid SSR issues if any
         const { platform } = await import('@tauri-apps/plugin-os');

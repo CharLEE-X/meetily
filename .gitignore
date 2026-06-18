@@ -77,6 +77,7 @@ experiments/
 .agents/worktrees/
 .agents/state/
 .agents/tmp/
+.signing/
 target/
 
 frontend/src-tauri/binaries/

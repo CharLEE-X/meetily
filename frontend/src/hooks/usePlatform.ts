@@ -1,13 +1,7 @@
 import { useState, useEffect } from 'react';
+import { isTauriRuntime } from '@/lib/tauri';
 
 export type Platform = 'macos' | 'windows' | 'linux' | 'unknown';
-
-// Extend Window type to include Tauri internals
-declare global {
-  interface Window {
-    __TAURI_INTERNALS__?: unknown;
-  }
-}
 
 /**
  * Detect platform from user agent (fallback method)
@@ -37,7 +31,7 @@ export function usePlatform(): Platform {
   useEffect(() => {
     async function detectPlatform() {
       // Check if Tauri is available
-      if (typeof window === 'undefined' || !window.__TAURI_INTERNALS__) {
+      if (!isTauriRuntime()) {
         // Not in Tauri environment, use user agent
         setCurrentPlatform(detectPlatformFromUserAgent());
         return;

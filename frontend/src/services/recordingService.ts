@@ -7,6 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { isTauriRuntime, noopUnlisten } from '@/lib/tauri';
 
 export interface RecordingState {
   is_recording: boolean;
@@ -32,6 +33,7 @@ export class RecordingService {
    * @returns Promise<boolean>
    */
   async isRecording(): Promise<boolean> {
+    if (!isTauriRuntime()) return false;
     return invoke<boolean>('is_recording');
   }
 
@@ -40,6 +42,16 @@ export class RecordingService {
    * @returns Promise with full recording state
    */
   async getRecordingState(): Promise<RecordingState> {
+    if (!isTauriRuntime()) {
+      return {
+        is_recording: false,
+        is_paused: false,
+        is_active: false,
+        recording_duration: null,
+        active_duration: null,
+      };
+    }
+
     return invoke<RecordingState>('get_recording_state');
   }
 
@@ -48,6 +60,7 @@ export class RecordingService {
    * @returns Promise<string | null>
    */
   async getRecordingMeetingName(): Promise<string | null> {
+    if (!isTauriRuntime()) return null;
     return invoke<string | null>('get_recording_meeting_name');
   }
 
@@ -56,6 +69,7 @@ export class RecordingService {
    * @returns Promise<void>
    */
   async startRecording(): Promise<void> {
+    if (!isTauriRuntime()) return;
     return invoke('start_recording');
   }
 
@@ -71,6 +85,7 @@ export class RecordingService {
     systemDeviceName: string | null,
     meetingName: string
   ): Promise<void> {
+    if (!isTauriRuntime()) return;
     return invoke('start_recording_with_devices_and_meeting', {
       mic_device_name: micDeviceName,
       system_device_name: systemDeviceName,
@@ -84,6 +99,7 @@ export class RecordingService {
    * @returns Promise<void>
    */
   async stopRecording(savePath: string): Promise<void> {
+    if (!isTauriRuntime()) return;
     return invoke('stop_recording', {
       args: { save_path: savePath }
     });
@@ -94,6 +110,7 @@ export class RecordingService {
    * @returns Promise<void>
    */
   async pauseRecording(): Promise<void> {
+    if (!isTauriRuntime()) return;
     return invoke('pause_recording');
   }
 
@@ -102,6 +119,7 @@ export class RecordingService {
    * @returns Promise<void>
    */
   async resumeRecording(): Promise<void> {
+    if (!isTauriRuntime()) return;
     return invoke('resume_recording');
   }
 
@@ -113,6 +131,7 @@ export class RecordingService {
    * @returns Promise that resolves to unlisten function
    */
   async onRecordingStarted(callback: () => void): Promise<UnlistenFn> {
+    if (!isTauriRuntime()) return noopUnlisten;
     return listen('recording-started', callback);
   }
 
@@ -122,6 +141,7 @@ export class RecordingService {
    * @returns Promise that resolves to unlisten function
    */
   async onRecordingStopped(callback: (payload: RecordingStoppedPayload) => void): Promise<UnlistenFn> {
+    if (!isTauriRuntime()) return noopUnlisten;
     return listen<RecordingStoppedPayload>('recording-stopped', (event) => {
       callback(event.payload);
     });
@@ -133,6 +153,7 @@ export class RecordingService {
    * @returns Promise that resolves to unlisten function
    */
   async onRecordingPaused(callback: () => void): Promise<UnlistenFn> {
+    if (!isTauriRuntime()) return noopUnlisten;
     return listen('recording-paused', callback);
   }
 
@@ -142,6 +163,7 @@ export class RecordingService {
    * @returns Promise that resolves to unlisten function
    */
   async onRecordingResumed(callback: () => void): Promise<UnlistenFn> {
+    if (!isTauriRuntime()) return noopUnlisten;
     return listen('recording-resumed', callback);
   }
 
@@ -151,6 +173,7 @@ export class RecordingService {
    * @returns Promise that resolves to unlisten function
    */
   async onChunkDropWarning(callback: (warning: string) => void): Promise<UnlistenFn> {
+    if (!isTauriRuntime()) return noopUnlisten;
     return listen<string>('chunk-drop-warning', (event) => {
       callback(event.payload);
     });
@@ -162,6 +185,7 @@ export class RecordingService {
    * @returns Promise that resolves to unlisten function
    */
   async onSpeechDetected(callback: () => void): Promise<UnlistenFn> {
+    if (!isTauriRuntime()) return noopUnlisten;
     return listen('speech-detected', callback);
   }
 }

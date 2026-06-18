@@ -1,0 +1,18 @@
+{
+    "bundle": {
+        "category": "Utility",
+        "targets": [
+            "app"
+        ],
+        "createUpdaterArtifacts": false,
+        "macOS": {
+            "entitlements": "entitlements.appstore.plist",
+            "signingIdentity": "3rd Party Mac Developer Application: Adrian Witaszak (35M6G2GGQB)",
+            "hardenedRuntime": false,
+            "minimumSystemVersion": "12.0",
+            "files": {
+                "embedded.provisionprofile": "../../.signing/meetily-mac-app-store-connect.provisionprofile"
+            }
+        }
+    }
+}

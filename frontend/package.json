@@ -11,6 +11,8 @@
         "tauri": "tauri",
         "tauri:dev": "node scripts/tauri-auto.js dev",
         "tauri:build": "node scripts/tauri-auto.js build",
+        "tauri:build:appstore": "node scripts/build-appstore-macos.js",
+        "tauri:upload:appstore": "node scripts/upload-appstore-macos.js",
         "tauri:dev:cpu": "tauri dev",
         "tauri:dev:cuda": "tauri dev -- --features cuda",
         "tauri:dev:vulkan": "tauri dev -- --features vulkan",

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { isTauriRuntime } from '@/lib/tauri';
 
 export interface PermissionStatus {
   hasMicrophone: boolean;
@@ -18,6 +19,16 @@ export function usePermissionCheck() {
 
   const checkPermissions = async () => {
     setStatus(prev => ({ ...prev, isChecking: true, error: null }));
+
+    if (!isTauriRuntime()) {
+      setStatus({
+        hasMicrophone: false,
+        hasSystemAudio: false,
+        isChecking: false,
+        error: null,
+      });
+      return { hasMicrophone: false, hasSystemAudio: false };
+    }
 
     try {
       // Get audio devices to check for microphone and system audio availability
@@ -60,6 +71,8 @@ export function usePermissionCheck() {
   };
 
   const requestPermissions = async () => {
+    if (!isTauriRuntime()) return;
+
     try {
       // Trigger audio permission by trying to access devices
       await invoke('get_audio_devices');
