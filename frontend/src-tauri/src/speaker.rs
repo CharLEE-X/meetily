@@ -124,6 +124,125 @@ pub async fn clear_speaker_labels<R: Runtime>(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn update_speaker_label<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    label_id: String,
+    display_name: String,
+) -> Result<SpeakerLabel, String> {
+    let display_name = normalize_display_name(&display_name)?;
+    let pool = state.db_manager.pool();
+    let now = Utc::now().to_rfc3339();
+
+    let existing = sqlx::query(
+        r#"
+        SELECT id, meeting_id, display_name, source, status, confidence
+        FROM speaker_labels
+        WHERE id = ? AND deleted_at IS NULL
+        "#,
+    )
+    .bind(&label_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| format!("Failed to load speaker label: {}", err))?
+    .ok_or_else(|| "Speaker label not found".to_string())?;
+
+    let meeting_id: String = existing.get("meeting_id");
+    let previous_name: String = existing.get("display_name");
+    if previous_name == display_name {
+        return Ok(row_to_speaker_label(existing));
+    }
+
+    let duplicate = sqlx::query(
+        r#"
+        SELECT id
+        FROM speaker_labels
+        WHERE meeting_id = ? AND display_name = ? AND id != ? AND deleted_at IS NULL
+        "#,
+    )
+    .bind(&meeting_id)
+    .bind(&display_name)
+    .bind(&label_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| format!("Failed to validate speaker label: {}", err))?;
+
+    if duplicate.is_some() {
+        return Err("A speaker with that name already exists".to_string());
+    }
+
+    let correction_id = Uuid::new_v4().to_string();
+    let before_json = serde_json::json!({ "displayName": previous_name });
+    let after_json = serde_json::json!({ "displayName": display_name });
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|err| format!("Failed to start speaker correction transaction: {}", err))?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO speaker_corrections (id, meeting_id, action, before_json, after_json, created_at)
+        VALUES (?, ?, 'rename', ?, ?, ?)
+        "#,
+    )
+    .bind(&correction_id)
+    .bind(&meeting_id)
+    .bind(before_json.to_string())
+    .bind(after_json.to_string())
+    .bind(&now)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to store speaker correction: {}", err))?;
+
+    sqlx::query(
+        r#"
+        UPDATE speaker_labels
+        SET display_name = ?, status = 'confirmed', source = 'manual', updated_at = ?
+        WHERE id = ?
+        "#,
+    )
+    .bind(&display_name)
+    .bind(&now)
+    .bind(&label_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to update speaker label: {}", err))?;
+
+    sqlx::query(
+        r#"
+        UPDATE transcript_speaker_segments
+        SET source = 'manual', correction_id = ?, updated_at = ?
+        WHERE speaker_label_id = ?
+        "#,
+    )
+    .bind(&correction_id)
+    .bind(&now)
+    .bind(&label_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to update speaker segments: {}", err))?;
+
+    tx.commit()
+        .await
+        .map_err(|err| format!("Failed to commit speaker correction: {}", err))?;
+
+    let updated = sqlx::query(
+        r#"
+        SELECT id, meeting_id, display_name, source, status, confidence
+        FROM speaker_labels
+        WHERE id = ?
+        "#,
+    )
+    .bind(&label_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|err| format!("Failed to load updated speaker label: {}", err))?;
+
+    Ok(row_to_speaker_label(updated))
+}
+
 async fn run_speaker_labeling_for_meeting(
     state: &AppState,
     meeting_id: &str,
@@ -259,6 +378,17 @@ async fn run_speaker_labeling_for_meeting(
         .map_err(|err| format!("Failed to commit speaker labels: {}", err))?;
 
     load_speaker_labeling_result(state, meeting_id, "local_timing_and_source").await
+}
+
+fn row_to_speaker_label(row: sqlx::sqlite::SqliteRow) -> SpeakerLabel {
+    SpeakerLabel {
+        id: row.get("id"),
+        meeting_id: row.get("meeting_id"),
+        display_name: row.get("display_name"),
+        source: row.get("source"),
+        status: row.get("status"),
+        confidence: row.try_get("confidence").ok(),
+    }
 }
 
 async fn load_transcripts_for_labeling(
@@ -410,6 +540,25 @@ fn sanitize_legacy_speaker_label(value: &str) -> Option<String> {
         None
     } else {
         Some(truncated)
+    }
+}
+
+fn normalize_display_name(value: &str) -> Result<String, String> {
+    let cleaned = value
+        .chars()
+        .filter(|ch| {
+            ch.is_ascii_alphanumeric() || ch.is_ascii_whitespace() || *ch == '-' || *ch == '_'
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let truncated = cleaned.chars().take(48).collect::<String>();
+
+    if truncated.is_empty() {
+        Err("Speaker name cannot be empty".to_string())
+    } else {
+        Ok(truncated)
     }
 }
 

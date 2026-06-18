@@ -41,3 +41,10 @@ export async function clearSpeakerLabels(
 ): Promise<void> {
   return invoke<void>('clear_speaker_labels', { meetingId, includeConfirmed });
 }
+
+export async function updateSpeakerLabel(
+  labelId: string,
+  displayName: string,
+): Promise<SpeakerLabel> {
+  return invoke<SpeakerLabel>('update_speaker_label', { labelId, displayName });
+}

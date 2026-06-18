@@ -695,6 +695,7 @@ pub fn run() {
             speaker::run_speaker_labeling,
             speaker::get_speaker_labels,
             speaker::clear_speaker_labels,
+            speaker::update_speaker_label,
             // Meeting screenshot commands
             screenshots::get_screenshot_preferences,
             screenshots::set_screenshot_preferences,
