@@ -7,6 +7,8 @@ use std::{
     io,
     path::PathBuf,
     sync::Arc,
+    sync::Mutex as StdMutex,
+    time::Duration,
 };
 use tauri::{AppHandle, Manager, State};
 use tokio::{
@@ -14,6 +16,7 @@ use tokio::{
     net::TcpListener,
     sync::{oneshot, Mutex},
     task::JoinHandle,
+    time::timeout,
 };
 use uuid::Uuid;
 
@@ -21,6 +24,7 @@ const DEFAULT_PORT: u16 = 43118;
 const CONFIG_DIR_NAME: &str = "meetily";
 const SETTINGS_FILE_NAME: &str = "mcp_settings.json";
 const AUDIT_FILE_NAME: &str = "mcp_audit_log.json";
+static AUDIT_FILE_LOCK: std::sync::LazyLock<StdMutex<()>> = std::sync::LazyLock::new(|| StdMutex::new(()));
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,20 +148,37 @@ fn load_audit_events() -> Vec<McpAuditEvent> {
     let Ok(path) = audit_path() else {
         return Vec::new();
     };
-    let Ok(raw) = fs::read_to_string(path) else {
+    let Ok(raw) = fs::read_to_string(&path) else {
         return Vec::new();
     };
-    serde_json::from_str(&raw).unwrap_or_default()
+    match serde_json::from_str(&raw) {
+        Ok(events) => events,
+        Err(error) => {
+            log::warn!("MCP audit log is corrupt; preserving it before starting a new log: {}", error);
+            let corrupt_path = path.with_extension(format!("json.corrupt-{}", Utc::now().timestamp()));
+            let _ = fs::rename(path, corrupt_path);
+            Vec::new()
+        }
+    }
 }
 
 fn save_audit_events(events: &[McpAuditEvent]) -> Result<()> {
     let path = audit_path()?;
+    let tmp_path = path.with_extension("json.tmp");
     let raw = serde_json::to_string_pretty(events)?;
-    fs::write(path, raw)?;
+    fs::write(&tmp_path, raw)?;
+    fs::rename(tmp_path, path)?;
     Ok(())
 }
 
 fn append_audit_event(event: McpAuditEvent) {
+    let _guard = match AUDIT_FILE_LOCK.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            log::warn!("MCP audit log lock poisoned; dropping audit event");
+            return;
+        }
+    };
     let mut events = load_audit_events();
     events.insert(0, event);
     events.truncate(100);
@@ -201,6 +222,52 @@ async fn write_response(socket: &mut tokio::net::TcpStream, status: &str, body: 
     socket.write_all(response.as_bytes()).await
 }
 
+async fn read_http_request(socket: &mut tokio::net::TcpStream) -> io::Result<String> {
+    let mut buffer = Vec::with_capacity(8192);
+    let mut chunk = [0; 2048];
+    let mut expected_len: Option<usize> = None;
+
+    loop {
+        let n = timeout(Duration::from_secs(5), socket.read(&mut chunk))
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "MCP request timed out"))??;
+        if n == 0 {
+            break;
+        }
+        buffer.extend_from_slice(&chunk[..n]);
+
+        if expected_len.is_none() {
+            if let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                let header_raw = String::from_utf8_lossy(&buffer[..header_end]);
+                let content_length = header_raw
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        if name.eq_ignore_ascii_case("content-length") {
+                            value.trim().parse::<usize>().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+                expected_len = Some(header_end + 4 + content_length);
+            }
+        }
+
+        if let Some(total_len) = expected_len {
+            if buffer.len() >= total_len {
+                break;
+            }
+        }
+
+        if buffer.len() > 1024 * 1024 {
+            break;
+        }
+    }
+
+    Ok(String::from_utf8_lossy(&buffer).to_string())
+}
+
 fn json_rpc_response(request: &str) -> String {
     let parsed: Value = serde_json::from_str(request).unwrap_or_else(|_| json!({}));
     let id = parsed.get("id").cloned().unwrap_or(Value::Null);
@@ -226,6 +293,10 @@ fn json_rpc_response(request: &str) -> String {
                 .pointer("/params/name")
                 .and_then(Value::as_str)
                 .unwrap_or("unknown");
+
+            // Only non-content status tools are exposed until client authorization and scoped
+            // content permissions are implemented. Do not add meeting-content tools here
+            // without enforcing bearer-token authorization and client revocation.
             append_audit_event(McpAuditEvent {
                 id: Uuid::new_v4().to_string(),
                 timestamp: now_string(),
@@ -257,13 +328,11 @@ fn json_rpc_response(request: &str) -> String {
 }
 
 async fn handle_connection(mut socket: tokio::net::TcpStream) -> io::Result<()> {
-    let mut buffer = vec![0; 8192];
-    let n = socket.read(&mut buffer).await?;
-    if n == 0 {
+    let request = read_http_request(&mut socket).await?;
+    if request.is_empty() {
         return Ok(());
     }
 
-    let request = String::from_utf8_lossy(&buffer[..n]);
     let mut lines = request.lines();
     let request_line = lines.next().unwrap_or_default();
     let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
@@ -286,11 +355,7 @@ async fn handle_connection(mut socket: tokio::net::TcpStream) -> io::Result<()> 
     write_response(&mut socket, "404 Not Found", &json!({ "error": "not_found" }).to_string()).await
 }
 
-async fn run_server(port: u16, mut shutdown_rx: oneshot::Receiver<()>) -> Result<()> {
-    let listener = TcpListener::bind(("127.0.0.1", port))
-        .await
-        .with_context(|| format!("Unable to bind MCP server to 127.0.0.1:{}", port))?;
-
+async fn run_server(listener: TcpListener, mut shutdown_rx: oneshot::Receiver<()>) -> Result<()> {
     loop {
         tokio::select! {
             accept_result = listener.accept() => {
@@ -327,10 +392,9 @@ async fn start_runtime(runtime: &mut McpRuntime) -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port))
         .await
         .with_context(|| format!("Unable to bind MCP server to 127.0.0.1:{}", port))?;
-    drop(listener);
 
     let task = tokio::spawn(async move {
-        if let Err(error) = run_server(port, shutdown_rx).await {
+        if let Err(error) = run_server(listener, shutdown_rx).await {
             log::error!("MCP server stopped with error: {}", error);
         }
     });
@@ -372,7 +436,15 @@ pub async fn shutdown(state: &McpState) {
 #[tauri::command]
 pub async fn mcp_get_status(state: State<'_, McpState>) -> Result<McpStatus, String> {
     let mut runtime = state.runtime.lock().await;
-    runtime.settings = load_settings().unwrap_or_else(|_| runtime.settings.clone());
+    if runtime.state == McpServerState::Running && runtime.task.as_ref().is_some_and(|task| task.is_finished()) {
+        runtime.task = None;
+        runtime.shutdown_tx = None;
+        runtime.state = McpServerState::Error;
+        runtime.last_error = Some("MCP server stopped unexpectedly.".to_string());
+    }
+    if runtime.state == McpServerState::Stopped || runtime.state == McpServerState::Error {
+        runtime.settings = load_settings().unwrap_or_else(|_| runtime.settings.clone());
+    }
     Ok(build_status(runtime.settings.clone(), &runtime))
 }
 
@@ -385,9 +457,14 @@ pub async fn mcp_update_settings(settings: McpSettings, state: State<'_, McpStat
     save_settings(&settings).map_err(|_| "Unable to save MCP settings".to_string())?;
 
     let mut runtime = state.runtime.lock().await;
+    let was_enabled = runtime.settings.enabled;
+    let old_port = runtime.settings.port;
     runtime.settings = settings.clone();
 
     if settings.enabled {
+        if was_enabled && old_port != settings.port {
+            stop_runtime(&mut runtime).await;
+        }
         if let Err(error) = start_runtime(&mut runtime).await {
             runtime.state = McpServerState::Error;
             runtime.last_error = Some(error.to_string());
@@ -472,7 +549,19 @@ fn home_dir() -> Result<PathBuf> {
 fn agent_config_path(agent: &AgentKind) -> Result<PathBuf> {
     let home = home_dir()?;
     Ok(match agent {
-        AgentKind::Claude => home.join("Library/Application Support/Claude/claude_desktop_config.json"),
+        AgentKind::Claude if cfg!(target_os = "macos") => {
+            home.join("Library/Application Support/Claude/claude_desktop_config.json")
+        }
+        AgentKind::Claude if cfg!(target_os = "windows") => {
+            dirs::config_dir()
+                .ok_or_else(|| anyhow!("Could not find config directory"))?
+                .join("Claude/claude_desktop_config.json")
+        }
+        AgentKind::Claude => {
+            dirs::config_dir()
+                .ok_or_else(|| anyhow!("Could not find config directory"))?
+                .join("Claude/claude_desktop_config.json")
+        }
         AgentKind::Cursor => home.join(".cursor/mcp.json"),
         AgentKind::Codex => home.join(".codex/config.toml"),
     })
@@ -540,7 +629,7 @@ fn merge_json_mcp_config(path: &PathBuf, agent: &AgentKind, url: &str) -> Result
     }
 
     if path.exists() {
-        let backup = path.with_extension("json.meetily-backup");
+        let backup = path.with_extension(format!("json.meetily-backup-{}", Utc::now().timestamp_millis()));
         fs::copy(path, backup)?;
     }
 
@@ -585,7 +674,7 @@ fn merge_codex_config(path: &PathBuf, url: &str) -> Result<()> {
     }
 
     if path.exists() {
-        let backup = path.with_extension("toml.meetily-backup");
+        let backup = path.with_extension(format!("toml.meetily-backup-{}", Utc::now().timestamp_millis()));
         fs::copy(path, backup)?;
     }
 
@@ -596,7 +685,22 @@ fn merge_codex_config(path: &PathBuf, url: &str) -> Result<()> {
     };
 
     if raw.contains("[mcp_servers.meetily]") {
-        return Ok(());
+        let mut filtered = Vec::new();
+        let mut skipping = false;
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if trimmed == "[mcp_servers.meetily]" || trimmed.starts_with("[mcp_servers.meetily.") {
+                skipping = true;
+                continue;
+            }
+            if skipping && trimmed.starts_with('[') {
+                skipping = false;
+            }
+            if !skipping {
+                filtered.push(line);
+            }
+        }
+        raw = filtered.join("\n");
     }
 
     if !raw.ends_with('\n') && !raw.is_empty() {

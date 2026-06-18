@@ -86,7 +86,7 @@ export const mcpService = {
   },
 
   async startServer(): Promise<McpStatus> {
-    if (!isTauriRuntime()) return { ...defaultStatus, state: 'running', url: 'http://127.0.0.1:43118/mcp' };
+    if (!isTauriRuntime()) return defaultStatus;
     return invoke<McpStatus>('mcp_start_server');
   },
 

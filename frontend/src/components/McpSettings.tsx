@@ -21,6 +21,7 @@ function agentIcon(agent: AgentSetupStatus) {
 
 function friendlyError(error: unknown): string {
   if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
   return "The MCP setting could not be updated. Check the app permissions and try again."
 }
 
@@ -87,6 +88,10 @@ export function McpSettings() {
   }
 
   const handlePortChange = (port: number) => {
+    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+      setMessage("Choose a port between 1 and 65535.")
+      return
+    }
     updateStatus((current) => ({ ...current.settings, port }))
   }
 
