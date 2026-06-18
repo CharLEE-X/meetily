@@ -203,3 +203,83 @@ Every meeting-content tool call records:
 
 Audit events must not include meeting titles, transcript text, summary text,
 prompts, screenshots, embeddings, local file paths, or raw tokens.
+
+## Agent Setup
+
+Use `Settings -> MCP -> Agent setup` to configure supported local clients:
+
+* Claude Desktop;
+* Codex;
+* Cursor.
+
+The app writes a Meetily MCP entry for the selected client and creates a matching
+trusted-client record. Re-running setup repairs the client config and rotates the
+local token. After setup, Settings shows the client name, scopes, token
+fingerprint, expiry, and revoke state.
+
+Client records are stored in Meetily's local config directory in
+`mcp_clients.json`. The registry stores token hashes and fingerprints, not raw
+tokens. The agent configuration file receives the raw token because the agent
+needs it to call the local server, but Meetily should never display that token in
+Settings or audit logs.
+
+## Connection
+
+When enabled, the server URL is:
+
+```text
+http://127.0.0.1:<configured-port>/mcp
+```
+
+The default port is `43118`. The health endpoint is:
+
+```text
+http://127.0.0.1:<configured-port>/health
+```
+
+External MCP clients must send:
+
+```text
+Authorization: Bearer <client-token>
+```
+
+`initialize`, `tools/list`, and `meetily_status` are safe discovery/status paths.
+Meeting-content tools require the bearer token and a matching scope.
+
+## Settings UX
+
+The MCP Settings page must show:
+
+* server enabled/running/error state;
+* loopback URL and configured port;
+* auto-start preference;
+* supported agent setup status;
+* trusted clients with active, expired, or revoked state;
+* token fingerprints, not raw tokens;
+* recent audit events with client id, tool, scopes, meeting ids, result, and
+  reason when applicable.
+
+Revoking a client marks the client record as revoked. Subsequent meeting-content
+tool calls with that token must fail with a revoked authorization error and log a
+revoked audit event.
+
+## QA Checklist
+
+Before shipping MCP meeting access:
+
+* Confirm MCP is disabled by default.
+* Enable MCP and verify `/health` responds only on `127.0.0.1`.
+* Verify `tools/list` includes only read-only tools.
+* Call a meeting-content tool without `Authorization`; expect no meeting content
+  and a denied audit event.
+* Configure at least one agent from Settings; verify a trusted client appears
+  with a fingerprint and scopes.
+* Call a read-only meeting tool with that agent token; expect scoped meeting data
+  and an allowed audit event.
+* Revoke that client and retry the same token; expect no meeting content and a
+  revoked audit event.
+* Restart the app with auto-start enabled and verify the server starts on the
+  configured loopback port.
+* Disable MCP and verify the server stops.
+* Inspect audit logs and app logs for absence of raw tokens, transcript text,
+  summary text, prompts, screenshots, embeddings, and local file paths.
