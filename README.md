@@ -86,12 +86,8 @@ read-only MCP tool and authorization contract is documented in
 
 The Community fork upgrade roadmap is documented in
 [Pro-Equivalent Feature Architecture Roadmap](docs/pro-equivalent-architecture-roadmap.md).
-It covers the planned sequence for transcription accuracy, custom templates,
-advanced PDF/DOCX/Markdown exports, meeting detection, speaker identification
-and screenshots, meeting chat, calendar integration, Apple Notes export, local
-MCP access, and AI-agent skill setup. Sensitive automation in that roadmap is
-default-off and requires explicit user opt-in before it captures, exports,
-indexes, syncs, or exposes meeting data.
+Sensitive automation in that roadmap is default-off and requires explicit user
+opt-in before it captures, exports, indexes, syncs, or exposes meeting data.
 
 <details>
 <summary>The Privacy Problem</summary>

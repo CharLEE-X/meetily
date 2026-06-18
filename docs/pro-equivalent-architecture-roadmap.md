@@ -130,6 +130,20 @@ tables and no-op repositories even before feature UIs are complete.
 | Automation runs | `meeting_automation_runs` | Job/agent services | Agent/workflow/template invocation status without prompts or meeting bodies |
 | Access audit | existing MCP audit JSON, future `meeting_access_audit` | MCP and integration services | Minimal content-free access/export/sync metadata |
 
+The existing `transcripts.speaker` column from
+`frontend/src-tauri/migrations/20251110000001_add_speaker_field.sql` remains a
+legacy/simple source-label field during the transition. Phase 6 speaker work
+should treat it as backwards-compatible input, backfill richer
+`speaker_labels` and `transcript_speaker_segments` rows where possible, and then
+keep it as a denormalized compatibility field until all readers use the richer
+tables.
+
+The current MCP audit precedent is implemented in
+`frontend/src-tauri/src/mcp/mod.rs` and persisted as the local
+`mcp_audit_log.json` file. A future `meeting_access_audit` table should mirror
+that content-free shape rather than storing transcript text, summary bodies,
+prompts, screenshots, or local file paths.
+
 ### File Storage
 
 Use app-managed storage under the Tauri app data directory:
@@ -209,7 +223,7 @@ content.
 | Screenshots | new `screenshots/` module | recording controls and meeting detail | `request_screenshot_permission`, `start_meeting_screenshots`, `pause_meeting_screenshots`, `delete_meeting_screenshot` |
 | Speaker labels | new `speaker/` module | meeting detail hooks | `run_speaker_labeling`, `update_speaker_label`, `clear_speaker_labels` |
 | Meeting chat/index | new `meeting_chat/` module | new chat service | `build_meeting_index`, `ask_meeting`, `delete_meeting_index`; events `meeting-index-progress` |
-| MCP | existing `mcp/` module | `mcpService.ts` | Existing read-only tools are Phase 0 complete; write/export tools require future gate |
+| MCP | existing `mcp/` module | `mcpService.ts` | Existing read-only tools are Phase 0 complete; write/export tools require the gates in `docs/privacy-consent-access-controls.md` and `docs/security-review-checklist.md` |
 | Agent skills/workflows | new `agent_workflows/` module | MCP/settings service | `list_agent_workflows`, `save_agent_workflow_settings`, `prepare_agent_context`, `run_agent_workflow` |
 
 Sensitive services must call permission/consent checks before doing work, not
@@ -268,6 +282,7 @@ Every feature surface should define:
 | --- | --- | --- |
 | CHA-1674 privacy/consent/access controls | Done | Sensitive feature policy exists |
 | CHA-1671 local MCP meeting access | Done | Read-only MCP server, scopes, audit, setup UI |
+| CHA-1716 README upgrade coverage | Done in this branch | README lists all planned upgrade areas and links this roadmap |
 | CHA-1673 architecture plan | This branch | Shared roadmap before feature implementation |
 
 ### Phase 1: Storage, Jobs, and Export Foundation
@@ -278,7 +293,7 @@ Primary candidates:
 2. New child: common job runner/progress model.
 3. CHA-1665 advanced exports: start with Markdown and app-managed export
    records before PDF/DOCX.
-4. CHA-1716 README upgrade coverage stays updated with shipped slices.
+4. Keep README roadmap coverage updated whenever a future slice ships.
 
 Exit gates:
 
@@ -314,8 +329,9 @@ Primary candidates:
 
 1. Continue CHA-1665 PDF/DOCX renderers.
 2. CHA-1670 Apple Notes export.
-3. Calendar metadata prerequisites from CHA-1669 if Notes folder naming depends
-   on event context.
+3. If Notes folder naming depends on event context, land only the minimal
+   provider-neutral calendar metadata slice from CHA-1669 first; otherwise
+   Apple Notes can ship without waiting for full calendar sync.
 
 Exit gates:
 
@@ -455,4 +471,3 @@ explicit destination/provider/client setup.
 | PDF/DOCX renderer dependencies | CHA-1665 | Review license and bundle size before adding |
 | Diarization model/dependency | CHA-1667 | Keep labels manual/detected distinction regardless of engine |
 | Common job runner shape | Phase 1 | Add before multiple long-running features ship |
-
