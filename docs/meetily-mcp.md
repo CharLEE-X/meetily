@@ -213,9 +213,10 @@ Use `Settings -> MCP -> Agent setup` to configure supported local clients:
 * Cursor.
 
 The app writes a Meetily MCP entry for the selected client and creates a matching
-trusted-client record. Re-running setup repairs the client config and rotates the
-local token. After setup, Settings shows the client name, scopes, token
-fingerprint, expiry, and revoke state.
+trusted-client record. Re-running setup is idempotent while the client is already
+configured with an active token; if the client is missing, expired, or revoked,
+setup writes a fresh local token. After setup, Settings shows the client name,
+scopes, token fingerprint, expiry, and revoke state.
 
 Client records are stored in Meetily's local config directory in
 `mcp_clients.json`. The registry stores token hashes and fingerprints, not raw

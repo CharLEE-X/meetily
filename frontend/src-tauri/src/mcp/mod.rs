@@ -281,7 +281,7 @@ fn hash_token(token: &str) -> String {
 }
 
 fn token_fingerprint(token_hash: &str) -> String {
-    format!("sha256:{}", token_hash.chars().take(12).collect::<String>())
+    format!("sha256:{}", token_hash.chars().take(16).collect::<String>())
 }
 
 fn default_client_scopes() -> Vec<String> {
@@ -328,6 +328,20 @@ fn ensure_agent_client(agent: &AgentKind) -> Result<String> {
     Ok(token)
 }
 
+fn active_agent_client_exists(agent: &AgentKind) -> bool {
+    let client_id = format!("agent-{}", agent_label(agent).to_lowercase());
+    let now = Utc::now();
+    load_trusted_clients().into_iter().any(|client| {
+        if client.id != client_id || client.revoked {
+            return false;
+        }
+
+        chrono::DateTime::parse_from_rfc3339(&client.expires_at)
+            .map(|expires_at| expires_at.with_timezone(&Utc) > now)
+            .unwrap_or(false)
+    })
+}
+
 fn public_clients() -> Vec<McpClient> {
     load_trusted_clients()
         .into_iter()
@@ -349,6 +363,19 @@ fn revoke_trusted_client(client_id: &str) -> Result<Vec<McpClient>> {
     }
     save_trusted_clients(&clients)?;
     Ok(clients.into_iter().map(McpClient::from).collect())
+}
+
+fn constant_time_eq(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len() != right.len() {
+        return false;
+    }
+
+    left.iter()
+        .zip(right.iter())
+        .fold(0u8, |diff, (left, right)| diff | (left ^ right))
+        == 0
 }
 
 #[derive(Debug, Clone)]
@@ -408,7 +435,7 @@ fn authorize_client(
     let now = Utc::now();
 
     for client in load_trusted_clients() {
-        if client.token_hash != token_hash {
+        if !constant_time_eq(&client.token_hash, &token_hash) {
             continue;
         }
         if client.revoked {
@@ -466,7 +493,7 @@ async fn write_response(
     body: &str,
 ) -> io::Result<()> {
     let response = format!(
-        "HTTP/1.1 {}\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: http://localhost\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         status,
         body.as_bytes().len(),
         body
@@ -697,6 +724,14 @@ fn audit_allowed(
     });
 }
 
+async fn ensure_meeting_exists(pool: &sqlx::SqlitePool, meeting_id: &str) -> Result<(), String> {
+    MeetingsRepository::get_meeting_metadata(pool, meeting_id)
+        .await
+        .map_err(|error| format!("Failed to inspect meeting: {}", error))?
+        .map(|_| ())
+        .ok_or_else(|| "Meeting not found".to_string())
+}
+
 async fn call_meeting_tool(
     app_handle: &AppHandle,
     tool_name: &str,
@@ -793,6 +828,7 @@ async fn call_meeting_tool(
         }
         "meetily_get_summary" => {
             let meeting_id = meeting_id.ok_or_else(|| "meetingId is required".to_string())?;
+            ensure_meeting_exists(pool, &meeting_id).await?;
             let summary = SummaryProcessesRepository::get_summary_data(pool, &meeting_id)
                 .await
                 .map_err(|error| format!("Failed to get summary: {}", error))?;
@@ -805,6 +841,7 @@ async fn call_meeting_tool(
             let meeting_id = meeting_id.ok_or_else(|| "meetingId is required".to_string())?;
             let limit = bounded_i64_arg(args, "limit", 100, 1, 500);
             let offset = bounded_i64_arg(args, "offset", 0, 0, i64::MAX);
+            ensure_meeting_exists(pool, &meeting_id).await?;
             let (transcripts, total_count) = MeetingsRepository::get_meeting_transcripts_paginated(pool, &meeting_id, limit, offset)
                 .await
                 .map_err(|error| format!("Failed to get transcript: {}", error))?;
@@ -831,6 +868,7 @@ async fn call_meeting_tool(
         }
         "meetily_get_action_items" => {
             let meeting_id = meeting_id.ok_or_else(|| "meetingId is required".to_string())?;
+            ensure_meeting_exists(pool, &meeting_id).await?;
             let rows = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
                 "SELECT id, action_items, key_points FROM transcripts WHERE meeting_id = ? AND (action_items IS NOT NULL OR key_points IS NOT NULL)"
             )
@@ -1166,7 +1204,19 @@ pub async fn mcp_list_clients() -> Result<Vec<McpClient>, String> {
 
 #[tauri::command]
 pub async fn mcp_revoke_client(client_id: String) -> Result<Vec<McpClient>, String> {
-    revoke_trusted_client(&client_id).map_err(|_| "Unable to revoke MCP client".to_string())
+    let clients =
+        revoke_trusted_client(&client_id).map_err(|_| "Unable to revoke MCP client".to_string())?;
+    append_audit_event(McpAuditEvent {
+        id: Uuid::new_v4().to_string(),
+        timestamp: now_string(),
+        client_id,
+        tool_name: "mcp_revoke_client".to_string(),
+        scopes: Vec::new(),
+        meeting_ids: Vec::new(),
+        result: "revoked".to_string(),
+        reason: Some("user_revoked_client".to_string()),
+    });
+    Ok(clients)
 }
 
 #[tauri::command]
@@ -1383,14 +1433,22 @@ fn merge_codex_config(path: &PathBuf, url: &str, token: &str) -> Result<()> {
         raw.push('\n');
     }
 
-    let safe_url = url.replace('"', "");
-    let safe_header = format!("Authorization: Bearer {}", token).replace('"', "");
+    let safe_url = toml_string_value(url);
+    let safe_header = toml_string_value(&format!("Authorization: Bearer {}", token));
     raw.push_str(&format!(
         "\n[mcp_servers.meetily]\ncommand = \"npx\"\nargs = [\"-y\", \"mcp-remote\", \"{}\", \"--header\", \"{}\"]\nenabled = true\n",
         safe_url, safe_header
     ));
     fs::write(path, raw)?;
     Ok(())
+}
+
+fn toml_string_value(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 #[tauri::command]
@@ -1420,6 +1478,9 @@ pub async fn mcp_setup_agent(
     let path = agent_config_path(&agent)
         .map_err(|_| "Unable to find the user home directory".to_string())?;
     let url = expected_url(&settings);
+    if config_contains_meetily(&path, &agent, &url) && active_agent_client_exists(&agent) {
+        return Ok(status_for_agent(agent, &settings, running));
+    }
     let token = ensure_agent_client(&agent)
         .map_err(|_| format!("Unable to authorize {} MCP client", agent_label(&agent)))?;
 
@@ -1439,6 +1500,9 @@ fn setup_agent_inner(
 ) -> Result<AgentSetupStatus> {
     let path = agent_config_path(&agent)?;
     let url = expected_url(settings);
+    if config_contains_meetily(&path, &agent, &url) && active_agent_client_exists(&agent) {
+        return Ok(status_for_agent(agent, settings, running));
+    }
     let token = ensure_agent_client(&agent)?;
 
     match agent {
