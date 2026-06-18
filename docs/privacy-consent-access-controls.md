@@ -183,3 +183,55 @@ Implementation and QA issues for external integrations must include tests for:
 * Revoked calendar or Notes permission stops future sync/export attempts.
 * Clearing local export history does not silently delete user-managed external files.
 * Cloud-provider mode shows provider disclosure before sending meeting content.
+
+## Screenshot Capture Controls
+
+Periodic screenshot capture is high risk because it can include unrelated apps, private tabs, notifications, credentials, or participants who did not expect screen capture. Screenshots must never start silently.
+
+Consent and startup:
+
+* Screenshot capture is off by default.
+* A global screenshot preference may only make the feature available. Every meeting still requires per-meeting confirmation before the first screenshot.
+* The confirmation must show capture interval, storage location, retention behavior, deletion path, whether screenshots may be used for speaker labeling or meeting chat context, and a warning that screenshots may include visible screen content outside the meeting app.
+* If OS screen-recording permission is missing, revoked, or unavailable before capture starts, screenshots must remain disabled, the meeting must continue without screenshots, and the UI must show screenshots as unavailable.
+
+Runtime controls:
+
+* Show a persistent visible indicator whenever screenshot capture is active.
+* Show the next scheduled capture time or countdown.
+* Provide immediate pause, resume, and stop controls from the meeting surface.
+* Pausing recording must also pause screenshot capture. Screenshots may resume only when the meeting recording resumes and the screenshot controls still show active capture.
+* Stopping screenshot capture must stop future captures immediately without ending audio recording.
+* If OS screen-recording permission is revoked during an active session, screenshot capture must stop immediately, the UI must show screenshots as unavailable, and existing screenshots remain subject to the meeting deletion and screenshot deletion controls.
+* The user must be able to delete individual screenshots and all screenshots for a meeting.
+
+Capture limits and storage:
+
+* The default interval must not be more frequent than every 60 seconds.
+* A user-configurable interval must enforce an absolute minimum of 30 seconds unless a future release gate approves a shorter interval. The default remains at least 60 seconds.
+* Screenshots are stored only in app-managed local storage by default and linked to meeting ID, capture timestamp, source display/window when available, and deletion status.
+* Screenshots inherit the meeting retention policy and must be deleted when the meeting is deleted.
+* Redaction, if added, must run before screenshots are exposed to summaries, chat indexes, exports, or MCP clients.
+
+Private and unsupported capture contexts:
+
+* Meetily cannot reliably identify every private/incognito window or sensitive app. The confirmation and active indicator must state that screenshots may include visible screen content outside the meeting app.
+* If the OS or target app blocks screen capture, the app must record a visible skipped-capture status instead of retrying aggressively or capturing a different source silently.
+* Notifications or error states must not include screenshot thumbnails or captured text.
+
+Speaker labeling:
+
+* Screenshot-derived speaker labels are detected labels, not verified identities.
+* UI and exports must distinguish "detected speaker label" from "user-confirmed identity."
+* Users must be able to edit, confirm, clear, and delete speaker labels independently from screenshots.
+* Speaker labels must not be sent to external exports, chat indexes, MCP clients, or cloud providers unless the relevant feature is enabled under the external data boundary rules and the destination preview includes speaker labels explicitly.
+
+Implementation and QA issues for screenshots must include tests for:
+
+* Screenshots do not start from a global preference alone.
+* Per-meeting confirmation appears before the first capture.
+* Active indicator, next-capture time, pause, resume, stop, and delete controls are visible during capture.
+* Pausing recording pauses screenshots, and screenshots resume only after recording resumes with active screenshot state visible.
+* Permission denial or revocation disables screenshots without breaking recording.
+* Meeting deletion removes screenshot files and timeline references.
+* Speaker labels clearly distinguish detected labels from user-confirmed identities.
