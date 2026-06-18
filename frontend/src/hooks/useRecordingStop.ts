@@ -316,6 +316,7 @@ export function useRecordingStop(
           sessionStorage.removeItem('last_recording_folder_path');
           sessionStorage.removeItem('last_recording_meeting_name');
           sessionStorage.removeItem('recording_started_at');
+          sessionStorage.removeItem('meetingDetection:selectedCandidate');
           // Clean up IndexedDB meeting ID (redundant with markMeetingAsSaved cleanup, but ensures cleanup)
           sessionStorage.removeItem('indexeddb_current_meeting_id');
 

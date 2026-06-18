@@ -13,6 +13,16 @@ export interface MeetingMetadata {
   transcriptCount: number;    // Number of transcript segments
   savedToSQLite: boolean;     // Flag: saved to backend DB
   folderPath?: string;        // Path to recording folder
+  calendarEvent?: {
+    eventId: string;
+    calendarId: string;
+    calendarName: string | null;
+    meetingUrl: string;
+    provider: string;
+    startAt: string;
+    endAt: string;
+    attendees: string[];
+  };
 }
 
 export interface StoredTranscript {

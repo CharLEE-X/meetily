@@ -84,6 +84,11 @@ Local AI agents can connect to Meetily through the opt-in local MCP server. The
 read-only MCP tool and authorization contract is documented in
 [Meetily Local MCP Contract](docs/meetily-mcp.md).
 
+Meeting detection and assisted join are documented in
+[Meeting Detection and Assisted Join](docs/meeting-detection-assisted-join.md).
+The feature is disabled by default, supports prompt-only and explicit auto-open
+behavior, and never joins or records silently.
+
 The Community fork upgrade roadmap is documented in
 [Pro-Equivalent Feature Architecture Roadmap](docs/pro-equivalent-architecture-roadmap.md).
 Sensitive automation in that roadmap is default-off and requires explicit user
@@ -236,7 +241,8 @@ Planned feature areas:
 - **Advanced exports:** Markdown, PDF, and DOCX exports with preview,
   destination history, and retryable failures.
 - **Meeting detection and assisted join:** calendar-backed prompts and optional
-  assisted join flows that remain opt-in.
+  assisted join flows that remain opt-in. The first implementation supports
+  Google Meet, Zoom, and Microsoft Teams URLs from approved event metadata.
 - **Speaker identification and screenshots:** diarization/speaker labels and
   periodic screenshots with per-meeting confirmation, visible capture state, and
   deletion controls.
