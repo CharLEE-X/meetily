@@ -7,6 +7,7 @@ import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import {
+  getScreenshotPreferences,
   startMeetingScreenshotCapture,
   stopMeetingScreenshotCapture,
 } from '@/services/screenshotService';
@@ -124,12 +125,25 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
               folderPath: undefined // Will update shortly
             });
 
-            startMeetingScreenshotCapture(
-              meetingId,
-              sessionStorage.getItem('recording_started_at')
-            ).catch((error) => {
-              console.warn('Failed to start screenshot capture:', error);
-            });
+            try {
+              const screenshotPreferences = await getScreenshotPreferences();
+              if (screenshotPreferences.enabled) {
+                const confirmed = window.confirm(
+                  'Allow Meetily to capture periodic screenshots for this meeting? Screenshots are stored locally, may include visible screen content outside the meeting, and can be deleted from the meeting timeline.'
+                );
+
+                if (confirmed) {
+                  startMeetingScreenshotCapture(
+                    meetingId,
+                    sessionStorage.getItem('recording_started_at')
+                  ).catch((error) => {
+                    console.warn('Failed to start screenshot capture:', error);
+                  });
+                }
+              }
+            } catch (error) {
+              console.warn('Failed to check screenshot preferences:', error);
+            }
 
             // Synchronize meeting title to state (fixes tray stop title issue)
             setMeetingTitle(effectiveTitle);

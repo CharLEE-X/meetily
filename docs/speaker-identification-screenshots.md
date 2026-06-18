@@ -128,18 +128,18 @@ Pausing recording pauses screenshots. Resuming recording may resume screenshots 
 
 Proposed commands:
 
-* `get_speaker_settings`
-* `set_speaker_settings`
 * `run_speaker_labeling`
+* `get_speaker_labels`
 * `update_speaker_label`
-* `merge_speaker_labels`
-* `split_speaker_segment`
 * `clear_speaker_labels`
-* `get_meeting_screenshots`
-* `start_meeting_screenshots`
-* `pause_meeting_screenshots`
-* `stop_meeting_screenshots`
+* `get_screenshot_preferences`
+* `set_screenshot_preferences`
+* `start_meeting_screenshot_capture`
+* `stop_meeting_screenshot_capture`
+* `capture_meeting_screenshot_now`
+* `list_meeting_screenshots`
 * `delete_meeting_screenshot`
+* `attach_meeting_screenshots`
 
 All commands that create labels or screenshots must re-check consent and OS permissions in Rust, even when the UI has already shown consent.
 
