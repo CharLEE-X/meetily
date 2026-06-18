@@ -51,6 +51,7 @@ pub mod anthropic;
 pub mod groq;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod speaker;
 pub mod state;
 pub mod summary;
 pub mod tray;
@@ -689,6 +690,10 @@ pub fn run() {
             summary::summary_engine::commands::builtin_ai_get_available_summary_model,
             summary::summary_engine::commands::builtin_ai_get_recommended_model,
             openrouter::get_openrouter_models,
+            // Speaker identification commands
+            speaker::run_speaker_labeling,
+            speaker::get_speaker_labels,
+            speaker::clear_speaker_labels,
             audio::recording_preferences::get_recording_preferences,
             audio::recording_preferences::set_recording_preferences,
             audio::recording_preferences::get_default_recordings_folder_path,
