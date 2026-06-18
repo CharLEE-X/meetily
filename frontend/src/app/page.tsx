@@ -18,6 +18,7 @@ import { useRecordingStart } from '@/hooks/useRecordingStart';
 import { useRecordingStop } from '@/hooks/useRecordingStop';
 import { useTranscriptRecovery } from '@/hooks/useTranscriptRecovery';
 import { TranscriptRecovery } from '@/components/TranscriptRecovery';
+import { MeetingDetectionPrompt } from '@/components/MeetingDetectionPrompt';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
@@ -218,6 +219,14 @@ export default function Home() {
           isStopping={isStopping}
           showModal={showModal}
         />
+
+        {!isProcessingStop && status !== RecordingStatus.SAVING && (
+          <MeetingDetectionPrompt
+            sidebarCollapsed={sidebarCollapsed}
+            onStartRecording={handleRecordingStart}
+            isRecording={recordingState.isRecording}
+          />
+        )}
 
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
         {(hasMicrophone || isRecording) &&

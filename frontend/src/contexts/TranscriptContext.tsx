@@ -113,6 +113,15 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
             // Use a better fallback that matches the backend's naming pattern
             const effectiveTitle = meetingName || `Meeting ${new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-')}`;
+            const selectedCandidate = sessionStorage.getItem('meetingDetection:selectedCandidate');
+            let calendarEventMetadata = undefined;
+            if (selectedCandidate) {
+              try {
+                calendarEventMetadata = JSON.parse(selectedCandidate);
+              } catch (error) {
+                console.warn('Failed to parse selected meeting candidate metadata:', error);
+              }
+            }
 
             // Initialize meeting metadata in IndexedDB
             await indexedDBService.saveMeetingMetadata({
@@ -122,7 +131,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
               lastUpdated: Date.now(),
               transcriptCount: 0,
               savedToSQLite: false,
-              folderPath: undefined // Will update shortly
+              folderPath: undefined, // Will update shortly
+              calendarEvent: calendarEventMetadata,
             });
 
             try {

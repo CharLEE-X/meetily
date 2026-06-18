@@ -2,11 +2,27 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
-import { FolderOpen } from "lucide-react"
+import { CalendarClock, FolderOpen } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
+import {
+  ApprovedCalendarEvent,
+  MEETING_DETECTION_SETTINGS_EVENT,
+  MeetingDetectionMode,
+  MeetingDetectionSettings,
+  addApprovedCalendarEvent,
+  getApprovedCalendarEvents,
+  getMeetingDetectionSettings,
+  saveMeetingDetectionSettings,
+} from "@/services/meetingDetectionService"
+
+function localDateTimeValue(offsetMinutes = 0): string {
+  const date = new Date(Date.now() + offsetMinutes * 60 * 1000);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 export function PreferenceSettings() {
   const {
@@ -20,6 +36,12 @@ export function PreferenceSettings() {
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
+  const [meetingDetectionSettings, setMeetingDetectionSettings] = useState<MeetingDetectionSettings>(() => getMeetingDetectionSettings());
+  const [approvedEventCount, setApprovedEventCount] = useState(() => getApprovedCalendarEvents().length);
+  const [localEventTitle, setLocalEventTitle] = useState("Upcoming meeting");
+  const [localEventUrl, setLocalEventUrl] = useState("");
+  const [localEventStart, setLocalEventStart] = useState(() => localDateTimeValue(5));
+  const [localEventEnd, setLocalEventEnd] = useState(() => localDateTimeValue(35));
   const hasTrackedViewRef = useRef(false);
 
   // Lazy load preferences on mount (only loads if not already cached)
@@ -133,6 +155,48 @@ export function PreferenceSettings() {
     }
   };
 
+  const updateMeetingDetectionSettings = (nextSettings: MeetingDetectionSettings) => {
+    const saved = saveMeetingDetectionSettings(nextSettings);
+    setMeetingDetectionSettings(saved);
+    setApprovedEventCount(getApprovedCalendarEvents().length);
+    window.dispatchEvent(new Event(MEETING_DETECTION_SETTINGS_EVENT));
+  };
+
+  const handleMeetingDetectionModeChange = async (mode: MeetingDetectionMode) => {
+    updateMeetingDetectionSettings({ ...meetingDetectionSettings, mode });
+    await Analytics.track('meeting_detection_mode_changed', { mode });
+  };
+
+  const canAddLocalEvent = Boolean(
+    localEventTitle.trim() &&
+    localEventUrl.trim() &&
+    Number.isFinite(Date.parse(localEventStart)) &&
+    Number.isFinite(Date.parse(localEventEnd))
+  );
+
+  const handleAddLocalEvent = async () => {
+    if (!canAddLocalEvent) return;
+
+    const event: ApprovedCalendarEvent = {
+      id: `local-${Date.now()}`,
+      calendarId: "local-approved-events",
+      calendarName: "Local approved events",
+      source: "local-app",
+      provider: "manual",
+      title: localEventTitle.trim(),
+      meetingUrl: localEventUrl.trim(),
+      startAt: new Date(localEventStart).toISOString(),
+      endAt: new Date(localEventEnd).toISOString(),
+      attendees: [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    addApprovedCalendarEvent(event);
+    setApprovedEventCount(getApprovedCalendarEvents().length);
+    window.dispatchEvent(new Event(MEETING_DETECTION_SETTINGS_EVENT));
+    await Analytics.track('meeting_detection_local_event_added', { provider: 'manual' });
+  };
+
   // Show loading only if we're actually loading and don't have cached data
   if (isLoadingPreferences && !notificationSettings && !storageLocations) {
     return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>
@@ -156,6 +220,178 @@ export function PreferenceSettings() {
             <p className="text-sm text-gray-600">Enable or disable notifications of start and end of meeting</p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
+        </div>
+      </div>
+
+      {/* Meeting Detection Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <CalendarClock className="h-5 w-5 text-blue-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Meeting detection</h3>
+            </div>
+            <p className="mt-2 max-w-2xl text-sm text-gray-600">
+              Detect upcoming meetings from approved calendar metadata and show assisted join prompts. Meetily never joins or records silently.
+            </p>
+          </div>
+          <div className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700">
+            {approvedEventCount} approved event{approvedEventCount === 1 ? "" : "s"}
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-3">
+          <div>
+            <label className="text-sm font-medium text-gray-900" htmlFor="meeting-detection-mode">Mode</label>
+            <select
+              id="meeting-detection-mode"
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+              value={meetingDetectionSettings.mode}
+              onChange={(event) => handleMeetingDetectionModeChange(event.target.value as MeetingDetectionMode)}
+            >
+              <option value="disabled">Disabled</option>
+              <option value="prompt">Prompt only</option>
+              <option value="autoOpen">Auto-open link</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-gray-900" htmlFor="meeting-detection-lookahead">Lookahead minutes</label>
+            <input
+              id="meeting-detection-lookahead"
+              type="number"
+              min={1}
+              max={120}
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+              value={meetingDetectionSettings.lookaheadMinutes}
+              onChange={(event) => updateMeetingDetectionSettings({
+                ...meetingDetectionSettings,
+                lookaheadMinutes: Number(event.target.value),
+              })}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-gray-900" htmlFor="meeting-detection-stale">Hide after minutes</label>
+            <input
+              id="meeting-detection-stale"
+              type="number"
+              min={1}
+              max={120}
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+              value={meetingDetectionSettings.staleAfterMinutes}
+              onChange={(event) => updateMeetingDetectionSettings({
+                ...meetingDetectionSettings,
+                staleAfterMinutes: Number(event.target.value),
+              })}
+            />
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-medium text-gray-900">Quiet hours</div>
+              <p className="mt-1 text-sm text-gray-600">Hide meeting prompts during focus or non-working hours.</p>
+            </div>
+            <Switch
+              checked={meetingDetectionSettings.quietHoursEnabled}
+              onCheckedChange={(checked) => updateMeetingDetectionSettings({
+                ...meetingDetectionSettings,
+                quietHoursEnabled: checked,
+              })}
+            />
+          </div>
+          {meetingDetectionSettings.quietHoursEnabled && (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="text-sm font-medium text-gray-900" htmlFor="quiet-hours-start">Start</label>
+                <input
+                  id="quiet-hours-start"
+                  type="time"
+                  className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                  value={meetingDetectionSettings.quietHoursStart}
+                  onChange={(event) => updateMeetingDetectionSettings({
+                    ...meetingDetectionSettings,
+                    quietHoursStart: event.target.value,
+                  })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-900" htmlFor="quiet-hours-end">End</label>
+                <input
+                  id="quiet-hours-end"
+                  type="time"
+                  className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                  value={meetingDetectionSettings.quietHoursEnd}
+                  onChange={(event) => updateMeetingDetectionSettings({
+                    ...meetingDetectionSettings,
+                    quietHoursEnd: event.target.value,
+                  })}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          Auto-open launches the meeting URL only after opt-in. It does not click provider join buttons, start recording, or enable microphone/camera.
+        </div>
+
+        <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div className="flex flex-col gap-1">
+            <div className="text-sm font-medium text-gray-900">Approved local event</div>
+            <p className="text-sm text-gray-600">
+              Add a local event while calendar sync is not connected. Supported links: Google Meet, Zoom, and Microsoft Teams.
+            </p>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="text-sm font-medium text-gray-900" htmlFor="local-event-title">Title</label>
+              <input
+                id="local-event-title"
+                className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                value={localEventTitle}
+                onChange={(event) => setLocalEventTitle(event.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-900" htmlFor="local-event-url">Meeting URL</label>
+              <input
+                id="local-event-url"
+                className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                placeholder="https://meet.google.com/..."
+                value={localEventUrl}
+                onChange={(event) => setLocalEventUrl(event.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-900" htmlFor="local-event-start">Start</label>
+              <input
+                id="local-event-start"
+                type="datetime-local"
+                className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                value={localEventStart}
+                onChange={(event) => setLocalEventStart(event.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-900" htmlFor="local-event-end">End</label>
+              <input
+                id="local-event-end"
+                type="datetime-local"
+                className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                value={localEventEnd}
+                onChange={(event) => setLocalEventEnd(event.target.value)}
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            className="mt-4 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            disabled={!canAddLocalEvent}
+            onClick={handleAddLocalEvent}
+          >
+            Add approved event
+          </button>
         </div>
       </div>
 
