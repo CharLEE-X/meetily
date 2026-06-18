@@ -7,6 +7,7 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
+import { attachMeetingScreenshots } from '@/services/screenshotService';
 import Analytics from '@/lib/analytics';
 import {
   applyPinnedSummaryLanguageToMeeting,
@@ -293,12 +294,28 @@ export function useRecordingStop(
           console.log('   Transcripts:', freshTranscripts.length);
           console.log('   folder_path:', folderPath);
 
+          const pendingScreenshotMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
+          if (pendingScreenshotMeetingId) {
+            try {
+              const attachedCount = await attachMeetingScreenshots(pendingScreenshotMeetingId, meetingId);
+              if (attachedCount > 0) {
+                console.log(`📸 Attached ${attachedCount} screenshots to saved meeting ${meetingId}`);
+              }
+            } catch (error) {
+              console.warn('Failed to attach screenshots to saved meeting:', error);
+              toast.warning('Screenshots need attention', {
+                description: 'The meeting was saved, but screenshot metadata could not be attached.',
+              });
+            }
+          }
+
           // Mark meeting as saved in IndexedDB (for recovery system)
           await markMeetingAsSaved();
 
           // Clean up session storage
           sessionStorage.removeItem('last_recording_folder_path');
           sessionStorage.removeItem('last_recording_meeting_name');
+          sessionStorage.removeItem('recording_started_at');
           // Clean up IndexedDB meeting ID (redundant with markMeetingAsSaved cleanup, but ensures cleanup)
           sessionStorage.removeItem('indexeddb_current_meeting_id');
 

@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
-import { FolderOpen } from 'lucide-react';
+import { Camera, FolderOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
+import {
+  getScreenshotPreferences,
+  setScreenshotPreferences,
+  ScreenshotPreferences,
+} from '@/services/screenshotService';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -29,6 +34,13 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showRecordingNotification, setShowRecordingNotification] = useState(true);
+  const [screenshotPreferences, setLocalScreenshotPreferences] = useState<ScreenshotPreferences>({
+    enabled: false,
+    intervalSeconds: 60,
+    captureTarget: 'fullScreen',
+    retentionDays: 30,
+  });
+  const [savingScreenshotPreferences, setSavingScreenshotPreferences] = useState(false);
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -51,6 +63,19 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     };
 
     loadPreferences();
+  }, []);
+
+  // Load screenshot capture preference separately. This is privacy-sensitive and defaults off.
+  useEffect(() => {
+    const loadScreenshotPreferences = async () => {
+      try {
+        const prefs = await getScreenshotPreferences();
+        setLocalScreenshotPreferences(prefs);
+      } catch (error) {
+        console.error('Failed to load screenshot preferences:', error);
+      }
+    };
+    loadScreenshotPreferences();
   }, []);
 
   // Load recording notification preference
@@ -119,6 +144,33 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       console.error('Failed to save notification preference:', error);
       toast.error('Failed to save preference');
     }
+  };
+
+  const saveScreenshotPreferences = async (prefs: ScreenshotPreferences) => {
+    setSavingScreenshotPreferences(true);
+    try {
+      const saved = await setScreenshotPreferences(prefs);
+      setLocalScreenshotPreferences(saved);
+      toast.success('Screenshot preferences saved');
+    } catch (error) {
+      console.error('Failed to save screenshot preferences:', error);
+      toast.error('Failed to save screenshot preferences');
+    } finally {
+      setSavingScreenshotPreferences(false);
+    }
+  };
+
+  const handleScreenshotToggle = async (enabled: boolean) => {
+    const next = { ...screenshotPreferences, enabled };
+    setLocalScreenshotPreferences(next);
+    await saveScreenshotPreferences(next);
+  };
+
+  const handleScreenshotIntervalChange = async (value: string) => {
+    const intervalSeconds = Math.max(30, Math.min(900, Number(value) || 60));
+    const next = { ...screenshotPreferences, intervalSeconds };
+    setLocalScreenshotPreferences(next);
+    await saveScreenshotPreferences(next);
   };
 
   const savePreferences = async (prefs: RecordingPreferences) => {
@@ -225,6 +277,49 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
           checked={showRecordingNotification}
           onCheckedChange={handleNotificationToggle}
         />
+      </div>
+
+      {/* Periodic Screenshot Capture */}
+      <div className="p-4 border rounded-lg">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 font-medium">
+              <Camera className="w-4 h-4 text-gray-600" />
+              Meeting Screenshots
+            </div>
+            <div className="text-sm text-gray-600 mt-1">
+              Capture full-screen snapshots during recordings for timeline context. This is off until you enable it.
+            </div>
+          </div>
+          <Switch
+            checked={screenshotPreferences.enabled}
+            onCheckedChange={handleScreenshotToggle}
+            disabled={savingScreenshotPreferences}
+          />
+        </div>
+
+        {screenshotPreferences.enabled && (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="block">
+              <span className="text-sm font-medium text-gray-700">Capture interval</span>
+              <select
+                value={screenshotPreferences.intervalSeconds}
+                onChange={(event) => handleScreenshotIntervalChange(event.target.value)}
+                disabled={savingScreenshotPreferences}
+                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+              >
+                <option value={30}>Every 30 seconds</option>
+                <option value={60}>Every minute</option>
+                <option value={120}>Every 2 minutes</option>
+                <option value={300}>Every 5 minutes</option>
+              </select>
+            </label>
+
+            <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+              Screenshots are stored locally with each meeting and can be deleted from the meeting timeline.
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Device Preferences */}

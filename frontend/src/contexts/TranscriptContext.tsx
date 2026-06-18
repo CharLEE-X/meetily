@@ -6,6 +6,11 @@ import { toast } from 'sonner';
 import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
+import {
+  getScreenshotPreferences,
+  startMeetingScreenshotCapture,
+  stopMeetingScreenshotCapture,
+} from '@/services/screenshotService';
 import { indexedDBService } from '@/services/indexedDBService';
 
 interface TranscriptContextType {
@@ -100,6 +105,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
             // Store in sessionStorage as fallback for markMeetingAsSaved
             sessionStorage.setItem('indexeddb_current_meeting_id', meetingId);
+            sessionStorage.setItem('recording_started_at', new Date().toISOString());
             console.log('[Recording Started] 💾 IndexedDB meeting ID stored:', meetingId);
 
             // Get meeting name
@@ -118,6 +124,26 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
               savedToSQLite: false,
               folderPath: undefined // Will update shortly
             });
+
+            try {
+              const screenshotPreferences = await getScreenshotPreferences();
+              if (screenshotPreferences.enabled) {
+                const confirmed = window.confirm(
+                  'Allow Meetily to capture periodic screenshots for this meeting? Screenshots are stored locally, may include visible screen content outside the meeting, and can be deleted from the meeting timeline.'
+                );
+
+                if (confirmed) {
+                  startMeetingScreenshotCapture(
+                    meetingId,
+                    sessionStorage.getItem('recording_started_at')
+                  ).catch((error) => {
+                    console.warn('Failed to start screenshot capture:', error);
+                  });
+                }
+              }
+            } catch (error) {
+              console.warn('Failed to check screenshot preferences:', error);
+            }
 
             // Synchronize meeting title to state (fixes tray stop title issue)
             setMeetingTitle(effectiveTitle);
@@ -145,9 +171,14 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         // Listen for recording-stopped event
         unlistenRecordingStopped = await recordingService.onRecordingStopped(async (payload) => {
           try {
-            if (currentMeetingId) {
+            const meetingId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
+            if (meetingId) {
+              stopMeetingScreenshotCapture(meetingId).catch((error) => {
+                console.warn('Failed to stop screenshot capture:', error);
+              });
+
               // Update folder path in IndexedDB
-              const metadata = await indexedDBService.getMeetingMetadata(currentMeetingId);
+              const metadata = await indexedDBService.getMeetingMetadata(meetingId);
 
               if (metadata && payload.folder_path) {
                 metadata.folderPath = payload.folder_path;

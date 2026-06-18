@@ -2,6 +2,10 @@
 
 This policy is the release gate for sensitive Meetily automation. It applies to recording, transcription, calendar access, assisted meeting join, screenshots, exports, Apple Notes automation, local MCP access, meeting chat indexes, and agent skill setup.
 
+Speaker identification and screenshot implementation details are defined in
+[Speaker Identification and Screenshots](speaker-identification-screenshots.md).
+That document is the data-model and consent contract for CHA-1667 work.
+
 No sensitive automation may ship enabled by default. Every implementation issue for these areas must link to this policy and state how the feature satisfies the relevant section.
 
 Implementation issues must include this checklist before shipping a sensitive feature:
@@ -191,6 +195,10 @@ Implementation and QA issues for external integrations must include tests for:
 ## Screenshot Capture Controls
 
 Periodic screenshot capture is high risk because it can include unrelated apps, private tabs, notifications, credentials, or participants who did not expect screen capture. Screenshots must never start silently.
+
+The implementation data model, runtime state machine, storage layout, and
+speaker-label boundary rules are specified in
+[Speaker Identification and Screenshots](speaker-identification-screenshots.md).
 
 Consent and startup:
 

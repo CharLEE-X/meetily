@@ -4,7 +4,8 @@ import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import { useMemo } from 'react';
+import { SpeakerScreenshotPanel } from './SpeakerScreenshotPanel';
+import { useCallback, useMemo, useState } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -49,6 +50,8 @@ export function TranscriptPanel({
   meetingFolderPath,
   onRefetchTranscripts,
 }: TranscriptPanelProps) {
+  const [speakerLabelsByTranscriptId, setSpeakerLabelsByTranscriptId] = useState<Record<string, string>>({});
+
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
     if (usePagination && segments) {
@@ -64,6 +67,10 @@ export function TranscriptPanel({
     }));
   }, [transcripts, usePagination, segments]);
 
+  const handleSpeakerLabelsChange = useCallback((labelsByTranscriptId: Record<string, string>) => {
+    setSpeakerLabelsByTranscriptId(labelsByTranscriptId);
+  }, []);
+
   return (
     <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
       {/* Title area */}
@@ -77,6 +84,13 @@ export function TranscriptPanel({
           onRefetchTranscripts={onRefetchTranscripts}
         />
       </div>
+
+      {meetingId && (
+        <SpeakerScreenshotPanel
+          meetingId={meetingId}
+          onSpeakerLabelsChange={handleSpeakerLabelsChange}
+        />
+      )}
 
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
@@ -94,6 +108,7 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          speakerLabelsBySegmentId={speakerLabelsByTranscriptId}
         />
       </div>
 
