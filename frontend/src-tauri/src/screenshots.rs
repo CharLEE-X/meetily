@@ -2,7 +2,9 @@ use crate::state::AppState;
 use chrono::{DateTime, Utc};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::Row;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -18,6 +20,7 @@ const MIN_INTERVAL_SECONDS: u64 = 30;
 const MAX_INTERVAL_SECONDS: u64 = 900;
 const DEFAULT_INTERVAL_SECONDS: u64 = 60;
 const DEFAULT_RETENTION_DAYS: u32 = 30;
+const SCREENSHOT_RELEVANCE_THRESHOLD: f64 = 0.55;
 
 static CAPTURE_TASKS: Lazy<Mutex<HashMap<String, JoinHandle<()>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -65,6 +68,16 @@ pub struct ScreenshotCaptureStatus {
     pub enabled: bool,
     pub interval_seconds: u64,
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct ScreenshotAnalysis {
+    is_relevant: bool,
+    confidence: f64,
+    provider: Option<String>,
+    visible_names: Vec<String>,
+    text_snippets: Vec<String>,
 }
 
 #[tauri::command]
@@ -181,6 +194,11 @@ pub async fn capture_meeting_screenshot_now<R: Runtime>(
         recording_started_at,
     )
     .await
+    .and_then(|screenshot| {
+        screenshot.ok_or_else(|| {
+            "Captured screen did not appear to contain an active meeting window".to_string()
+        })
+    })
 }
 
 #[tauri::command]
@@ -299,13 +317,27 @@ async fn capture_and_store_screenshot<R: Runtime>(
     pool: &sqlx::SqlitePool,
     meeting_id: &str,
     recording_started_at: Option<DateTime<Utc>>,
-) -> Result<MeetingScreenshot, String> {
+) -> Result<Option<MeetingScreenshot>, String> {
     let screenshot_id = Uuid::new_v4().to_string();
     let captured_at = Utc::now();
     let file_path = screenshot_file_path(app, meeting_id, &screenshot_id, captured_at)
         .map_err(|err| format!("Failed to prepare screenshot folder: {}", err))?;
 
     capture_screen_to_file(&file_path).await?;
+
+    let analysis = analyze_screenshot(&file_path).await;
+    if !analysis.is_relevant {
+        if let Err(err) = std::fs::remove_file(&file_path) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                log::warn!(
+                    "Failed to remove irrelevant screenshot {}: {}",
+                    file_path.display(),
+                    err
+                );
+            }
+        }
+        return Ok(None);
+    }
 
     let recording_time = recording_started_at
         .map(|started_at| (captured_at - started_at).num_milliseconds() as f64 / 1000.0)
@@ -315,11 +347,16 @@ async fn capture_and_store_screenshot<R: Runtime>(
     let now = Utc::now().to_rfc3339();
     let file_path_string = file_path.to_string_lossy().to_string();
 
+    let metadata_json = json!({
+        "analysis": analysis,
+    })
+    .to_string();
+
     sqlx::query(
         r#"
         INSERT INTO meeting_screenshots
-            (id, meeting_id, captured_at, recording_time, file_path, display_label, status, redaction_status, source, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'captured', 'not_available', 'periodic', ?, ?)
+            (id, meeting_id, captured_at, recording_time, file_path, display_label, status, redaction_status, source, created_at, updated_at, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?, 'captured', 'not_available', 'periodic', ?, ?, ?)
         "#,
     )
     .bind(&screenshot_id)
@@ -330,11 +367,12 @@ async fn capture_and_store_screenshot<R: Runtime>(
     .bind(&display_label)
     .bind(&now)
     .bind(&now)
+    .bind(&metadata_json)
     .execute(pool)
     .await
     .map_err(|err| format!("Failed to store screenshot metadata: {}", err))?;
 
-    Ok(MeetingScreenshot {
+    Ok(Some(MeetingScreenshot {
         id: screenshot_id,
         meeting_id: meeting_id.to_string(),
         captured_at: captured_at_string,
@@ -345,7 +383,155 @@ async fn capture_and_store_screenshot<R: Runtime>(
         status: "captured".to_string(),
         redaction_status: "not_available".to_string(),
         source: "periodic".to_string(),
-    })
+    }))
+}
+
+async fn analyze_screenshot(path: &Path) -> ScreenshotAnalysis {
+    let path = path.to_path_buf();
+    let recognized_text =
+        match tokio::task::spawn_blocking(move || recognize_text_in_image(&path)).await {
+            Ok(Ok(text)) => text,
+            Ok(Err(err)) => {
+                log::warn!("Screenshot OCR failed: {}", err);
+                Vec::new()
+            }
+            Err(err) => {
+                log::warn!("Screenshot OCR task failed: {}", err);
+                Vec::new()
+            }
+        };
+
+    analyze_recognized_text(&recognized_text)
+}
+
+fn analyze_recognized_text(recognized_text: &[String]) -> ScreenshotAnalysis {
+    let provider = detect_meeting_provider(recognized_text);
+    let visible_names = extract_visible_names(recognized_text);
+    let has_provider = provider.is_some();
+    let has_visible_name = !visible_names.is_empty();
+    let has_call_controls = recognized_text.iter().any(|text| {
+        contains_any(
+            &text.to_lowercase(),
+            &["mute", "camera", "captions", "present", "leave call"],
+        )
+    });
+
+    let confidence = match (has_provider, has_visible_name, has_call_controls) {
+        (true, true, _) => 0.92,
+        (true, false, true) => 0.78,
+        (true, false, false) => 0.62,
+        (false, true, true) => 0.68,
+        _ => 0.0,
+    };
+
+    ScreenshotAnalysis {
+        is_relevant: confidence >= SCREENSHOT_RELEVANCE_THRESHOLD,
+        confidence,
+        provider,
+        visible_names,
+        text_snippets: recognized_text
+            .iter()
+            .filter(|text| !text.trim().is_empty())
+            .take(20)
+            .cloned()
+            .collect(),
+    }
+}
+
+fn detect_meeting_provider(recognized_text: &[String]) -> Option<String> {
+    let joined = recognized_text.join(" ").to_lowercase();
+    if contains_any(&joined, &["meet.google.com", "google meet"]) {
+        Some("Google Meet".to_string())
+    } else if contains_any(&joined, &["teams.microsoft.com", "microsoft teams"]) {
+        Some("Microsoft Teams".to_string())
+    } else if contains_any(&joined, &["zoom.us", "zoom meeting"]) {
+        Some("Zoom".to_string())
+    } else if contains_any(&joined, &["facetime"]) {
+        Some("FaceTime".to_string())
+    } else if contains_any(&joined, &["webex.com", "webex"]) {
+        Some("Webex".to_string())
+    } else {
+        None
+    }
+}
+
+fn extract_visible_names(recognized_text: &[String]) -> Vec<String> {
+    let mut names = BTreeSet::new();
+    for text in recognized_text {
+        if let Some(name) = normalize_visible_name_candidate(text) {
+            names.insert(name);
+        }
+    }
+    names.into_iter().collect()
+}
+
+fn normalize_visible_name_candidate(value: &str) -> Option<String> {
+    let cleaned = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphabetic() || ch.is_ascii_whitespace() || ch == '-' || ch == '\'' {
+                ch
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let tokens: Vec<&str> = cleaned.split_whitespace().collect();
+    if !(2..=4).contains(&tokens.len()) {
+        return None;
+    }
+
+    let lower = cleaned.to_lowercase();
+    if contains_any(
+        &lower,
+        &[
+            "google meet",
+            "microsoft teams",
+            "new tab",
+            "recording",
+            "apple developer",
+            "create new certificate",
+            "application support",
+            "captions",
+            "connected",
+            "mobility",
+            "repository",
+            "knowledge base",
+            "certificates identifiers profiles",
+        ],
+    ) {
+        return None;
+    }
+
+    let has_titlecase_token = tokens.iter().all(|token| {
+        token
+            .chars()
+            .next()
+            .map(|ch| ch.is_ascii_uppercase())
+            .unwrap_or(false)
+    });
+    if !has_titlecase_token {
+        return None;
+    }
+
+    Some(cleaned.chars().take(64).collect())
+}
+
+fn contains_any(value: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| value.contains(needle))
+}
+
+#[cfg(target_os = "macos")]
+fn recognize_text_in_image(path: &Path) -> Result<Vec<String>, String> {
+    macos_vision_ocr::recognize_text(path)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn recognize_text_in_image(_path: &Path) -> Result<Vec<String>, String> {
+    Ok(Vec::new())
 }
 
 async fn load_meeting_screenshots(
@@ -482,6 +668,114 @@ fn format_time_label(seconds: f64) -> String {
     format!("{:02}:{:02}", minutes, seconds)
 }
 
+#[cfg(target_os = "macos")]
+mod macos_vision_ocr {
+    use objc::runtime::{Object, BOOL, YES};
+    use objc::{class, msg_send, sel, sel_impl};
+    use std::ffi::{CStr, CString};
+    use std::os::raw::c_char;
+    use std::path::Path;
+
+    type Id = *mut Object;
+
+    #[link(name = "Foundation", kind = "framework")]
+    extern "C" {}
+
+    #[link(name = "Vision", kind = "framework")]
+    extern "C" {}
+
+    pub fn recognize_text(path: &Path) -> Result<Vec<String>, String> {
+        let path = path
+            .to_str()
+            .ok_or_else(|| "Screenshot path is not valid UTF-8".to_string())?;
+        let path =
+            CString::new(path).map_err(|_| "Screenshot path contains NUL byte".to_string())?;
+
+        unsafe {
+            let pool: Id = msg_send![class!(NSAutoreleasePool), new];
+            let result = recognize_text_inner(path.as_ptr());
+            let _: () = msg_send![pool, drain];
+            result
+        }
+    }
+
+    unsafe fn recognize_text_inner(path: *const c_char) -> Result<Vec<String>, String> {
+        let ns_path: Id = msg_send![class!(NSString), stringWithUTF8String: path];
+        if ns_path.is_null() {
+            return Err("Failed to create NSString for screenshot path".to_string());
+        }
+
+        let url: Id = msg_send![class!(NSURL), fileURLWithPath: ns_path];
+        if url.is_null() {
+            return Err("Failed to create file URL for screenshot".to_string());
+        }
+
+        let handler: Id = msg_send![class!(VNImageRequestHandler), alloc];
+        let options: Id = msg_send![class!(NSDictionary), dictionary];
+        let handler: Id = msg_send![handler, initWithURL: url options: options];
+        if handler.is_null() {
+            return Err("Failed to initialize Vision image handler".to_string());
+        }
+
+        let request: Id = msg_send![class!(VNRecognizeTextRequest), new];
+        if request.is_null() {
+            return Err("Failed to initialize Vision text request".to_string());
+        }
+        let _: () = msg_send![request, setUsesLanguageCorrection: YES];
+
+        let requests: Id = msg_send![class!(NSArray), arrayWithObject: request];
+        let mut error: Id = std::ptr::null_mut();
+        let ok: BOOL = msg_send![handler, performRequests: requests error: &mut error];
+        if !ok {
+            return Err("Vision failed to recognize text in screenshot".to_string());
+        }
+
+        let observations: Id = msg_send![request, results];
+        if observations.is_null() {
+            return Ok(Vec::new());
+        }
+
+        let count: usize = msg_send![observations, count];
+        let mut lines = Vec::new();
+        for index in 0..count {
+            let observation: Id = msg_send![observations, objectAtIndex: index];
+            let candidates: Id = msg_send![observation, topCandidates: 1usize];
+            if candidates.is_null() {
+                continue;
+            }
+            let candidate_count: usize = msg_send![candidates, count];
+            if candidate_count == 0 {
+                continue;
+            }
+            let candidate: Id = msg_send![candidates, objectAtIndex: 0usize];
+            let confidence: f32 = msg_send![candidate, confidence];
+            if confidence < 0.35 {
+                continue;
+            }
+            let string: Id = msg_send![candidate, string];
+            if let Some(text) = nsstring_to_string(string) {
+                let text = text.trim().to_string();
+                if !text.is_empty() {
+                    lines.push(text);
+                }
+            }
+        }
+
+        Ok(lines)
+    }
+
+    unsafe fn nsstring_to_string(value: Id) -> Option<String> {
+        if value.is_null() {
+            return None;
+        }
+        let bytes: *const c_char = msg_send![value, UTF8String];
+        if bytes.is_null() {
+            return None;
+        }
+        CStr::from_ptr(bytes).to_str().ok().map(str::to_string)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,5 +816,41 @@ mod tests {
     fn formats_recording_time_label() {
         assert_eq!(format_time_label(0.0), "00:00");
         assert_eq!(format_time_label(65.2), "01:05");
+    }
+
+    #[test]
+    fn screenshot_analysis_keeps_google_meet_with_visible_name() {
+        let analysis = analyze_recognized_text(&[
+            "meet.google.com/trv-nxib-ftd".to_string(),
+            "Adrian Witaszak".to_string(),
+            "Captions".to_string(),
+        ]);
+
+        assert!(analysis.is_relevant);
+        assert_eq!(analysis.provider, Some("Google Meet".to_string()));
+        assert_eq!(analysis.visible_names, vec!["Adrian Witaszak".to_string()]);
+    }
+
+    #[test]
+    fn screenshot_analysis_filters_non_call_screens() {
+        let analysis = analyze_recognized_text(&[
+            "Create a New Certificate".to_string(),
+            "Apple Developer".to_string(),
+            "Application Support".to_string(),
+        ]);
+
+        assert!(!analysis.is_relevant);
+        assert!(analysis.visible_names.is_empty());
+    }
+
+    #[test]
+    fn visible_name_extraction_ignores_controls_and_project_text() {
+        let names = extract_visible_names(&[
+            "Recording 02:30".to_string(),
+            "Connected Mobility Repository".to_string(),
+            "Adrian Witaszak".to_string(),
+        ]);
+
+        assert_eq!(names, vec!["Adrian Witaszak".to_string()]);
     }
 }

@@ -32,7 +32,7 @@ export function SummaryUpdaterButtonGroup({
       <Button
         variant="outline"
         size="sm"
-        className={`${isDirty ? 'bg-green-200' : ""}`}
+        className={`${isDirty ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100' : ""}`}
         title={isSaving ? "Saving" : "Save Changes"}
         onClick={() => {
           Analytics.trackButtonClick('save_changes', 'meeting_details');

@@ -617,7 +617,7 @@ export function useSummaryGeneration({
   }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
 
   // Public API: Regenerate summary from the current saved transcript
-  const handleRegenerateSummary = useCallback(async () => {
+  const handleRegenerateSummary = useCallback(async (customPrompt: string = '') => {
     const allTranscripts = await fetchAllTranscripts(meeting.id);
 
     if (!allTranscripts.length) {
@@ -628,6 +628,7 @@ export function useSummaryGeneration({
 
     await processSummary({
       ...buildSummaryTranscriptPayload(allTranscripts),
+      customPrompt,
       isRegeneration: true
     });
   }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);

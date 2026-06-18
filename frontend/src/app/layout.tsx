@@ -1,7 +1,7 @@
 'use client'
 
 import './globals.css'
-import { Source_Sans_3 } from 'next/font/google'
+import { Plus_Jakarta_Sans } from 'next/font/google'
 import Sidebar from '@/components/Sidebar'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
@@ -28,10 +28,10 @@ import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioF
 import { isTauriRuntime } from '@/lib/tauri'
 
 
-const sourceSans3 = Source_Sans_3({
+const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
-  variable: '--font-source-sans-3',
+  variable: '--font-plus-jakarta-sans',
 })
 
 // Module-level component — stable reference across RootLayout re-renders.
@@ -246,30 +246,30 @@ export default function RootLayout({
   if (runtimeReady && !nativeRuntime) {
     return (
       <html lang="en">
-        <body className={`${sourceSans3.variable} font-sans antialiased`}>
-          <main className="min-h-screen bg-gray-50 text-gray-900">
+        <body className={`${plusJakartaSans.variable} font-sans antialiased`}>
+          <main className="min-h-screen bg-[#f4f6f4] text-slate-950">
             <div className="mx-auto flex min-h-screen max-w-3xl flex-col justify-center px-6 py-16">
               <div className="space-y-5">
-                <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">Web preview</p>
-                <h1 className="text-4xl font-semibold tracking-normal text-gray-950">Meetily desktop app</h1>
-                <p className="max-w-2xl text-lg text-gray-600">
+                <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">Web preview</p>
+                <h1 className="text-4xl font-semibold tracking-normal text-slate-950">Meetily desktop app</h1>
+                <p className="max-w-2xl text-lg text-slate-600">
                   This localhost view is running outside the Tauri desktop shell, so native recording,
                   file system, updater, and model-management APIs are unavailable here.
                 </p>
               </div>
 
               <div className="mt-10 grid gap-4 sm:grid-cols-3">
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <h2 className="text-sm font-semibold text-gray-950">Frontend</h2>
-                  <p className="mt-2 text-sm text-gray-600">Next.js is serving correctly on port 3118.</p>
+                <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
+                  <h2 className="text-sm font-semibold text-slate-950">Frontend</h2>
+                  <p className="mt-2 text-sm text-slate-600">Next.js is serving correctly on port 3118.</p>
                 </div>
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <h2 className="text-sm font-semibold text-gray-950">Desktop runtime</h2>
-                  <p className="mt-2 text-sm text-gray-600">Run the Tauri app to test native workflows.</p>
+                <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
+                  <h2 className="text-sm font-semibold text-slate-950">Desktop runtime</h2>
+                  <p className="mt-2 text-sm text-slate-600">Run the Tauri app to test native workflows.</p>
                 </div>
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <h2 className="text-sm font-semibold text-gray-950">Build status</h2>
-                  <p className="mt-2 text-sm text-gray-600">The app compiles with the configured toolchain.</p>
+                <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
+                  <h2 className="text-sm font-semibold text-slate-950">Build status</h2>
+                  <p className="mt-2 text-sm text-slate-600">The app compiles with the configured toolchain.</p>
                 </div>
               </div>
             </div>
@@ -282,7 +282,7 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${sourceSans3.variable} font-sans antialiased`}>
+      <body className={`${plusJakartaSans.variable} font-sans antialiased`}>
         <AnalyticsProvider>
           <RecordingStateProvider>
             <TranscriptProvider>
@@ -301,7 +301,7 @@ export default function RootLayout({
                               {showOnboarding ? (
                                 <OnboardingFlow onComplete={handleOnboardingComplete} />
                               ) : (
-                                <div className="flex">
+                                <div className="flex min-h-screen bg-[#f4f6f4] text-slate-950">
                                   <Sidebar />
                                   <MainContent>{children}</MainContent>
                                 </div>

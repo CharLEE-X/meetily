@@ -1,15 +1,15 @@
 "use client";
 
 import { Transcript, TranscriptSegmentData } from '@/types';
-import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { SpeakerScreenshotPanel } from './SpeakerScreenshotPanel';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
   customPrompt: string;
+  customPromptHistory?: string[];
   onPromptChange: (value: string) => void;
   onCopyTranscript: () => void;
   onOpenMeetingFolder: () => Promise<void>;
@@ -29,11 +29,14 @@ interface TranscriptPanelProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+  className?: string;
+  style?: CSSProperties;
 }
 
 export function TranscriptPanel({
   transcripts,
   customPrompt,
+  customPromptHistory = [],
   onPromptChange,
   onCopyTranscript,
   onOpenMeetingFolder,
@@ -49,6 +52,8 @@ export function TranscriptPanel({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  className = '',
+  style,
 }: TranscriptPanelProps) {
   const [speakerLabelsByTranscriptId, setSpeakerLabelsByTranscriptId] = useState<Record<string, string>>({});
 
@@ -72,9 +77,12 @@ export function TranscriptPanel({
   }, []);
 
   return (
-    <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
+    <div
+      className={`relative hidden min-w-0 shrink-0 flex-col border-r border-slate-200/80 bg-white/95 md:flex ${className}`}
+      style={style}
+    >
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="border-b border-slate-200/80 bg-white/90 p-4">
         <TranscriptButtonGroup
           transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
           onCopyTranscript={onCopyTranscript}
@@ -114,10 +122,32 @@ export function TranscriptPanel({
 
       {/* Custom prompt input at bottom of transcript section */}
       {!isRecording && convertedSegments.length > 0 && (
-        <div className="p-1 border-t border-gray-200">
+        <div className="space-y-2 border-t border-slate-200/80 bg-white/95 p-3">
+          {customPromptHistory.length > 0 && (
+            <select
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] outline-none transition-[border-color,box-shadow] focus:border-emerald-700/50 focus:ring-2 focus:ring-emerald-700/15"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  onPromptChange(e.target.value);
+                }
+              }}
+              aria-label="Previous summary context"
+            >
+              <option value="">Previous summary context...</option>
+              {customPromptHistory.map((prompt) => (
+                <option key={prompt} value={prompt}>
+                  {prompt.replace(/\s+/g, ' ').length > 90
+                    ? `${prompt.replace(/\s+/g, ' ').slice(0, 90)}...`
+                    : prompt.replace(/\s+/g, ' ')}
+                </option>
+              ))}
+            </select>
+          )}
           <textarea
             placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
-            className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm min-h-[80px] resize-y"
+            aria-label="Additional context for AI summary"
+            className="min-h-[88px] w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-900 shadow-[0_1px_2px_rgba(15,23,42,0.04)] outline-none transition-[border-color,box-shadow] placeholder:text-slate-400 focus:border-emerald-700/50 focus:ring-2 focus:ring-emerald-700/15"
             value={customPrompt}
             onChange={(e) => onPromptChange(e.target.value)}
           />

@@ -1,16 +1,19 @@
 use crate::state::AppState;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::Row;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use tauri::Runtime;
 use uuid::Uuid;
 
 const SOURCE_HEURISTIC: &str = "heuristic";
 const SOURCE_LEGACY: &str = "legacy";
+const SOURCE_SCREENSHOT_NAME: &str = "screenshot_name";
 const STATUS_DETECTED: &str = "detected";
 const CONFIDENCE_LEGACY_SOURCE: f64 = 0.9;
 const CONFIDENCE_TIMING_HEURISTIC: f64 = 0.45;
+const CONFIDENCE_SCREENSHOT_NAME: f64 = 0.82;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -249,7 +252,8 @@ async fn run_speaker_labeling_for_meeting(
 ) -> Result<SpeakerLabelingResult, String> {
     let pool = state.db_manager.pool();
     let transcripts = load_transcripts_for_labeling(pool, meeting_id).await?;
-    let assignments = derive_speaker_assignments(&transcripts);
+    let visible_name_hint = load_visible_speaker_name_hint(pool, meeting_id).await?;
+    let assignments = derive_speaker_assignments(&transcripts, visible_name_hint.as_deref());
     let now = Utc::now().to_rfc3339();
 
     let mut tx = pool
@@ -264,7 +268,7 @@ async fn run_speaker_labeling_for_meeting(
           AND speaker_label_id IN (
             SELECT id FROM speaker_labels
             WHERE meeting_id = ?
-              AND source IN ('heuristic', 'legacy')
+              AND source IN ('heuristic', 'legacy', 'screenshot_name')
               AND status != 'confirmed'
           )
         "#,
@@ -279,7 +283,7 @@ async fn run_speaker_labeling_for_meeting(
         r#"
         DELETE FROM speaker_labels
         WHERE meeting_id = ?
-          AND source IN ('heuristic', 'legacy')
+          AND source IN ('heuristic', 'legacy', 'screenshot_name')
           AND status != 'confirmed'
         "#,
     )
@@ -419,6 +423,51 @@ async fn load_transcripts_for_labeling(
         .collect())
 }
 
+async fn load_visible_speaker_name_hint(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+) -> Result<Option<String>, String> {
+    let rows = sqlx::query(
+        r#"
+        SELECT metadata_json
+        FROM meeting_screenshots
+        WHERE meeting_id = ?
+          AND deleted_at IS NULL
+          AND status = 'captured'
+          AND metadata_json IS NOT NULL
+        ORDER BY COALESCE(recording_time, 0), captured_at
+        "#,
+    )
+    .bind(meeting_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|err| format!("Failed to load screenshot speaker hints: {}", err))?;
+
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for row in rows {
+        let raw: String = row.get("metadata_json");
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        let Some(names) = value
+            .get("analysis")
+            .and_then(|analysis| analysis.get("visibleNames"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+
+        for name in names {
+            let Some(name) = name.as_str().and_then(normalize_screenshot_speaker_name) else {
+                continue;
+            };
+            *counts.entry(name).or_insert(0) += 1;
+        }
+    }
+
+    Ok(select_stable_visible_name(counts))
+}
+
 async fn load_speaker_labeling_result(
     state: &AppState,
     meeting_id: &str,
@@ -482,7 +531,10 @@ async fn load_speaker_labeling_result(
     })
 }
 
-fn derive_speaker_assignments(transcripts: &[TranscriptForLabeling]) -> Vec<SpeakerAssignment> {
+fn derive_speaker_assignments(
+    transcripts: &[TranscriptForLabeling],
+    visible_name_hint: Option<&str>,
+) -> Vec<SpeakerAssignment> {
     transcripts
         .iter()
         .enumerate()
@@ -492,11 +544,39 @@ fn derive_speaker_assignments(transcripts: &[TranscriptForLabeling]) -> Vec<Spea
                 .as_deref()
                 .and_then(normalize_legacy_speaker)
             {
+                if is_microphone_source(&legacy_speaker) {
+                    if let Some(display_name) =
+                        visible_name_hint.and_then(normalize_screenshot_speaker_name)
+                    {
+                        return SpeakerAssignment {
+                            transcript_id: segment.id.clone(),
+                            display_name,
+                            source: SOURCE_SCREENSHOT_NAME.to_string(),
+                            confidence: CONFIDENCE_SCREENSHOT_NAME,
+                            start_time: segment.audio_start_time,
+                            end_time: segment.audio_end_time,
+                        };
+                    }
+                }
+
                 return SpeakerAssignment {
                     transcript_id: segment.id.clone(),
                     display_name: legacy_speaker,
                     source: SOURCE_LEGACY.to_string(),
                     confidence: CONFIDENCE_LEGACY_SOURCE,
+                    start_time: segment.audio_start_time,
+                    end_time: segment.audio_end_time,
+                };
+            }
+
+            if let Some(display_name) =
+                visible_name_hint.and_then(normalize_screenshot_speaker_name)
+            {
+                return SpeakerAssignment {
+                    transcript_id: segment.id.clone(),
+                    display_name,
+                    source: SOURCE_SCREENSHOT_NAME.to_string(),
+                    confidence: CONFIDENCE_SCREENSHOT_NAME,
                     start_time: segment.audio_start_time,
                     end_time: segment.audio_end_time,
                 };
@@ -513,6 +593,55 @@ fn derive_speaker_assignments(transcripts: &[TranscriptForLabeling]) -> Vec<Spea
             }
         })
         .collect()
+}
+
+fn select_stable_visible_name(counts: HashMap<String, usize>) -> Option<String> {
+    let mut counts = counts.into_iter().collect::<Vec<_>>();
+    counts.sort_by(|(left_name, left_count), (right_name, right_count)| {
+        right_count
+            .cmp(left_count)
+            .then_with(|| left_name.cmp(right_name))
+    });
+
+    let (name, count) = counts.first()?;
+    if *count == 0 {
+        return None;
+    }
+
+    if counts
+        .get(1)
+        .map(|(_, second_count)| second_count == count)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
+    Some(name.clone())
+}
+
+fn normalize_screenshot_speaker_name(value: &str) -> Option<String> {
+    let cleaned = value
+        .chars()
+        .filter(|ch| {
+            ch.is_ascii_alphanumeric() || ch.is_ascii_whitespace() || *ch == '-' || *ch == '\''
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let truncated = cleaned.chars().take(48).collect::<String>();
+    if truncated.is_empty() {
+        None
+    } else {
+        Some(truncated)
+    }
+}
+
+fn is_microphone_source(display_name: &str) -> bool {
+    matches!(
+        display_name.trim().to_lowercase().as_str(),
+        "microphone" | "mic"
+    )
 }
 
 fn normalize_legacy_speaker(value: &str) -> Option<String> {
@@ -603,10 +732,13 @@ mod tests {
 
     #[test]
     fn uses_legacy_audio_source_when_available() {
-        let assignments = derive_speaker_assignments(&[
-            transcript("a", Some(0.0), Some(1.0), Some("mic")),
-            transcript("b", Some(1.2), Some(2.0), Some("system")),
-        ]);
+        let assignments = derive_speaker_assignments(
+            &[
+                transcript("a", Some(0.0), Some(1.0), Some("mic")),
+                transcript("b", Some(1.2), Some(2.0), Some("system")),
+            ],
+            None,
+        );
 
         assert_eq!(assignments[0].display_name, "Microphone");
         assert_eq!(assignments[0].source, SOURCE_LEGACY);
@@ -615,11 +747,14 @@ mod tests {
 
     #[test]
     fn falls_back_to_timing_based_detected_labels() {
-        let assignments = derive_speaker_assignments(&[
-            transcript("a", Some(0.0), Some(1.0), None),
-            transcript("b", Some(4.0), Some(5.0), None),
-            transcript("c", Some(5.2), Some(6.0), None),
-        ]);
+        let assignments = derive_speaker_assignments(
+            &[
+                transcript("a", Some(0.0), Some(1.0), None),
+                transcript("b", Some(4.0), Some(5.0), None),
+                transcript("c", Some(5.2), Some(6.0), None),
+            ],
+            None,
+        );
 
         assert_eq!(assignments[0].display_name, "Speaker 1");
         assert_eq!(assignments[1].display_name, "Speaker 2");
@@ -631,7 +766,7 @@ mod tests {
 
     #[test]
     fn empty_transcripts_produce_no_assignments() {
-        assert!(derive_speaker_assignments(&[]).is_empty());
+        assert!(derive_speaker_assignments(&[], None).is_empty());
     }
 
     #[test]
@@ -640,6 +775,34 @@ mod tests {
         assert_eq!(
             normalize_legacy_speaker("Guest <script>"),
             Some("Speaker guest script".to_string())
+        );
+    }
+
+    #[test]
+    fn visible_screenshot_name_overrides_generic_microphone_label() {
+        let assignments = derive_speaker_assignments(
+            &[transcript("a", Some(0.0), Some(1.0), Some("mic"))],
+            Some("Adrian Witaszak"),
+        );
+
+        assert_eq!(assignments[0].display_name, "Adrian Witaszak");
+        assert_eq!(assignments[0].source, SOURCE_SCREENSHOT_NAME);
+        assert_eq!(assignments[0].confidence, CONFIDENCE_SCREENSHOT_NAME);
+    }
+
+    #[test]
+    fn stable_visible_name_requires_no_top_count_tie() {
+        let mut counts = HashMap::new();
+        counts.insert("Adrian Witaszak".to_string(), 2);
+        counts.insert("Kriszi Balla".to_string(), 2);
+        assert_eq!(select_stable_visible_name(counts), None);
+
+        let mut counts = HashMap::new();
+        counts.insert("Adrian Witaszak".to_string(), 3);
+        counts.insert("Kriszi Balla".to_string(), 1);
+        assert_eq!(
+            select_stable_visible_name(counts),
+            Some("Adrian Witaszak".to_string())
         );
     }
 }

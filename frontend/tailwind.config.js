@@ -7,12 +7,12 @@ module.exports = {
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
-  	extend: {
-  		fontFamily: {
-  			sans: [
-  				'var(--font-source-sans-3)'
-  			]
-  		},
+    extend: {
+      fontFamily: {
+        sans: [
+          'var(--font-plus-jakarta-sans)'
+        ]
+      },
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',

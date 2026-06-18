@@ -36,10 +36,10 @@ export const RecordingStatusBar: React.FC<RecordingStatusBarProps> = ({ isPaused
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.2 }}
-      className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg mb-2"
+      className="mb-2 flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
     >
-      <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-red-500 animate-pulse'}`} />
-      <span className={`text-sm ${isPaused ? 'text-orange-700' : 'text-gray-700'}`}>
+      <div className={`h-2 w-2 rounded-full ${isPaused ? 'bg-amber-500' : 'animate-pulse bg-red-600'}`} />
+      <span className={`text-sm font-medium ${isPaused ? 'text-amber-700' : 'text-slate-700'}`}>
         {isPaused ? 'Paused' : 'Recording'} • {formatDuration(displaySeconds)}
       </span>
     </motion.div>

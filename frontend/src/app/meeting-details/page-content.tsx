@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { motion } from 'framer-motion';
 import { Summary, SummaryResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -18,6 +18,57 @@ import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
 import { exportMeeting, getExportSettings } from '@/services/exportService';
+
+const SUMMARY_CONTEXT_HISTORY_KEY = 'meetily.summaryContextHistory';
+const SUMMARY_CONTEXT_HISTORY_LIMIT = 8;
+const TRANSCRIPT_PANE_WIDTH_KEY = 'meetily.meetingDetailsTranscriptPaneWidth';
+const TRANSCRIPT_PANE_MIN_WIDTH = 360;
+const TRANSCRIPT_PANE_MAX_WIDTH = 760;
+const TRANSCRIPT_PANE_DEFAULT_WIDTH = 580;
+
+function normalizeSummaryContext(value: string) {
+  return value.trim();
+}
+
+function readSummaryContextHistory() {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SUMMARY_CONTEXT_HISTORY_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((value): value is string => typeof value === 'string')
+      .map(normalizeSummaryContext)
+      .filter(Boolean)
+      .slice(0, SUMMARY_CONTEXT_HISTORY_LIMIT);
+  } catch (error) {
+    console.warn('Failed to load summary context history:', error);
+    return [];
+  }
+}
+
+function clampTranscriptPaneWidth(value: number) {
+  return Math.min(TRANSCRIPT_PANE_MAX_WIDTH, Math.max(TRANSCRIPT_PANE_MIN_WIDTH, value));
+}
+
+function readTranscriptPaneWidth() {
+  if (typeof window === 'undefined') {
+    return TRANSCRIPT_PANE_DEFAULT_WIDTH;
+  }
+
+  const stored = Number(window.localStorage.getItem(TRANSCRIPT_PANE_WIDTH_KEY));
+  return Number.isFinite(stored)
+    ? clampTranscriptPaneWidth(stored)
+    : TRANSCRIPT_PANE_DEFAULT_WIDTH;
+}
 
 export default function PageContent({
   meeting,
@@ -56,6 +107,8 @@ export default function PageContent({
 
   // State
   const [customPrompt, setCustomPrompt] = useState<string>('');
+  const [customPromptHistory, setCustomPromptHistory] = useState<string[]>([]);
+  const [transcriptPaneWidth, setTranscriptPaneWidth] = useState<number>(TRANSCRIPT_PANE_DEFAULT_WIDTH);
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
 
@@ -135,6 +188,90 @@ export default function PageContent({
   const meetingOperations = useMeetingOperations({
     meeting,
   });
+
+  useEffect(() => {
+    setCustomPromptHistory(readSummaryContextHistory());
+    setTranscriptPaneWidth(readTranscriptPaneWidth());
+  }, []);
+
+  const handleResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = transcriptPaneWidth;
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const nextWidth = clampTranscriptPaneWidth(startWidth + moveEvent.clientX - startX);
+      setTranscriptPaneWidth(nextWidth);
+    };
+
+    const handlePointerUp = (upEvent: PointerEvent) => {
+      const finalWidth = clampTranscriptPaneWidth(startWidth + upEvent.clientX - startX);
+      setTranscriptPaneWidth(finalWidth);
+      window.localStorage.setItem(TRANSCRIPT_PANE_WIDTH_KEY, String(finalWidth));
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp, { once: true });
+  };
+
+  const updateTranscriptPaneWidth = (nextWidth: number) => {
+    const clampedWidth = clampTranscriptPaneWidth(nextWidth);
+    setTranscriptPaneWidth(clampedWidth);
+    window.localStorage.setItem(TRANSCRIPT_PANE_WIDTH_KEY, String(clampedWidth));
+  };
+
+  const handleResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.key === 'Home') {
+      updateTranscriptPaneWidth(TRANSCRIPT_PANE_MIN_WIDTH);
+      return;
+    }
+    if (event.key === 'End') {
+      updateTranscriptPaneWidth(TRANSCRIPT_PANE_MAX_WIDTH);
+      return;
+    }
+
+    const step = event.shiftKey ? 48 : 16;
+    updateTranscriptPaneWidth(transcriptPaneWidth + (event.key === 'ArrowRight' ? step : -step));
+  };
+
+  const rememberSummaryContext = (value: string) => {
+    const normalized = normalizeSummaryContext(value);
+    if (!normalized) {
+      return;
+    }
+
+    setCustomPromptHistory((current) => {
+      const next = [
+        normalized,
+        ...current.filter((entry) => normalizeSummaryContext(entry) !== normalized),
+      ].slice(0, SUMMARY_CONTEXT_HISTORY_LIMIT);
+
+      try {
+        window.localStorage.setItem(SUMMARY_CONTEXT_HISTORY_KEY, JSON.stringify(next));
+      } catch (error) {
+        console.warn('Failed to save summary context history:', error);
+      }
+
+      return next;
+    });
+  };
+
+  const handleGenerateSummary = async (prompt: string) => {
+    rememberSummaryContext(prompt);
+    await summaryGeneration.handleGenerateSummary(prompt);
+  };
+
+  const handleRegenerateSummary = async () => {
+    rememberSummaryContext(customPrompt);
+    await summaryGeneration.handleRegenerateSummary(customPrompt);
+  };
 
   // Track page view
   useEffect(() => {
@@ -216,12 +353,13 @@ export default function PageContent({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
+      className="flex h-screen flex-col bg-[#f4f6f4]"
     >
       <div className="flex flex-1 overflow-hidden">
         <TranscriptPanel
           transcripts={meetingData.transcripts}
           customPrompt={customPrompt}
+          customPromptHistory={customPromptHistory}
           onPromptChange={setCustomPrompt}
           onCopyTranscript={copyOperations.handleCopyTranscript}
           onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
@@ -239,7 +377,26 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
+          style={{
+            width: transcriptPaneWidth,
+            minWidth: TRANSCRIPT_PANE_MIN_WIDTH,
+            maxWidth: TRANSCRIPT_PANE_MAX_WIDTH,
+          }}
         />
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize transcript and summary columns"
+          aria-valuemin={TRANSCRIPT_PANE_MIN_WIDTH}
+          aria-valuemax={TRANSCRIPT_PANE_MAX_WIDTH}
+          aria-valuenow={transcriptPaneWidth}
+          tabIndex={0}
+          className="group hidden w-3 shrink-0 cursor-col-resize bg-transparent outline-none md:flex md:items-stretch md:justify-center"
+          onPointerDown={handleResizeStart}
+          onKeyDown={handleResizeKeyDown}
+        >
+          <span className="my-3 w-px rounded-full bg-slate-200 transition-colors group-hover:bg-emerald-600 group-focus:bg-emerald-700" />
+        </div>
         <SummaryPanel
           meeting={meeting}
           meetingTitle={meetingData.meetingTitle}
@@ -259,7 +416,7 @@ export default function PageContent({
           modelConfig={modelConfig}
           setModelConfig={setModelConfig}
           onSaveModelConfig={handleSaveModelConfig}
-          onGenerateSummary={summaryGeneration.handleGenerateSummary}
+          onGenerateSummary={handleGenerateSummary}
           onStopGeneration={summaryGeneration.handleStopGeneration}
           customPrompt={customPrompt}
           summaryResponse={summaryResponse}
@@ -267,7 +424,7 @@ export default function PageContent({
           onSummaryChange={meetingData.handleSummaryChange}
           onDirtyChange={meetingData.setIsSummaryDirty}
           summaryError={summaryGeneration.summaryError}
-          onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
+          onRegenerateSummary={handleRegenerateSummary}
           getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
           availableTemplates={templates.availableTemplates}
           selectedTemplate={templates.selectedTemplate}

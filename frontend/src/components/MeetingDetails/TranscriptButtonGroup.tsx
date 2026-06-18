@@ -38,7 +38,7 @@ export function TranscriptButtonGroup({
   }, [onRefetchTranscripts]);
 
   return (
-    <div className="flex items-center justify-center w-full gap-2">
+    <div className="flex w-full items-center justify-center gap-2">
       <ButtonGroup>
         <Button
           variant="outline"
@@ -72,7 +72,7 @@ export function TranscriptButtonGroup({
           <Button
             size="sm"
             variant="outline"
-            className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
+            className="border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100 xl:px-4"
             onClick={() => {
               Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
               setShowRetranscribeDialog(true);
