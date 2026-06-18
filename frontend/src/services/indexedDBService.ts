@@ -17,8 +17,11 @@ export interface MeetingMetadata {
     eventId: string;
     calendarId: string;
     calendarName: string | null;
-    meetingUrl: string;
+    meetingUrl: string | null;
     provider: string;
+    source?: string;
+    confidence?: number;
+    reasons?: string[];
     startAt: string;
     endAt: string;
     attendees: string[];

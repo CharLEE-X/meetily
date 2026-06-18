@@ -1,13 +1,16 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarClock, ExternalLink, Mic, X } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import {
   MeetingDetectionSettings,
   MeetingJoinCandidate,
   MEETING_DETECTION_SETTINGS_EVENT,
   dismissMeetingCandidate,
+  getAmbientMeetingCandidate,
   getApprovedCalendarEvents,
   getMeetingDetectionSettings,
   getUpcomingMeetingCandidates,
@@ -16,6 +19,8 @@ import {
   saveMeetingDetectionSettings,
   wasAutoOpened,
 } from "@/services/meetingDetectionService";
+import type { MicActivitySignal } from "@/services/meetingDetectionSignals";
+import { isTauriRuntime } from "@/lib/tauri";
 
 interface MeetingDetectionPromptProps {
   sidebarCollapsed: boolean;
@@ -37,28 +42,44 @@ function providerLabel(provider: MeetingJoinCandidate["provider"]): string {
 }
 
 function timeLabel(candidate: MeetingJoinCandidate): string {
+  if (candidate.source === "ambient") return "Detected now";
   if (candidate.isActive) return "Happening now";
   if (candidate.minutesUntilStart <= 0) return "Starting now";
   if (candidate.minutesUntilStart === 1) return "Starts in 1 minute";
   return `Starts in ${candidate.minutesUntilStart} minutes`;
 }
 
+interface AudioLevelData {
+  device_name: string;
+  device_type: string;
+  rms_level: number;
+  peak_level: number;
+  is_active: boolean;
+}
+
+interface AudioLevelUpdate {
+  levels: AudioLevelData[];
+}
+
 export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isRecording }: MeetingDetectionPromptProps) {
   const [settings, setSettings] = useState<MeetingDetectionSettings>(() => getMeetingDetectionSettings());
   const [candidates, setCandidates] = useState<MeetingJoinCandidate[]>([]);
+  const micActivityRef = useRef<MicActivitySignal | null>(null);
   const [isOpening, setIsOpening] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
 
-  const refreshCandidates = useCallback(() => {
+  const refreshCandidates = useCallback(async () => {
     const nextSettings = getMeetingDetectionSettings();
+    const calendarCandidates = getUpcomingMeetingCandidates(getApprovedCalendarEvents(), nextSettings);
+    const ambientCandidate = await getAmbientMeetingCandidate(nextSettings, micActivityRef.current);
     setSettings(nextSettings);
-    setCandidates(getUpcomingMeetingCandidates(getApprovedCalendarEvents(), nextSettings));
+    setCandidates(ambientCandidate ? [ambientCandidate, ...calendarCandidates] : calendarCandidates);
   }, []);
 
   useEffect(() => {
-    refreshCandidates();
-    const interval = window.setInterval(refreshCandidates, 30000);
-    const onStorage = () => refreshCandidates();
+    void refreshCandidates();
+    const interval = window.setInterval(() => void refreshCandidates(), 30000);
+    const onStorage = () => void refreshCandidates();
     window.addEventListener("storage", onStorage);
     window.addEventListener(MEETING_DETECTION_SETTINGS_EVENT, onStorage);
     return () => {
@@ -68,10 +89,54 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
     };
   }, [refreshCandidates]);
 
+  useEffect(() => {
+    if (!isTauriRuntime() || isRecording || !settings.ambientDetectionEnabled || !settings.ambientMicSignalEnabled) return;
+
+    let unlisten: (() => void) | undefined;
+    let startedByPrompt = false;
+    let cancelled = false;
+
+    const setupMicSignals = async () => {
+      try {
+        unlisten = await listen<AudioLevelUpdate>("audio-levels", (event) => {
+          const inputLevels = event.payload.levels.filter((level) => level.device_type === "Input");
+          const peakLevel = Math.max(0, ...inputLevels.map((level) => level.peak_level));
+          const rmsLevel = Math.max(0, ...inputLevels.map((level) => level.rms_level));
+          const isActive = inputLevels.some((level) => level.is_active) || peakLevel >= 0.08 || rmsLevel >= 0.025;
+          micActivityRef.current = { isActive, peakLevel, rmsLevel };
+        });
+
+        const alreadyMonitoring = await invoke<boolean>("is_audio_level_monitoring");
+        if (!alreadyMonitoring) {
+          const devices = await invoke<Array<{ name: string; device_type: "Input" | "Output" }>>("get_audio_devices");
+          const deviceNames = devices.filter((device) => device.device_type === "Input").map((device) => device.name);
+          if (deviceNames.length > 0 && !cancelled) {
+            await invoke("start_audio_level_monitoring", { deviceNames });
+            startedByPrompt = true;
+          }
+        }
+      } catch (error) {
+        console.warn("Meeting detection mic signal setup failed:", error);
+      }
+    };
+
+    void setupMicSignals();
+
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+      if (startedByPrompt) {
+        void invoke("stop_audio_level_monitoring").catch((error) => {
+          console.warn("Failed to stop meeting detection mic signals:", error);
+        });
+      }
+    };
+  }, [settings.ambientDetectionEnabled, settings.ambientMicSignalEnabled, isRecording]);
+
   const candidate = candidates[0];
 
   useEffect(() => {
-    if (!candidate || settings.mode !== "autoOpen" || wasAutoOpened(candidate)) return;
+    if (!candidate || !candidate.meetingUrl || settings.mode !== "autoOpen" || wasAutoOpened(candidate)) return;
     openMeetingCandidate(candidate)
       .then(() => {
         markMeetingCandidateAutoOpened(candidate);
@@ -90,6 +155,11 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
     const visible = candidate.attendees.slice(0, 3).join(", ");
     const remaining = candidate.attendees.length - 3;
     return remaining > 0 ? `${visible} +${remaining}` : visible;
+  }, [candidate]);
+
+  const signalPreview = useMemo(() => {
+    if (!candidate?.reasons?.length) return null;
+    return candidate.reasons.slice(0, 3).join(", ");
   }, [candidate]);
 
   if (!candidate || settings.mode === "disabled" || isRecording) return null;
@@ -150,11 +220,14 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
               </span>
             </div>
             <p className="mt-1 text-sm text-gray-600">
-              {candidate.calendarName ? `${candidate.calendarName} calendar` : "Approved calendar event"}
+              {candidate.source === "ambient"
+                ? `Detected from local app/window signals${candidate.confidence ? ` · ${candidate.confidence}% confidence` : ""}`
+                : candidate.calendarName ? `${candidate.calendarName} calendar` : "Approved calendar event"}
               {attendeePreview ? ` · ${attendeePreview}` : ""}
             </p>
             <p className="mt-1 text-xs text-gray-500">
-              Meetily can open the meeting link or start recording with this title. It will not join or record silently.
+              {signalPreview ? `${signalPreview}. ` : ""}
+              Meetily can {candidate.meetingUrl ? "open the meeting link or " : ""}start recording with this title. It will not join or record silently.
             </p>
           </div>
           <button
@@ -180,7 +253,8 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
               type="button"
               className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
               onClick={handleOpen}
-              disabled={isOpening}
+              disabled={isOpening || !candidate.meetingUrl}
+              title={candidate.meetingUrl ? "Open meeting" : "No meeting link detected"}
             >
               <ExternalLink className="h-4 w-4" />
               Open meeting

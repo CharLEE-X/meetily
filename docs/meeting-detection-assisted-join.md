@@ -24,6 +24,7 @@ Settings must make this clear:
 * Prompt-only is the recommended mode.
 * Auto-open can launch a meeting URL but never starts recording.
 * Start recording remains explicit.
+* Ambient detection is a local heuristic, not proof that another app owns the microphone.
 * Detection can be disabled quickly from Settings or from a prompt.
 
 ## Event Matching Rules
@@ -42,6 +43,26 @@ active. Events older than the configured stale window are hidden. Duplicate
 event/link combinations are suppressed, and dismissed candidates remain hidden
 until the source event changes.
 
+## Ambient Signal Detection
+
+When enabled, Meetily can also detect likely live meetings without calendar
+metadata by combining local-only signals:
+
+* known meeting apps or browsers running, including Teams, Zoom, Google Chrome,
+  Arc, Safari, Edge, Firefox, and Slack;
+* the active app and active window title, where the OS allows access;
+* active browser tab title and URL for Google Meet, Zoom, or Microsoft Teams;
+* optional microphone input activity from Meetily's existing audio level monitor.
+
+These signals are scored together and only produce a prompt when confidence
+passes the configured threshold. Process-only signals are intentionally weak and
+do not trigger prompts by themselves. If an ambient candidate has no meeting URL,
+Meetily offers Start recording but disables Open meeting.
+
+On macOS, active window and browser tab inspection may require Accessibility or
+Automation permissions. If those permissions are unavailable, Meetily falls back
+to weaker process and microphone signals and may not show a prompt.
+
 ## Stored Data
 
 Meetily stores local detection preferences, dismissed candidate IDs, auto-open
@@ -52,9 +73,13 @@ meeting chat content for meeting detection.
 ## Implementation References
 
 * `frontend/src/services/meetingDetectionService.ts` owns matching, filtering,
-  URL extraction, dismissal, and safe open behavior.
+  URL extraction, dismissal, ambient candidate creation, and safe open behavior.
+* `frontend/src/services/meetingDetectionSignals.ts` owns local ambient signal
+  scoring.
+* `frontend/src-tauri/src/meeting_detection.rs` collects read-only app, window,
+  and browser signals for the desktop shell.
 * `frontend/src/components/MeetingDetectionPrompt.tsx` presents candidates and
   requires user action before opening links or starting recording.
 * `frontend/src/components/PreferenceSettings.tsx` exposes detection mode and
-  quiet hours, plus a local approved-event form while full calendar sync is not
-  connected.
+  quiet hours, ambient signal controls, plus a local approved-event form while
+  full calendar sync is not connected.

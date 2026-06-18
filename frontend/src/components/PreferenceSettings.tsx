@@ -232,7 +232,7 @@ export function PreferenceSettings() {
               <h3 className="text-lg font-semibold text-gray-900">Meeting detection</h3>
             </div>
             <p className="mt-2 max-w-2xl text-sm text-gray-600">
-              Detect upcoming meetings from approved calendar metadata and show assisted join prompts. Meetily never joins or records silently.
+              Detect upcoming meetings from approved calendar metadata, meeting apps, active call windows, browser meeting tabs, and optional mic activity. Meetily never joins or records silently.
             </p>
           </div>
           <div className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700">
@@ -284,6 +284,61 @@ export function PreferenceSettings() {
               })}
             />
           </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-medium text-gray-900">Ambient meeting signals</div>
+              <p className="mt-1 text-sm text-gray-600">
+                Look for Teams, Zoom, Google Meet, active call windows, and browser tabs when calendar metadata is missing.
+              </p>
+            </div>
+            <Switch
+              checked={meetingDetectionSettings.ambientDetectionEnabled}
+              onCheckedChange={(checked) => updateMeetingDetectionSettings({
+                ...meetingDetectionSettings,
+                ambientDetectionEnabled: checked,
+              })}
+            />
+          </div>
+          {meetingDetectionSettings.ambientDetectionEnabled && (
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div className="rounded-md border border-gray-200 bg-white p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">Use mic activity as a signal</div>
+                    <p className="mt-1 text-xs text-gray-600">
+                      Measures local input levels only. It cannot identify which app is using the microphone.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={meetingDetectionSettings.ambientMicSignalEnabled}
+                    onCheckedChange={(checked) => updateMeetingDetectionSettings({
+                      ...meetingDetectionSettings,
+                      ambientMicSignalEnabled: checked,
+                    })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-900" htmlFor="ambient-confidence">Prompt confidence</label>
+                <input
+                  id="ambient-confidence"
+                  type="number"
+                  min={50}
+                  max={95}
+                  className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                  value={meetingDetectionSettings.ambientMinimumConfidence}
+                  onChange={(event) => updateMeetingDetectionSettings({
+                    ...meetingDetectionSettings,
+                    ambientMinimumConfidence: Number(event.target.value),
+                  })}
+                />
+                <p className="mt-1 text-xs text-gray-500">Higher values reduce false prompts but may miss meetings.</p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
