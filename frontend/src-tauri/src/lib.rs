@@ -51,6 +51,7 @@ pub mod anthropic;
 pub mod groq;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod screenshots;
 pub mod speaker;
 pub mod state;
 pub mod summary;
@@ -694,6 +695,15 @@ pub fn run() {
             speaker::run_speaker_labeling,
             speaker::get_speaker_labels,
             speaker::clear_speaker_labels,
+            // Meeting screenshot commands
+            screenshots::get_screenshot_preferences,
+            screenshots::set_screenshot_preferences,
+            screenshots::start_meeting_screenshot_capture,
+            screenshots::stop_meeting_screenshot_capture,
+            screenshots::capture_meeting_screenshot_now,
+            screenshots::list_meeting_screenshots,
+            screenshots::delete_meeting_screenshot,
+            screenshots::attach_meeting_screenshots,
             audio::recording_preferences::get_recording_preferences,
             audio::recording_preferences::set_recording_preferences,
             audio::recording_preferences::get_default_recordings_folder_path,

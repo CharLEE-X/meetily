@@ -15,8 +15,7 @@ CREATE TABLE IF NOT EXISTS meeting_screenshots (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT,
-    metadata_json TEXT,
-    FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+    metadata_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_meeting_screenshots_meeting_id ON meeting_screenshots(meeting_id);
