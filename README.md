@@ -58,6 +58,7 @@ A privacy-first AI meeting assistant that captures, transcribes, and summarizes 
 - [Key Features in Action](#key-features-in-action)
 - [System Architecture](#system-architecture)
 - [For Developers](#for-developers)
+- [Community Pro-Equivalent Roadmap](#community-pro-equivalent-roadmap)
 - [Meetily PRO](#meetily-pro)
 - [Contributing](#contributing)
 - [License](#license)
@@ -82,6 +83,11 @@ Sensitive automation is required to be explicit opt-in and auditable before it s
 Local AI agents can connect to Meetily through the opt-in local MCP server. The
 read-only MCP tool and authorization contract is documented in
 [Meetily Local MCP Contract](docs/meetily-mcp.md).
+
+The Community fork upgrade roadmap is documented in
+[Pro-Equivalent Feature Architecture Roadmap](docs/pro-equivalent-architecture-roadmap.md).
+Sensitive automation in that roadmap is default-off and requires explicit user
+opt-in before it captures, exports, indexes, syncs, or exposes meeting data.
 
 <details>
 <summary>The Privacy Problem</summary>
@@ -211,6 +217,40 @@ For more details, see the [Architecture documentation](docs/architecture.md).
 ## For Developers
 
 If you want to contribute to Meetily or build it from source, you'll need to have Rust and Node.js installed. For detailed build instructions, please see the [Building from Source guide](docs/BUILDING.md).
+
+## Community Pro-Equivalent Roadmap
+
+This fork is adding a local-first set of Pro-equivalent workflow features in a
+phased order so storage, exports, chat, Apple Notes, MCP, and agent workflows
+share the same meeting artifact model instead of creating duplicated silos.
+
+Planned feature areas:
+
+- **Transcription accuracy and model selection:** higher-accuracy local profiles,
+  preprocessing presets, language handling, and QA benchmarks.
+- **Custom summary templates:** reusable local templates with per-meeting
+  selection and regeneration.
+- **Advanced exports:** Markdown, PDF, and DOCX exports with preview,
+  destination history, and retryable failures.
+- **Meeting detection and assisted join:** calendar-backed prompts and optional
+  assisted join flows that remain opt-in.
+- **Speaker identification and screenshots:** diarization/speaker labels and
+  periodic screenshots with per-meeting confirmation, visible capture state, and
+  deletion controls.
+- **Meeting chat:** local-first retrieval over transcripts, summaries, and
+  enabled artifacts with citations back to meeting sources.
+- **Calendar integration:** selected-calendar sync that stores minimal event
+  metadata and can be disconnected.
+- **Apple Notes export:** opt-in macOS automation with destination preview before
+  writing meeting content.
+- **Local MCP server:** opt-in local agent access with trusted clients, scoped
+  read-only tools, revocation, and audit logs.
+- **AI-agent skill setup:** reversible setup for supported agents and ask-first
+  post-meeting workflows.
+
+The implementation order, shared artifact model, service contracts, UI map, and
+packaging gates are tracked in
+[Pro-Equivalent Feature Architecture Roadmap](docs/pro-equivalent-architecture-roadmap.md).
 
 ## Meetily Pro
 
