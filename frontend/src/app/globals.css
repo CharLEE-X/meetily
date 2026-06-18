@@ -78,26 +78,26 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
+    --background: 120 12% 96%;
+    --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 0 0% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
+    --primary: 222 47% 11%;
     --primary-foreground: 0 0% 98%;
     --secondary: 0 0% 96.1%;
     --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    --muted: 150 12% 94%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 154 45% 93%;
+    --accent-foreground: 157 75% 21%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --radius: 0.5rem;
+    --border: 214 24% 88%;
+    --input: 214 24% 88%;
+    --ring: 158 64% 30%;
+    --radius: 0.75rem;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -143,6 +143,12 @@
     @apply bg-background text-foreground;
     overflow: hidden;
     height: 100%;
+    font-feature-settings: "ss01" on, "cv05" on;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: rgba(4, 120, 87, 0.16);
   }
 
   /* Make the window draggable */
@@ -166,18 +172,29 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #d1d5db;
+    background: #cbd5d1;
     border-radius: 3px;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #9ca3af;
+    background: #94a3a0;
   }
 
   /* Firefox scrollbar */
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: #d1d5db transparent;
+    scrollbar-color: #cbd5d1 transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 
   /* BlockNote Editor - Override fixed dimensions for responsive layout */
@@ -210,5 +227,35 @@
   /* Disable scrolling on any BlockNote wrapper elements */
   [data-node-type] {
     overflow: visible !important;
+  }
+
+  .summary-content-wrap,
+  .summary-content-wrap .bn-container,
+  .summary-content-wrap .bn-editor,
+  .summary-content-wrap .ProseMirror {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .summary-content-wrap p,
+  .summary-content-wrap li,
+  .summary-content-wrap td,
+  .summary-content-wrap th,
+  .summary-content-wrap [contenteditable="true"] {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .summary-content-wrap table {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed;
+  }
+
+  .summary-content-wrap td,
+  .summary-content-wrap th {
+    min-width: 0 !important;
+    max-width: 100%;
   }
 }

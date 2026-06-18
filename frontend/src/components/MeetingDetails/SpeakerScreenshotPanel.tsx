@@ -136,18 +136,18 @@ export function SpeakerScreenshotPanel({
   };
 
   return (
-    <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 space-y-4">
+    <div className="space-y-4 border-b border-slate-200/80 bg-[#f8faf8] px-4 py-3">
       <section>
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
-            <Users className="h-4 w-4 text-gray-500" />
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <Users className="h-4 w-4 text-slate-500" />
             Speakers
           </div>
           <button
             type="button"
             onClick={handleRunSpeakerLabels}
             disabled={loadingSpeakers}
-            className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+            className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:bg-slate-50 disabled:opacity-60"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loadingSpeakers ? 'animate-spin' : ''}`} />
             Detect
@@ -155,7 +155,7 @@ export function SpeakerScreenshotPanel({
         </div>
 
         {labels.length === 0 ? (
-          <p className="mt-2 text-xs text-gray-500">No speaker labels yet.</p>
+          <p className="mt-2 text-xs text-slate-500">No speaker labels yet.</p>
         ) : (
           <div className="mt-3 space-y-2">
             {labels.map((label) => (
@@ -172,9 +172,9 @@ export function SpeakerScreenshotPanel({
                     }
                   }}
                   disabled={savingLabelId === label.id}
-                  className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900"
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 shadow-[0_1px_2px_rgba(15,23,42,0.04)] outline-none transition-[border-color,box-shadow] focus:border-emerald-700/50 focus:ring-2 focus:ring-emerald-700/15"
                 />
-                <span className="shrink-0 rounded bg-white px-1.5 py-0.5 text-[11px] text-gray-500">
+                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500">
                   {label.status}
                 </span>
               </div>
@@ -184,30 +184,30 @@ export function SpeakerScreenshotPanel({
       </section>
 
       <section>
-        <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
-          <Camera className="h-4 w-4 text-gray-500" />
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <Camera className="h-4 w-4 text-slate-500" />
           Screenshot Timeline
         </div>
 
         {screenshots.length === 0 ? (
-          <p className="mt-2 text-xs text-gray-500">No screenshots captured for this meeting.</p>
+          <p className="mt-2 text-xs text-slate-500">No screenshots captured for this meeting.</p>
         ) : (
           <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
             {screenshots.map((screenshot) => (
-              <div key={screenshot.id} className="w-36 shrink-0 overflow-hidden rounded-md border bg-white">
+              <div key={screenshot.id} className="w-36 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
                 <img
                   src={convertFileSrc(screenshot.filePath)}
                   alt={screenshot.displayLabel ?? 'Meeting screenshot'}
-                  className="h-20 w-full object-cover"
+                    className="h-20 w-full object-cover"
                 />
                 <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-                  <span className="truncate text-xs text-gray-600">
+                  <span className="truncate text-xs font-medium text-slate-600">
                     {screenshot.displayLabel ?? new Date(screenshot.capturedAt).toLocaleTimeString()}
                   </span>
                   <button
                     type="button"
                     onClick={() => handleDeleteScreenshot(screenshot.id)}
-                    className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                    className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
                     aria-label="Delete screenshot"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
