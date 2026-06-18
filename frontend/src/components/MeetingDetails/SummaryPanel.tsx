@@ -7,6 +7,7 @@ import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
+import { ExportMeetingDialog } from './ExportMeetingDialog';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
@@ -100,6 +101,7 @@ export function SummaryPanel({
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const languageLoadVersionRef = useRef(0);
   const activeMeetingIdRef = useRef(meeting.id);
   const languageSaveVersionRef = useRef(0);
@@ -300,12 +302,19 @@ export function SummaryPanel({
                   console.log('Find in summary clicked');
                 }}
                 onOpenFolder={onOpenFolder}
+                onExport={() => setExportDialogOpen(true)}
                 hasSummary={!!aiSummary}
               />
             </div>
           </div>
         )}
       </div>
+
+      <ExportMeetingDialog
+        meetingId={meeting.id}
+        open={exportDialogOpen}
+        onOpenChange={setExportDialogOpen}
+      />
 
       {isSummaryLoading ? (
         <div className="flex flex-col h-full">
