@@ -25,6 +25,20 @@ function friendlyError(error: unknown): string {
   return "The MCP setting could not be updated. Check the app permissions and try again."
 }
 
+function resultClass(result: string): string {
+  if (result === "allowed") return "bg-emerald-100 text-emerald-800"
+  if (result === "revoked" || result === "denied") return "bg-red-100 text-red-800"
+  if (result === "failed") return "bg-amber-100 text-amber-800"
+  return "bg-gray-200 text-gray-700"
+}
+
+function clientStateLabel(client: McpClient): string {
+  if (client.revoked) return "Revoked"
+  const expiresAt = new Date(client.expiresAt)
+  if (Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() < Date.now()) return "Expired"
+  return "Active"
+}
+
 export function McpSettings() {
   const [status, setStatus] = useState<McpStatus | null>(null)
   const [clients, setClients] = useState<McpClient[]>([])
@@ -129,6 +143,7 @@ export function McpSettings() {
     try {
       const nextClients = await mcpService.revokeClient(clientId)
       setClients(nextClients)
+      setAuditEvents(await mcpService.listAuditEvents())
       setMessage("Client access revoked.")
     } catch (error) {
       setMessage(friendlyError(error))
@@ -270,19 +285,26 @@ export function McpSettings() {
           </div>
           <div className="mt-4 space-y-3">
             {clients.length === 0 ? (
-              <p className="text-sm text-gray-600">No clients have been authorized yet.</p>
+              <p className="text-sm text-gray-600">No trusted clients yet. Use Agent setup to authorize Claude, Codex, or Cursor.</p>
             ) : (
               clients.map((client) => (
                 <div key={client.id} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="font-medium text-gray-900">{client.name}</div>
-                      <p className="mt-1 text-xs text-gray-600">{client.scopes.join(", ")}</p>
-                      <p className="mt-1 text-xs text-gray-500">{client.tokenFingerprint}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-medium text-gray-900">{client.name}</div>
+                        <span className={`rounded-full px-2 py-0.5 text-xs ${client.revoked ? "bg-red-100 text-red-800" : "bg-emerald-100 text-emerald-800"}`}>
+                          {clientStateLabel(client)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs text-gray-600">Scopes: {client.scopes.join(", ")}</p>
+                      <p className="mt-1 text-xs text-gray-500">Fingerprint: {client.tokenFingerprint}</p>
+                      <p className="mt-1 text-xs text-gray-500">Expires: {new Date(client.expiresAt).toLocaleString()}</p>
                     </div>
                     <button
-                      className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                      className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                       onClick={() => handleRevokeClient(client.id)}
+                      disabled={client.revoked || isSaving}
                     >
                       Revoke
                     </button>
@@ -303,10 +325,19 @@ export function McpSettings() {
                 <div key={event.id} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-medium text-gray-900">{event.toolName}</div>
-                    <span className="rounded-full bg-gray-200 px-2 py-1 text-xs text-gray-700">{event.result}</span>
+                    <span className={`rounded-full px-2 py-1 text-xs ${resultClass(event.result)}`}>{event.result}</span>
                   </div>
                   <p className="mt-2 text-xs text-gray-600">{new Date(event.timestamp).toLocaleString()}</p>
                   <p className="mt-1 text-xs text-gray-500">Client: {event.clientId}</p>
+                  {event.scopes.length > 0 && (
+                    <p className="mt-1 text-xs text-gray-500">Scopes: {event.scopes.join(", ")}</p>
+                  )}
+                  {event.meetingIds.length > 0 && (
+                    <p className="mt-1 break-all text-xs text-gray-500">Meetings: {event.meetingIds.join(", ")}</p>
+                  )}
+                  {event.reason && (
+                    <p className="mt-1 text-xs text-gray-500">Reason: {event.reason}</p>
+                  )}
                 </div>
               ))
             )}
