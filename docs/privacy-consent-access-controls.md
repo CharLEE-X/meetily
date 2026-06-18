@@ -25,7 +25,7 @@ Sensitive features use explicit consent states:
 | Auto-detect meetings | Off | Global opt-in | Settings and tray | Enable/disable, provider scope, last detection status, detection history |
 | Assisted join | Off | Per meeting or per calendar source opt-in | Calendar/automation UI | Confirm before join, cancel, failed join status, join attempt history |
 | Screenshots | Off | Per meeting confirmation, even if globally allowed | Recording controls | Visible capture indicator, next capture time, pause, stop, delete, capture history |
-| Speaker identification | Off until enabled | Per meeting or model setting | Meeting detail | Label confidence disclosure, edit/confirm identities, delete labels, label history |
+| Speaker identification | Off until enabled | Per meeting prompt tied to the source that creates labels: screenshot confirmation when labels use screenshots, or diarization setup when labels use a future audio model | Meeting detail | Label source disclosure, label confidence disclosure, edit/confirm identities, delete labels, label history |
 | External exports | Off; manual export only on user action | Per export destination, auto-export requires explicit destination setup | Export UI and Settings | Destination preview, export history, retry, revoke destination |
 | Apple Notes automation | Off | Global Apple Events permission plus destination confirmation | Settings and export UI | Notes folder/account preview, last export status, export history, disconnect |
 | Local MCP access | Off | Global server enablement plus per-client authorization | Settings | Client list, per-tool permissions, revoke, audit log |
@@ -47,6 +47,8 @@ Primary risks:
 * Malicious or over-broad local clients reading meeting content through MCP.
 * Stale derived artifacts, such as screenshots or chat indexes, surviving meeting deletion.
 * Confusing speaker labels with verified identity.
+
+Severity is assigned by the Critical, Important, and Minor tiers in [Security Review Checklist](security-review-checklist.md). Any primary risk that can expose meeting content, credentials, screenshots, exports, prompts, or tokens without consent is Critical until fixed or explicitly blocked from release.
 
 Controls:
 
@@ -74,12 +76,12 @@ Meetily stores supported app data locally through the desktop app: SQLite for me
 | Screenshots | Until user deletes screenshots, disables the feature, or deletes the meeting | Delete app-managed image files and SQLite references | Pause screenshots, delete screenshot, delete meeting, retention limit | Meeting deletion removes screenshot files and timeline references |
 | Speaker labels | Until user deletes labels or meeting | Remove labels, confidence metadata, and user-confirmed identity links | Edit label, clear labels, delete meeting | Clearing labels removes confirmed and detected identities |
 | Chat and transcript search indexes | Until user excludes a meeting, disables search/chat, or deletes the meeting | Delete vector/search index files and meeting-to-index mapping | Exclude meeting, rebuild index, delete index, delete meeting | Deleted or excluded meetings cannot be returned by search or chat |
-| Calendar metadata | Until provider disconnect, calendar deselect, or meeting deletion | Meeting deletion removes only that meeting's event link; calendar deselect removes calendar mappings; provider disconnect removes provider tokens and sync cursors | Disconnect provider, deselect calendar, delete meeting | Revoked calendar access stops sync and hides stale automation prompts |
+| Calendar metadata | Event links remain until provider disconnect, calendar deselect, or meeting deletion; sync history keeps minimal status for 30 days by default | Meeting deletion removes only that meeting's event link; calendar deselect removes calendar mappings; provider disconnect removes provider tokens and sync cursors | Disconnect provider, deselect calendar, delete meeting, sync history retention window | Revoked calendar access stops sync and hides stale automation prompts |
 | Apple Notes export records | Until user deletes export record, disconnects Notes automation, or deletes meeting | Remove export metadata and local status; do not delete Notes content without explicit confirmation | Disconnect, delete export record, retry failed export | Disconnect stops future writes and preserves visible prior-write status |
 | MCP client tokens | Until user revokes a client or disables MCP | Revoke token/trust record and terminate active sessions | Revoke client, disable MCP | Revoked clients cannot call tools without reauthorization |
 | MCP access logs | Retain minimal metadata for 30 days by default | Delete expired logs automatically; meeting deletion redacts meeting title/content references while preserving minimal event accountability | Clear logs, retention window | Logs never contain transcript text, prompts, screenshots, or summary bodies |
 | Agent skill installer logs | Retain minimal metadata for 30 days by default | Remove install/update logs and source references on clear; uninstall removes app-managed files | Uninstall skill, clear logs | Cleared logs cannot expose source paths or meeting content |
-| Provider request metadata | Keep minimal provider name, timestamp, and status for 30 days by default | Remove request IDs, provider names, and timestamps tied to the meeting; never store raw prompts beyond generated local output | Clear provider history, delete meeting, retention window | Cloud-provider summaries disclose provider use without retaining prompts |
+| Provider request metadata | Keep minimal provider name, timestamp, and status for 30 days by default | Remove request IDs, provider names, and timestamps tied to the meeting; never store raw prompts beyond generated local output | Settings > AI Providers: clear provider history, delete meeting, per-provider retention window | Cloud-provider summaries disclose provider use without retaining prompts |
 | Model caches | Until user removes a model or resets model storage | Delete app-managed Whisper, Parakeet, sidecar, or downloaded model files and clear model registry entries | Delete model, reset model storage | Removing a model frees the app-managed file and does not delete unrelated user files |
 | General app and diagnostic logs | Retain minimal logs for 30 days by default | Delete expired logs automatically; meeting deletion redacts meeting-specific identifiers where practical | Clear logs, retention window | Logs do not contain transcript text, prompts, screenshots, or summary bodies |
 
@@ -97,7 +99,7 @@ Future implementation and QA issues must include regression cases for:
 
 ## MCP Access Control and Audit Policy
 
-The local Meetily MCP server must not expose meeting content until the user explicitly enables MCP in Settings and authorizes at least one client.
+The local Meetily MCP server must not expose meeting content or sensitive meeting metadata until the user explicitly enables MCP in Settings and authorizes at least one client. For MCP policy, content means transcripts, summaries, screenshots, prompts, embeddings, exports, and speaker labels. Sensitive metadata includes meeting titles, dates, statuses, file paths, and calendar links when a client could use them to infer private context.
 
 Server rules:
 
@@ -120,7 +122,8 @@ Initial tool policy:
 | Tool category | Initial status | Permission scope | Notes |
 | --- | --- | --- | --- |
 | Server health and capability discovery | Allowed after client authorization | `mcp:read_status` | No meeting content or file paths |
-| List meetings | Allowed after explicit read scope | `meetings:list` | Return IDs, titles, dates, and status only |
+| List meeting IDs | Allowed after explicit list scope | `meetings:list_ids` | Return opaque IDs only |
+| List meeting metadata | Disabled until explicit metadata scope | `meetings:list_metadata` | Return titles, dates, and status only after metadata consent |
 | Read transcript or summary | Disabled until user grants meeting read scope | `meetings:read_content` | Client must request content access and logs must include meeting IDs |
 | Search/chat over meeting index | Disabled until chat/index feature and MCP scope are enabled | `meetings:query_index` | Must not expose excluded meetings |
 | Export or write meeting data | Disabled initially | `meetings:write` | Requires a later issue and separate security review |
@@ -156,13 +159,13 @@ Meetily is local-first by default. Meeting data leaves app-managed local storage
 
 | Integration | Data read | Data written | Local metadata retained | Required preview and controls |
 | --- | --- | --- | --- | --- |
-| Apple Calendar | Selected calendar event title, start/end time, meeting URL, calendar ID, and event ID | No calendar writes unless a future feature explicitly adds them | Provider/account label, selected calendar IDs, event IDs linked to meetings, last sync status, revocation status | Calendar/account selector, selected calendars, disconnect, last sync status |
-| Google Calendar, if added | Selected calendar event title, start/end time, meeting URL, calendar ID, event ID, and provider sync cursor | No calendar writes unless explicitly implemented and consented | Provider/account label, selected calendar IDs, event IDs, sync cursor, last sync status, revocation status | Provider consent screen, calendar selector, disconnect, last sync status |
+| Apple Calendar | Selected calendar event title, start/end time, meeting URL, calendar ID, and event ID | No calendar writes unless a future feature explicitly adds them | Provider/account label, selected calendar IDs, event IDs linked to meetings, last sync status, sync history, revocation status | Calendar/account selector, selected calendars, disconnect, last sync status, sync history |
+| Google Calendar, if added | Selected calendar event title, start/end time, meeting URL, calendar ID, event ID, and provider sync cursor | No calendar writes unless explicitly implemented and consented | Provider/account label, selected calendar IDs, event IDs, sync cursor, last sync status, sync history, revocation status | Provider consent screen, calendar selector, disconnect, last sync status, sync history |
 | Auto-detect and assisted join | Calendar metadata and meeting URLs from selected calendars | Join attempts only; no meeting content written externally | Meeting ID, event ID, join attempt timestamp, result status | Upcoming meeting preview, join confirmation, cancel, disable automation |
 | PDF, DOCX, Markdown, or share exports | Selected meeting title, transcript, summary, speaker labels, timestamps, and selected template output | User-selected destination file or share target | Export type, destination path or target label, timestamp, result status, retry state | Destination preview, file name preview, export confirmation, reveal destination, retry failed export |
 | Auto-export | Same as manual export for the selected template and format | User-configured destination only | Destination config, format, template, last export status, retry state | Explicit destination setup, sample destination preview, disable auto-export |
 | Apple Notes automation | Selected meeting title, summary, transcript excerpt or configured template output | User-selected Notes account/folder/note | Notes account/folder label, note identifier if available, timestamp, result status | Notes destination preview, content preview, retry, disconnect |
-| Cloud LLM summaries or chat | The prompt payload required by the selected provider, including selected transcript/summary/context | Provider receives request payload and returns generated text | Provider name, timestamp, model where available, result status, generated output stored locally if user keeps it | Provider disclosure, local-provider recommendation, model selector, clear provider history |
+| Cloud LLM summaries or chat | The prompt payload required by the selected provider, including selected transcript/summary/context | Provider receives request payload and returns generated text | Provider name, timestamp, model where available, result status, generated output stored locally if user keeps it | Provider disclosure, local-provider recommendation, model selector, clear provider history, provider history retention window |
 | MCP clients | Meeting metadata or content only within authorized scopes | Local response to authorized client; no external network by default | Client fingerprint, scopes, meeting IDs, tool name, result status | Enable MCP, authorize client, revoke client, audit log |
 
 External-boundary rules:
@@ -173,6 +176,7 @@ External-boundary rules:
 * Permission revocation must stop future reads/writes immediately and mark dependent automation unavailable until the user reconnects or disables it.
 * Local metadata must be limited to what is needed to show status, audit history, retry state, and revocation state.
 * Cloud-provider summaries or chat must clearly state that selected meeting content is sent to the configured provider, even though Meetily stores its own meeting records locally.
+* Cloud-provider settings must separate local Ollama from cloud providers. Ollama remains local by default. Anthropic, Groq, OpenAI, OpenRouter, and any OpenAI-compatible cloud endpoint must each expose provider-specific history retention, clear-history controls, and provider disclosure. If a provider offers a training-data opt-out or zero-retention mode, the setting or setup copy must surface it; Meetily must not imply it can control provider-side retention beyond the provider's own terms.
 * External files, Notes content, calendar events, and provider-side logs may remain outside Meetily's deletion control. Meetily must disclose this before writing externally.
 
 Implementation and QA issues for external integrations must include tests for:
@@ -222,8 +226,11 @@ Private and unsupported capture contexts:
 Speaker labeling:
 
 * Screenshot-derived speaker labels are detected labels, not verified identities.
+* The per-meeting prompt must say: "Allow Meetily to create detected speaker labels for this meeting?" and name the label source, such as screenshots or a future diarization model.
+* The prompt must disclose that labels are local derived data, can be wrong, can be edited or confirmed by the user, and can be cleared without deleting the meeting.
 * UI and exports must distinguish "detected speaker label" from "user-confirmed identity."
 * Users must be able to edit, confirm, clear, and delete speaker labels independently from screenshots.
+* Revoking speaker-label consent stops new labels and deletes detected labels by default. User-confirmed identities may be retained only if the user explicitly chooses to keep them.
 * Speaker labels must not be sent to external exports, chat indexes, MCP clients, or cloud providers unless the relevant feature is enabled under the external data boundary rules and the destination preview includes speaker labels explicitly.
 
 Implementation and QA issues for screenshots must include tests for:

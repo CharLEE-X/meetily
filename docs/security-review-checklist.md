@@ -139,6 +139,12 @@ Block release for:
 * Missing README or in-app privacy disclosure for a sensitive feature.
 * Unreviewed dependency that handles meeting content, credentials, native binaries, or network access.
 
+Severity tiers:
+
+* Critical: One of the release-blocking conditions above is present, or a feature can expose meeting content, credentials, screenshots, exports, prompts, or tokens without consent. Fix before merge and before any internal or external release build.
+* Important: A required control exists but is incomplete, ambiguous, unaudited, untested, or unavailable on a supported platform. Fix before the feature release candidate, or waive with an owner, follow-up issue, and expiration no later than the next release candidate.
+* Minor: Documentation, wording, or non-sensitive UX polish that does not weaken consent, revocation, deletion, auditability, or local-first defaults. Track before release and resolve by the next planned maintenance release unless the release owner accepts the residual risk.
+
 Important findings must be fixed before release unless explicitly waived. Minor findings may ship only with a tracked follow-up and release-owner approval.
 
 ## Documentation Requirements
