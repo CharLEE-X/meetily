@@ -12,6 +12,11 @@ import {
   readMeetingSummaryLanguage,
   readCachedDetectedSummaryLanguage,
 } from '@/lib/summary-language-preferences';
+import { mcpService } from '@/services/mcpService';
+import {
+  getAgentWorkflowSettings,
+  prepareAgentWorkflow,
+} from '@/services/agentWorkflowService';
 
 async function resolveSummaryLanguage(
   meetingId: string,
@@ -77,6 +82,68 @@ export function useSummaryGeneration({
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
+
+  const triggerPostMeetingWorkflow = useCallback(async (summary: Summary | { markdown?: string }, meetingTitle?: string) => {
+    const settings = getAgentWorkflowSettings();
+    if (settings.mode === 'off' || !settings.skillPackInstalled) {
+      return;
+    }
+
+    try {
+      const [mcpStatus, agentStatuses] = await Promise.all([
+        mcpService.getStatus(),
+        mcpService.getAgentStatuses(),
+      ]);
+      const prepared = prepareAgentWorkflow(
+        {
+          meetingId: meeting.id,
+          meetingTitle: meetingTitle || meeting.title || 'Untitled meeting',
+          summary,
+          mcpUrl: mcpStatus.url,
+        },
+        mcpStatus,
+        agentStatuses,
+        settings
+      );
+
+      if (!prepared.canRun) {
+        toast.info('Post-meeting workflow skipped', {
+          description: prepared.reason ?? 'Review agent workflow settings.',
+        });
+        return;
+      }
+
+      const copyPrompt = () => {
+        if (!navigator.clipboard) {
+          toast.error('Clipboard is not available');
+          return;
+        }
+        navigator.clipboard.writeText(prepared.prompt).then(
+          () => toast.success('Agent handoff copied'),
+          () => toast.error('Unable to copy agent handoff')
+        );
+      };
+
+      toast.info(
+        settings.mode === 'ask' ? 'Post-meeting workflow ready' : 'Post-meeting handoff prepared',
+        {
+          description: settings.mode === 'ask'
+            ? 'Review and copy the prepared agent prompt before running it.'
+            : 'Automatic mode prepares a safe handoff; external writes still require approval.',
+          duration: 12000,
+          action: {
+            label: 'Copy prompt',
+            onClick: copyPrompt,
+          },
+        }
+      );
+    } catch (error) {
+      console.error('Failed to prepare post-meeting workflow:', error);
+      toast.error('Post-meeting workflow failed', {
+        description: error instanceof Error ? error.message : 'Review agent workflow settings.',
+      });
+    }
+  }, [meeting.id, meeting.title]);
 
   // Helper to get status message
   const getSummaryStatusMessage = useCallback((status: SummaryStatus) => {
@@ -274,7 +341,8 @@ export function useSummaryGeneration({
           // Check if backend returned markdown format (new flow)
           if (pollingResult.data.markdown) {
             console.log('Received markdown format from backend');
-            setAiSummary({ markdown: pollingResult.data.markdown } as any);
+            const markdownSummary = { markdown: pollingResult.data.markdown } as any;
+            setAiSummary(markdownSummary);
             setSummaryStatus('completed');
 
             // Show success toast
@@ -292,6 +360,7 @@ export function useSummaryGeneration({
               modelConfig.model,
               true
             );
+            await triggerPostMeetingWorkflow(markdownSummary, meetingName);
             return;
           }
 
@@ -362,6 +431,7 @@ export function useSummaryGeneration({
             modelConfig.model,
             true
           );
+          await triggerPostMeetingWorkflow(formattedSummary, meetingName);
 
           if (meetingName && onMeetingUpdated) {
             await onMeetingUpdated();
@@ -396,6 +466,7 @@ export function useSummaryGeneration({
     setAiSummary,
     updateMeetingTitle,
     onMeetingUpdated,
+    triggerPostMeetingWorkflow,
   ]);
 
   // Helper function to fetch ALL transcripts for summary generation
