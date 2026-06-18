@@ -149,3 +149,37 @@ Implementation and QA issues for MCP must include tests for:
 * Non-loopback IPv4 and IPv6 bind attempts are rejected.
 * Disabling MCP terminates in-flight sessions.
 * Tokens, scopes beyond explicit permission names, meeting titles, transcript text, summaries, and prompts never appear in logs or UI beyond allowed token fingerprints and opaque IDs.
+
+## External Data Boundary Policy
+
+Meetily is local-first by default. Meeting data leaves app-managed local storage only after the user enables an integration, selects a destination, or chooses a cloud provider for summaries or chat.
+
+| Integration | Data read | Data written | Local metadata retained | Required preview and controls |
+| --- | --- | --- | --- | --- |
+| Apple Calendar | Selected calendar event title, start/end time, meeting URL, calendar ID, and event ID | No calendar writes unless a future feature explicitly adds them | Provider/account label, selected calendar IDs, event IDs linked to meetings, last sync status, revocation status | Calendar/account selector, selected calendars, disconnect, last sync status |
+| Google Calendar, if added | Selected calendar event title, start/end time, meeting URL, calendar ID, event ID, and provider sync cursor | No calendar writes unless explicitly implemented and consented | Provider/account label, selected calendar IDs, event IDs, sync cursor, last sync status, revocation status | Provider consent screen, calendar selector, disconnect, last sync status |
+| Auto-detect and assisted join | Calendar metadata and meeting URLs from selected calendars | Join attempts only; no meeting content written externally | Meeting ID, event ID, join attempt timestamp, result status | Upcoming meeting preview, join confirmation, cancel, disable automation |
+| PDF, DOCX, Markdown, or share exports | Selected meeting title, transcript, summary, speaker labels, timestamps, and selected template output | User-selected destination file or share target | Export type, destination path or target label, timestamp, result status, retry state | Destination preview, file name preview, export confirmation, reveal destination, retry failed export |
+| Auto-export | Same as manual export for the selected template and format | User-configured destination only | Destination config, format, template, last export status, retry state | Explicit destination setup, sample destination preview, disable auto-export |
+| Apple Notes automation | Selected meeting title, summary, transcript excerpt or configured template output | User-selected Notes account/folder/note | Notes account/folder label, note identifier if available, timestamp, result status | Notes destination preview, content preview, retry, disconnect |
+| Cloud LLM summaries or chat | The prompt payload required by the selected provider, including selected transcript/summary/context | Provider receives request payload and returns generated text | Provider name, timestamp, model where available, result status, generated output stored locally if user keeps it | Provider disclosure, local-provider recommendation, model selector, clear provider history |
+| MCP clients | Meeting metadata or content only within authorized scopes | Local response to authorized client; no external network by default | Client fingerprint, scopes, meeting IDs, tool name, result status | Enable MCP, authorize client, revoke client, audit log |
+
+External-boundary rules:
+
+* Auto-export must remain disabled until the user selects a concrete destination, format, and template.
+* Destination previews must appear before the first external write and whenever the configured destination changes.
+* External write failures must be visible in-app with a retry path, destination details, and a safe failure state that does not mark the export complete.
+* Permission revocation must stop future reads/writes immediately and mark dependent automation unavailable until the user reconnects or disables it.
+* Local metadata must be limited to what is needed to show status, audit history, retry state, and revocation state.
+* Cloud-provider summaries or chat must clearly state that selected meeting content is sent to the configured provider, even though Meetily stores its own meeting records locally.
+* External files, Notes content, calendar events, and provider-side logs may remain outside Meetily's deletion control. Meetily must disclose this before writing externally.
+
+Implementation and QA issues for external integrations must include tests for:
+
+* First export requires a destination preview and explicit confirmation.
+* Auto-export cannot run without destination configuration.
+* Failed or partially completed external writes remain visible and retryable.
+* Revoked calendar or Notes permission stops future sync/export attempts.
+* Clearing local export history does not silently delete user-managed external files.
+* Cloud-provider mode shows provider disclosure before sending meeting content.
