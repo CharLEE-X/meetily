@@ -17,6 +17,7 @@ import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
+import { exportMeeting, getExportSettings } from '@/services/exportService';
 
 export default function PageContent({
   meeting,
@@ -60,6 +61,7 @@ export default function PageContent({
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
+  const autoExportedMeetingRef = useRef<string | null>(null);
 
   // Sidebar context
   const { serverAddress } = useSidebar();
@@ -162,6 +164,52 @@ export default function PageContent({
       cancelled = true;
     };
   }, [shouldAutoGenerate, meeting.id]); // Re-run if meeting changes
+
+  useEffect(() => {
+    if (
+      summaryGeneration.summaryStatus !== 'completed' ||
+      !meetingData.aiSummary ||
+      autoExportedMeetingRef.current === meeting.id
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const maybeAutoExport = async () => {
+      try {
+        const settings = await getExportSettings();
+        if (cancelled || !settings.autoExportEnabled) return;
+
+        autoExportedMeetingRef.current = meeting.id;
+        const result = await exportMeeting(meeting.id, {
+          format: settings.autoExportFormat,
+          sections: settings.sections,
+          destinationDir: settings.destinationDir ?? null,
+          fileName: settings.fileNameTemplate,
+          autoExport: true,
+        });
+
+        if (!cancelled) {
+          toast.success('Meeting auto-exported', {
+            description: result.filePath,
+          });
+        }
+      } catch (error) {
+        console.error('Auto-export failed:', error);
+        if (!cancelled) {
+          toast.error('Auto-export failed', {
+            description: String(error),
+          });
+        }
+      }
+    };
+
+    void maybeAutoExport();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [summaryGeneration.summaryStatus, meeting.id, meetingData.aiSummary]);
 
   return (
     <motion.div

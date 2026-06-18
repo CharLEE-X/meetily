@@ -41,6 +41,7 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod export;
 pub mod mcp;
 pub mod notifications;
 pub mod ollama;
@@ -748,6 +749,11 @@ pub fn run() {
             mcp::mcp_get_agent_statuses,
             mcp::mcp_setup_agent,
             mcp::mcp_setup_all_agents,
+            // Export commands
+            export::export_get_settings,
+            export::export_update_settings,
+            export::export_meeting,
+            export::export_get_history,
             // Onboarding commands
             onboarding::get_onboarding_status,
             onboarding::save_onboarding_status_cmd,
