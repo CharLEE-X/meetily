@@ -41,6 +41,7 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod mcp;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -416,6 +417,7 @@ pub fn run() {
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
+        .manage(mcp::McpState::default())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Application setup complete");
@@ -508,6 +510,11 @@ pub fn run() {
             } else {
                 log::warn!("Failed to resolve resource directory for templates");
             }
+
+            let app_handle_for_mcp = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                mcp::initialize_on_startup(app_handle_for_mcp).await;
+            });
 
             Ok(())
         })
@@ -730,6 +737,17 @@ pub fn run() {
             database::commands::get_database_directory,
             database::commands::open_database_folder,
             whisper_engine::commands::open_models_folder,
+            // MCP commands
+            mcp::mcp_get_status,
+            mcp::mcp_update_settings,
+            mcp::mcp_start_server,
+            mcp::mcp_stop_server,
+            mcp::mcp_list_clients,
+            mcp::mcp_revoke_client,
+            mcp::mcp_list_audit_events,
+            mcp::mcp_get_agent_statuses,
+            mcp::mcp_setup_agent,
+            mcp::mcp_setup_all_agents,
             // Onboarding commands
             onboarding::get_onboarding_status,
             onboarding::save_onboarding_status_cmd,
@@ -770,6 +788,10 @@ pub fn run() {
                             }
                         } else {
                             log::warn!("AppState not available for database cleanup (likely first launch)");
+                        }
+
+                        if let Some(mcp_state) = _app_handle.try_state::<mcp::McpState>() {
+                            mcp::shutdown(&mcp_state).await;
                         }
 
                         // Clean up sidecar
