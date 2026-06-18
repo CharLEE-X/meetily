@@ -77,6 +77,8 @@ While there are many meeting transcription tools available, this solution stands
 - **Flexible:** Works offline and supports multiple meeting platforms.
 - **Customizable:** Self-host and modify for your specific needs.
 
+Sensitive automation is required to be explicit opt-in and auditable before it ships. This includes calendar sync, assisted join, screenshots, external exports, Apple Notes automation, local MCP access, meeting chat indexes, and agent skill setup. See the [privacy, consent, and access controls policy](docs/privacy-consent-access-controls.md) for the default-off rules.
+
 <details>
 <summary>The Privacy Problem</summary>
 
