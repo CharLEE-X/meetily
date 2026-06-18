@@ -1,5 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isTauriRuntime } from '@/lib/tauri';
+import {
+  MeetingActivitySignals,
+  MicActivitySignal,
+  NativeMeetingActivitySignals,
+  buildAmbientMeetingCandidate,
+} from './meetingDetectionSignals';
 
 export type MeetingDetectionMode = 'disabled' | 'prompt' | 'autoOpen';
 export type MeetingProvider = 'google-meet' | 'zoom' | 'teams' | 'unknown';
@@ -8,6 +14,9 @@ export interface MeetingDetectionSettings {
   mode: MeetingDetectionMode;
   lookaheadMinutes: number;
   staleAfterMinutes: number;
+  ambientDetectionEnabled: boolean;
+  ambientMicSignalEnabled: boolean;
+  ambientMinimumConfidence: number;
   quietHoursEnabled: boolean;
   quietHoursStart: string;
   quietHoursEnd: string;
@@ -39,11 +48,13 @@ export interface MeetingJoinCandidate {
   startAt: string;
   endAt: string;
   attendees: string[];
-  meetingUrl: string;
+  meetingUrl: string | null;
   provider: MeetingProvider;
-  source: ApprovedCalendarEvent['source'];
+  source: ApprovedCalendarEvent['source'] | 'ambient';
   minutesUntilStart: number;
   isActive: boolean;
+  confidence?: number;
+  reasons?: string[];
 }
 
 const SETTINGS_KEY = 'meetily.meetingDetectionSettings';
@@ -58,6 +69,9 @@ export const DEFAULT_MEETING_DETECTION_SETTINGS: MeetingDetectionSettings = {
   mode: 'disabled',
   lookaheadMinutes: 15,
   staleAfterMinutes: 10,
+  ambientDetectionEnabled: true,
+  ambientMicSignalEnabled: true,
+  ambientMinimumConfidence: 65,
   quietHoursEnabled: false,
   quietHoursStart: '18:00',
   quietHoursEnd: '08:00',
@@ -105,6 +119,9 @@ export function getMeetingDetectionSettings(): MeetingDetectionSettings {
     mode,
     lookaheadMinutes: clampNumber(stored.lookaheadMinutes, DEFAULT_MEETING_DETECTION_SETTINGS.lookaheadMinutes, 1, 120),
     staleAfterMinutes: clampNumber(stored.staleAfterMinutes, DEFAULT_MEETING_DETECTION_SETTINGS.staleAfterMinutes, 1, 120),
+    ambientDetectionEnabled: stored.ambientDetectionEnabled ?? DEFAULT_MEETING_DETECTION_SETTINGS.ambientDetectionEnabled,
+    ambientMicSignalEnabled: stored.ambientMicSignalEnabled ?? DEFAULT_MEETING_DETECTION_SETTINGS.ambientMicSignalEnabled,
+    ambientMinimumConfidence: clampNumber(stored.ambientMinimumConfidence, DEFAULT_MEETING_DETECTION_SETTINGS.ambientMinimumConfidence, 50, 95),
     quietHoursEnabled: Boolean(stored.quietHoursEnabled),
     quietHoursStart: sanitizeTime(stored.quietHoursStart, DEFAULT_MEETING_DETECTION_SETTINGS.quietHoursStart),
     quietHoursEnd: sanitizeTime(stored.quietHoursEnd, DEFAULT_MEETING_DETECTION_SETTINGS.quietHoursEnd),
@@ -128,6 +145,9 @@ function getSanitizedSettings(settings: MeetingDetectionSettings): MeetingDetect
     mode: ['disabled', 'prompt', 'autoOpen'].includes(settings.mode) ? settings.mode : 'disabled',
     lookaheadMinutes: clampNumber(settings.lookaheadMinutes, DEFAULT_MEETING_DETECTION_SETTINGS.lookaheadMinutes, 1, 120),
     staleAfterMinutes: clampNumber(settings.staleAfterMinutes, DEFAULT_MEETING_DETECTION_SETTINGS.staleAfterMinutes, 1, 120),
+    ambientDetectionEnabled: Boolean(settings.ambientDetectionEnabled),
+    ambientMicSignalEnabled: Boolean(settings.ambientMicSignalEnabled),
+    ambientMinimumConfidence: clampNumber(settings.ambientMinimumConfidence, DEFAULT_MEETING_DETECTION_SETTINGS.ambientMinimumConfidence, 50, 95),
     quietHoursStart: sanitizeTime(settings.quietHoursStart, DEFAULT_MEETING_DETECTION_SETTINGS.quietHoursStart),
     quietHoursEnd: sanitizeTime(settings.quietHoursEnd, DEFAULT_MEETING_DETECTION_SETTINGS.quietHoursEnd),
   };
@@ -232,6 +252,10 @@ export function markMeetingCandidateAutoOpened(candidate: Pick<MeetingJoinCandid
   });
 }
 
+export function isMeetingCandidateDismissed(candidate: Pick<MeetingJoinCandidate, 'id'>): boolean {
+  return Boolean(readDismissedCandidates()[candidate.id]);
+}
+
 export function getUpcomingMeetingCandidates(
   events = getApprovedCalendarEvents(),
   settings = getMeetingDetectionSettings(),
@@ -245,7 +269,7 @@ export function getUpcomingMeetingCandidates(
   const staleMs = settings.staleAfterMinutes * 60 * 1000;
 
   return events
-    .map((event) => {
+    .map((event): MeetingJoinCandidate | null => {
       const meetingUrl = extractMeetingUrl(event);
       if (!meetingUrl) return null;
       const startMs = Date.parse(event.startAt);
@@ -280,9 +304,44 @@ export function getUpcomingMeetingCandidates(
 }
 
 export async function openMeetingCandidate(candidate: MeetingJoinCandidate) {
+  if (!candidate.meetingUrl) {
+    throw new Error('This detected meeting does not expose a join link.');
+  }
   if (!isTauriRuntime()) {
     window.open(candidate.meetingUrl, '_blank', 'noopener,noreferrer');
     return;
   }
   await invoke('open_external_url', { url: candidate.meetingUrl });
+}
+
+export async function getNativeMeetingActivitySignals(): Promise<NativeMeetingActivitySignals | null> {
+  if (!isTauriRuntime()) return null;
+  try {
+    return await invoke<NativeMeetingActivitySignals>('get_meeting_activity_signals');
+  } catch (error) {
+    console.warn('Failed to collect meeting activity signals:', error);
+    return null;
+  }
+}
+
+export async function getAmbientMeetingCandidate(
+  settings = getMeetingDetectionSettings(),
+  micActivity?: MicActivitySignal | null,
+  now = new Date()
+): Promise<MeetingJoinCandidate | null> {
+  if (settings.mode === 'disabled' || !settings.ambientDetectionEnabled || isWithinQuietHours(now, settings)) return null;
+
+  const nativeSignals = await getNativeMeetingActivitySignals();
+  if (!nativeSignals) return null;
+
+  const candidate = buildAmbientMeetingCandidate({
+    ...nativeSignals,
+    micActivity: settings.ambientMicSignalEnabled ? micActivity : null,
+  } satisfies MeetingActivitySignals, now, {
+    minimumConfidence: settings.ambientMinimumConfidence,
+    windowMinutes: Math.max(30, Math.min(180, settings.staleAfterMinutes + 90)),
+  });
+
+  if (!candidate || isMeetingCandidateDismissed(candidate)) return null;
+  return candidate;
 }
