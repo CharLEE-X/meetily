@@ -1,10 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-
-declare global {
-  interface Window {
-    __TAURI_INTERNALS__?: unknown;
-  }
-}
+import { isTauriRuntime } from '@/lib/tauri';
 
 export type McpServerState = 'stopped' | 'starting' | 'running' | 'error';
 export type AgentKind = 'claude' | 'codex' | 'cursor';
@@ -69,10 +64,6 @@ const defaultStatus: McpStatus = {
   url: null,
   lastError: null,
 };
-
-function isTauriRuntime(): boolean {
-  return typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__);
-}
 
 export const mcpService = {
   async getStatus(): Promise<McpStatus> {
