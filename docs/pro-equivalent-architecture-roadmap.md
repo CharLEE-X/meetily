@@ -138,6 +138,10 @@ should treat it as backwards-compatible input, backfill richer
 keep it as a denormalized compatibility field until all readers use the richer
 tables.
 
+The detailed CHA-1667 data model, screenshot retention rules, correction
+history, consent states, and manual-only visual identification boundary are
+defined in [Speaker Identification and Screenshots](speaker-identification-screenshots.md).
+
 The current MCP audit precedent is implemented in
 `frontend/src-tauri/src/mcp/mod.rs` and persisted as the local
 `mcp_audit_log.json` file. A future `meeting_access_audit` table should mirror
