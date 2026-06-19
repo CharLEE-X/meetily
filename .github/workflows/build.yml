@@ -604,16 +604,18 @@ jobs:
           APPLE_ID: ''
           APPLE_ID_PASSWORD: ''
           APPLE_PASSWORD: ''
-          APPLE_TEAM_ID: ${{ inputs.sign-binaries && secrets.APPLE_TEAM_ID || '' }}
-          # Tauri's internal notarization currently returns Apple 401 in CI even
-          # though the same key succeeds with xcrun notarytool. Keep Tauri on
-          # build/signing only and notarize the release DMG explicitly below.
+          APPLE_TEAM_ID: ''
+          # The certificate is imported into a temporary keychain above. Do not
+          # pass Apple account, API key, or certificate blob variables into
+          # Tauri here: their presence makes Tauri attempt internal notarization,
+          # which returns Apple 401 in CI even though xcrun notarytool succeeds.
+          # Keep Tauri on build/signing only and notarize the DMG explicitly.
           APPLE_API_KEY: ''
           APPLE_API_ISSUER: ''
           APPLE_API_KEY_PATH: ''
           API_PRIVATE_KEYS_DIR: ''
-          APPLE_CERTIFICATE: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_CERTIFICATE: ''
+          APPLE_CERTIFICATE_PASSWORD: ''
           APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
           # Tauri updater signing (ALWAYS enabled for .sig files)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
