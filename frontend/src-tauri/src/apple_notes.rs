@@ -342,6 +342,7 @@ pub async fn export_meeting_to_apple_notes(
 
     let record =
         save_successful_export(pool, &account, &payload, &write_result, &destination).await?;
+    attach_notes_export_to_calendar_link(pool, &record.meeting_id, &record.id).await?;
     update_account_status(pool, "connected", None, Some(Utc::now().to_rfc3339())).await?;
     Ok(record)
 }
@@ -853,6 +854,32 @@ async fn save_failed_export(
     .execute(pool)
     .await
     .map_err(|err| format!("Failed to save Apple Notes export failure: {}", err))?;
+    Ok(())
+}
+
+async fn attach_notes_export_to_calendar_link(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    notes_export_id: &str,
+) -> Result<(), String> {
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "UPDATE meeting_calendar_links
+         SET notes_export_id = ?,
+             updated_at = ?
+         WHERE meeting_id = ?",
+    )
+    .bind(notes_export_id)
+    .bind(&now)
+    .bind(meeting_id)
+    .execute(pool)
+    .await
+    .map_err(|err| {
+        format!(
+            "Failed to link Apple Notes export with the meeting calendar record: {}",
+            err
+        )
+    })?;
     Ok(())
 }
 

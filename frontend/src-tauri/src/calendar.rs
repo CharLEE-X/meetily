@@ -123,6 +123,14 @@ struct MeetingCalendarLinkRow {
     apple_event_identifier: Option<String>,
 }
 
+struct MeetingNotesExportLink {
+    id: String,
+    note_title: String,
+    folder_name: Option<String>,
+    provider_note_id: Option<String>,
+    status: String,
+}
+
 struct AppleCalendarWriteResult {
     apple_event_identifier: String,
     calendar_name: String,
@@ -502,7 +510,13 @@ pub async fn create_or_update_meeting_calendar_event(
         .as_ref()
         .map(|summary| summary.status.as_str())
         .unwrap_or("not_generated");
-    let notes = calendar_event_notes(&meeting.id, summary_status, transcript_count > 0);
+    let notes_export = latest_apple_notes_export(pool, &request.meeting_id).await?;
+    let notes = calendar_event_notes(
+        &meeting.id,
+        summary_status,
+        transcript_count > 0,
+        notes_export.as_ref(),
+    );
     let write = write_apple_calendar_event(
         existing_apple_event_id,
         &account.target_calendar_name,
@@ -560,6 +574,7 @@ pub async fn create_or_update_meeting_calendar_event(
         &request.meeting_id,
         &event_id,
         &write.apple_event_identifier,
+        notes_export.as_ref().map(|export| export.id.as_str()),
     )
     .await?;
     update_account_sync(pool, PROVIDER_APPLE, "connected", Some(Utc::now()), None).await?;
@@ -865,8 +880,13 @@ fn parse_calendar_write_result(row: &str) -> Result<AppleCalendarWriteResult, St
     })
 }
 
-fn calendar_event_notes(meeting_id: &str, summary_status: &str, has_transcript: bool) -> String {
-    format!(
+fn calendar_event_notes(
+    meeting_id: &str,
+    summary_status: &str,
+    has_transcript: bool,
+    notes_export: Option<&MeetingNotesExportLink>,
+) -> String {
+    let mut notes = format!(
         "Created by Meetily\n\nMeeting ID: {}\nSummary status: {}\nTranscript: {}",
         meeting_id,
         summary_status,
@@ -875,7 +895,24 @@ fn calendar_event_notes(meeting_id: &str, summary_status: &str, has_transcript: 
         } else {
             "not available"
         }
-    )
+    );
+
+    if let Some(export) = notes_export {
+        notes.push_str("\n\nApple Notes export: ");
+        notes.push_str(&export.status);
+        notes.push_str("\nNote title: ");
+        notes.push_str(&export.note_title);
+        if let Some(folder_name) = export.folder_name.as_deref() {
+            notes.push_str("\nNotes folder: ");
+            notes.push_str(folder_name);
+        }
+        if let Some(provider_note_id) = export.provider_note_id.as_deref() {
+            notes.push_str("\nApple Notes ID: ");
+            notes.push_str(provider_note_id);
+        }
+    }
+
+    notes
 }
 
 fn sanitize_calendar_write_error(error: &str) -> String {
@@ -1156,6 +1193,7 @@ async fn upsert_meeting_calendar_link(
     meeting_id: &str,
     calendar_event_id: &str,
     apple_event_identifier: &str,
+    notes_export_id: Option<&str>,
 ) -> Result<(), String> {
     let now = Utc::now().to_rfc3339();
     if let Some(existing) = latest_meeting_calendar_link(pool, meeting_id).await? {
@@ -1165,11 +1203,13 @@ async fn upsert_meeting_calendar_link(
                  link_source = 'created_by_meetily',
                  confidence = 1.0,
                  apple_event_identifier = ?,
+                 notes_export_id = COALESCE(?, notes_export_id),
                  updated_at = ?
              WHERE id = ?",
         )
         .bind(calendar_event_id)
         .bind(apple_event_identifier)
+        .bind(notes_export_id)
         .bind(&now)
         .bind(existing.id)
         .execute(pool)
@@ -1182,24 +1222,51 @@ async fn upsert_meeting_calendar_link(
     sqlx::query(
         "INSERT INTO meeting_calendar_links
             (id, meeting_id, calendar_event_id, link_source, confidence,
-             apple_event_identifier, created_at, updated_at)
-         VALUES (?, ?, ?, 'created_by_meetily', 1.0, ?, ?, ?)
+             apple_event_identifier, notes_export_id, created_at, updated_at)
+         VALUES (?, ?, ?, 'created_by_meetily', 1.0, ?, ?, ?, ?)
          ON CONFLICT(meeting_id, calendar_event_id) DO UPDATE SET
              link_source = 'created_by_meetily',
              confidence = 1.0,
              apple_event_identifier = excluded.apple_event_identifier,
+             notes_export_id = COALESCE(excluded.notes_export_id, meeting_calendar_links.notes_export_id),
              updated_at = excluded.updated_at",
     )
     .bind(link_id)
     .bind(meeting_id)
     .bind(calendar_event_id)
     .bind(apple_event_identifier)
+    .bind(notes_export_id)
     .bind(&now)
     .bind(&now)
     .execute(pool)
     .await
     .map_err(|err| format!("Failed to save meeting calendar link: {}", err))?;
     Ok(())
+}
+
+async fn latest_apple_notes_export(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+) -> Result<Option<MeetingNotesExportLink>, String> {
+    let row = sqlx::query(
+        "SELECT id, note_title, folder_name, provider_note_id, status
+         FROM apple_notes_exports
+         WHERE meeting_id = ? AND provider = 'apple_notes'
+         ORDER BY COALESCE(exported_at, updated_at) DESC
+         LIMIT 1",
+    )
+    .bind(meeting_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| format!("Failed to inspect Apple Notes export link: {}", err))?;
+
+    Ok(row.map(|row| MeetingNotesExportLink {
+        id: row.get("id"),
+        note_title: row.get("note_title"),
+        folder_name: row.get("folder_name"),
+        provider_note_id: row.get("provider_note_id"),
+        status: row.get("status"),
+    }))
 }
 
 async fn update_account_sync(
@@ -1447,5 +1514,23 @@ mod tests {
             deterministic_id(&["apple", "source", "event"]),
             deterministic_id(&["apple", "source", "other"])
         );
+    }
+
+    #[test]
+    fn calendar_event_notes_include_apple_notes_export_metadata() {
+        let notes_export = MeetingNotesExportLink {
+            id: "export-1".to_string(),
+            note_title: "2026-06-19 - Planning".to_string(),
+            folder_name: Some("Meetily".to_string()),
+            provider_note_id: Some("x-coredata://note/123".to_string()),
+            status: "exported".to_string(),
+        };
+        let notes = calendar_event_notes("meeting-1", "completed", true, Some(&notes_export));
+
+        assert!(notes.contains("Meeting ID: meeting-1"));
+        assert!(notes.contains("Apple Notes export: exported"));
+        assert!(notes.contains("Note title: 2026-06-19 - Planning"));
+        assert!(notes.contains("Notes folder: Meetily"));
+        assert!(notes.contains("Apple Notes ID: x-coredata://note/123"));
     }
 }
