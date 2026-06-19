@@ -16,6 +16,10 @@ on:
       release-id:
         required: false
         type: string
+      release-version:
+        required: false
+        type: string
+        default: ""
       asset-prefix:
         required: false
         type: string
@@ -588,8 +592,8 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         with:
           projectPath: frontend
-          tagName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
-          releaseName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
+          tagName: ${{ inputs.release-id && format('v{0}', inputs.release-version != '' && inputs.release-version || steps.get-version.outputs.version) || '' }}
+          releaseName: ${{ inputs.release-id && format('v{0}', inputs.release-version != '' && inputs.release-version || steps.get-version.outputs.version) || '' }}
           releaseId: ${{ inputs.release-id }}
           args: ${{ inputs.build-args }} ${{ steps.build-features.outputs.features }}
 

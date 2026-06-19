@@ -8,6 +8,13 @@ export type WorkflowActionId =
   | 'extract-follow-ups'
   | 'draft-linear-issues'
   | 'draft-follow-up-message'
+  | 'daily-digest'
+  | 'weekly-digest'
+  | 'next-meeting-prep'
+  | 'open-loops'
+  | 'project-status-update'
+  | 'decision-log'
+  | 'role-brief'
   | 'open-agent-handoff';
 
 export interface AgentWorkflowSettings {
@@ -45,7 +52,7 @@ export interface PreparedAgentWorkflow {
   reason: string | null;
 }
 
-export const MEETILY_SKILL_PACK_VERSION = '2026.06.18';
+export const MEETILY_SKILL_PACK_VERSION = '2026.06.19';
 
 export const AGENT_WORKFLOW_ACTIONS: Array<{
   id: WorkflowActionId;
@@ -75,6 +82,48 @@ export const AGENT_WORKFLOW_ACTIONS: Array<{
     id: 'draft-follow-up-message',
     label: 'Draft follow-up message',
     description: 'Prepare a concise email or chat follow-up from the meeting outcomes.',
+    requiresApproval: false,
+  },
+  {
+    id: 'daily-digest',
+    label: 'Daily digest',
+    description: 'Summarize the day into decisions, commitments, risks, and open questions.',
+    requiresApproval: false,
+  },
+  {
+    id: 'weekly-digest',
+    label: 'Weekly digest',
+    description: 'Group recent meetings into repeated themes, commitments, decisions, and risks.',
+    requiresApproval: false,
+  },
+  {
+    id: 'next-meeting-prep',
+    label: 'Next-meeting prep',
+    description: 'Prepare context, unresolved questions, and suggested agenda points for the next related call.',
+    requiresApproval: false,
+  },
+  {
+    id: 'open-loops',
+    label: 'Open loops',
+    description: 'Find unresolved questions, ownerless action items, and follow-ups that need confirmation.',
+    requiresApproval: false,
+  },
+  {
+    id: 'project-status-update',
+    label: 'Project status update',
+    description: 'Turn meeting outcomes into a stakeholder-ready project status draft.',
+    requiresApproval: false,
+  },
+  {
+    id: 'decision-log',
+    label: 'Decision log',
+    description: 'Extract decision records with rationale, owner, confidence, and source references.',
+    requiresApproval: false,
+  },
+  {
+    id: 'role-brief',
+    label: 'Role-based brief',
+    description: 'Prepare product, engineering, sales, hiring, manager, founder, or customer-success briefs.',
     requiresApproval: false,
   },
   {
@@ -232,11 +281,45 @@ function summaryToText(summary: AgentWorkflowContext['summary']): string {
     .slice(0, 6000);
 }
 
+function actionInstruction(actionId: WorkflowActionId): string {
+  switch (actionId) {
+    case 'review-summary':
+      return 'Review the summary for missing decisions, unclear risks, weak action items, and unsupported claims.';
+    case 'extract-follow-ups':
+      return 'Extract follow-ups with owner, next step, due date if implied, source evidence, and confidence.';
+    case 'draft-linear-issues':
+      return 'Draft Linear issue proposals only. Include title, description, owner if known, priority suggestion, source meeting reference, and confidence.';
+    case 'draft-follow-up-message':
+      return 'Draft a concise follow-up message suitable for email or chat, with decisions, actions, and any questions needing confirmation.';
+    case 'daily-digest':
+      return 'Create a daily digest covering meetings, commitments I made, commitments others made, decisions, risks, and open questions.';
+    case 'weekly-digest':
+      return 'Create a weekly digest grouped by repeated themes, progress, decisions, commitments, risks, and recommended next actions.';
+    case 'next-meeting-prep':
+      return 'Prepare a next-meeting brief with prior decisions, unresolved questions, promised follow-ups, likely agenda, and suggested questions.';
+    case 'open-loops':
+      return 'Identify unresolved questions, ownerless actions, risks without mitigation, and decisions that need confirmation.';
+    case 'project-status-update':
+      return 'Draft a stakeholder-ready project status update with progress, blockers, risks, decisions, owners, and next milestones.';
+    case 'decision-log':
+      return 'Extract decision-log entries with decision, rationale, alternatives/tradeoffs if available, owner, date, source, and confidence.';
+    case 'role-brief':
+      return 'Prepare a role-specific brief. Ask which role if not specified: product, engineering, sales, hiring, manager, founder, or customer success.';
+    case 'open-agent-handoff':
+      return 'Prepare a clean handoff prompt for the selected agent, preserving meeting ids and source references.';
+    default:
+      return 'Review the meeting and produce concise, source-backed follow-up.';
+  }
+}
+
 export function buildLinearFollowUpTemplate(context: AgentWorkflowContext, actions: WorkflowActionId[]): string {
   const actionLabels = actions
     .map((actionId) => AGENT_WORKFLOW_ACTIONS.find((action) => action.id === actionId)?.label)
     .filter(Boolean)
     .join(', ');
+  const actionInstructions = actions
+    .map((actionId) => `- ${actionInstruction(actionId)}`)
+    .join('\n');
 
   return [
     'You are helping process a Meetily meeting.',
@@ -259,6 +342,17 @@ export function buildLinearFollowUpTemplate(context: AgentWorkflowContext, actio
     '- priority suggestion',
     '- confidence',
     '- source meeting reference',
+    '',
+    'Workflow instructions:',
+    actionInstructions || '- Review the meeting summary and produce concise follow-up.',
+    '',
+    'Useful MCP workflows when authorized:',
+    '- meetily_get_latest_meeting: latest meeting context',
+    '- meetily_ask_meetings: answer questions like "what did we say on the last call with X?"',
+    '- meetily_get_daily_digest and meetily_get_weekly_digest: personal productivity digests',
+    '- meetily_get_open_loops: unresolved actions, questions, risks, and confirmations',
+    '- meetily_prepare_next_meeting: preparation brief from prior related meetings',
+    '- meetily_prepare_role_brief: product, engineering, sales, hiring, manager, founder, or customer-success brief',
     '',
     'Meeting summary:',
     summaryToText(context.summary),

@@ -189,6 +189,35 @@ Input schema:
 }
 ```
 
+### Read-only workflow tools
+
+The MCP server also exposes read-only workflow tools for common agent use cases.
+All require `meetings:read`, return bounded context, and include guidance for
+source-backed answers:
+
+* `meetily_get_latest_meeting`: latest meeting context.
+* `meetily_find_meetings`: topic, person, title, or date-range lookup.
+* `meetily_ask_meetings`: answer-ready context for natural questions such as
+  "what did we say on the last call with X?"
+* `meetily_get_recent_action_items`: recent follow-ups across meetings.
+* `meetily_get_decisions`: decision-like summaries and excerpts.
+* `meetily_get_followups_for_person`: commitments and follow-ups involving a
+  person.
+* `meetily_get_meeting_brief`: compact meeting brief for one meeting or the
+  latest meeting.
+* `meetily_compare_meetings`: compare related meetings.
+* `meetily_get_project_context`: timeline for a project/topic.
+* `meetily_get_daily_digest`: personal daily meeting digest.
+* `meetily_get_weekly_digest`: weekly digest across commitments, risks,
+  decisions, and themes.
+* `meetily_get_open_loops`: unresolved questions, ownerless actions, risks, and
+  confirmations.
+* `meetily_prepare_next_meeting`: prep brief from previous related meetings.
+* `meetily_prepare_role_brief`: role-specific product, engineering, sales,
+  hiring, manager, founder, or customer-success brief.
+* `meetily_prepare_handoff`: Codex, Claude, Cursor, Linear, or manual handoff
+  prompt from meetings or a topic.
+
 ## Audit Events
 
 Every meeting-content tool call records:
@@ -234,11 +263,25 @@ keys, or secrets into agent configuration files.
 The first skill pack contains workflows for:
 
 * meeting search and meeting lookup through the authorized MCP server;
+* last-meeting recall, topic search, person search, and meeting comparison;
 * summary review and missing-context checks;
 * follow-up and action extraction;
+* personal daily and weekly meeting digests;
+* next-meeting preparation from previous related calls;
+* open-loop review for unresolved questions, ownerless actions, risks, and
+  confirmations;
+* role-based briefs for product, engineering, sales, hiring, manager, founder,
+  and customer-success workflows;
+* project status updates and decision-log extraction;
 * Linear follow-up issue proposals;
 * follow-up message drafting;
 * manual agent handoff prompts.
+
+The packaged MCP workflows are read-only. They return bounded source context and
+agent instructions, not external writes. Use cases that produce Linear issues,
+status updates, customer follow-ups, decision logs, or docs must remain drafts
+until the user explicitly approves the destination and content in a separate
+write flow.
 
 Post-meeting workflows have three modes:
 

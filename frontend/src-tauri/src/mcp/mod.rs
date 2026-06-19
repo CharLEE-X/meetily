@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use chrono::{NaiveDate, NaiveTime, TimeZone, Utc};
+use chrono::{Duration as ChronoDuration, NaiveDate, NaiveTime, TimeZone, Utc};
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -681,8 +681,8 @@ fn tool_schema() -> Value {
                     "properties": {
                         "query": { "type": "string" },
                         "person": { "type": "string" },
-                        "dateFrom": { "type": "string", "description": "Inclusive YYYY-MM-DD or RFC3339 date." },
-                        "dateTo": { "type": "string", "description": "Inclusive YYYY-MM-DD or RFC3339 date." },
+                        "dateFrom": { "type": "string", "description": "Inclusive YYYY-MM-DD date." },
+                        "dateTo": { "type": "string", "description": "Inclusive YYYY-MM-DD date." },
                         "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
                     }
                 }
@@ -770,6 +770,71 @@ fn tool_schema() -> Value {
                     "properties": {
                         "topic": { "type": "string", "minLength": 1 },
                         "limit": { "type": "integer", "minimum": 1, "maximum": 20 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_get_daily_digest",
+                "description": "Build a personal daily digest of meetings, decisions, follow-ups, and open questions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "date": { "type": "string", "description": "YYYY-MM-DD. Defaults to today in UTC." },
+                        "person": { "type": "string" },
+                        "topic": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 25 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_get_weekly_digest",
+                "description": "Build a weekly digest across meetings with commitments, decisions, risks, and repeated themes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "dateFrom": { "type": "string", "description": "Inclusive YYYY-MM-DD or RFC3339 date." },
+                        "dateTo": { "type": "string", "description": "Inclusive YYYY-MM-DD or RFC3339 date." },
+                        "person": { "type": "string" },
+                        "topic": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_get_open_loops",
+                "description": "Find unresolved-looking questions, follow-ups, commitments, and risks across recent meetings.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "person": { "type": "string" },
+                        "topic": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_prepare_next_meeting",
+                "description": "Prepare for a next meeting using prior meetings with a person or topic.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "person": { "type": "string" },
+                        "topic": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 10 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_prepare_role_brief",
+                "description": "Prepare a role-specific brief for product, engineering, sales, hiring, manager, founder, or customer-success workflows.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["role"],
+                    "properties": {
+                        "role": { "type": "string", "enum": ["product", "engineering", "sales", "hiring", "manager", "founder", "customer_success"] },
+                        "topic": { "type": "string" },
+                        "person": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 10 }
                     }
                 }
             },
@@ -1114,6 +1179,57 @@ async fn matching_transcript_excerpts(
         .collect())
 }
 
+fn day_bounds(date: Option<&str>) -> Result<(String, String), String> {
+    let day = match date.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .map_err(|_| format!("Invalid date '{}'. Use YYYY-MM-DD.", value))?,
+        None => Utc::now().date_naive(),
+    };
+    Ok((day.to_string(), day.to_string()))
+}
+
+fn default_week_bounds(
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+) -> Result<(String, String), String> {
+    let to_day = match date_to.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .map_err(|_| format!("Invalid dateTo '{}'. Use YYYY-MM-DD.", value))?,
+        None => Utc::now().date_naive(),
+    };
+    let from_day = match date_from.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .map_err(|_| format!("Invalid dateFrom '{}'. Use YYYY-MM-DD.", value))?,
+        None => to_day - ChronoDuration::days(6),
+    };
+    Ok((from_day.to_string(), to_day.to_string()))
+}
+
+async fn digest_meeting_cards(
+    pool: &sqlx::SqlitePool,
+    ids: Vec<String>,
+    transcript_limit: i64,
+) -> Result<Vec<Value>, String> {
+    let mut meetings = Vec::new();
+    for id in ids {
+        meetings.push(meeting_card(pool, &id, transcript_limit > 0, transcript_limit).await?);
+    }
+    Ok(meetings)
+}
+
+fn role_brief_guidance(role: &str) -> &'static str {
+    match role {
+        "product" => "Extract user problems, feature requests, product decisions, tradeoffs, owners, and validation questions.",
+        "engineering" => "Extract implementation tasks, blockers, risks, dependencies, architecture decisions, owners, and follow-up checks.",
+        "sales" => "Extract customer pain, objections, competitors, buying signals, stakeholders, next steps, and follow-up message points.",
+        "hiring" => "Extract candidate signals, concerns, evidence, follow-up questions, interviewer alignment gaps, and recommendation confidence.",
+        "manager" => "Extract commitments, blockers, morale signals, coaching topics, career goals, and recurring 1:1 themes.",
+        "founder" => "Extract strategic decisions, investor/customer signals, risks, hiring/product/commercial priorities, and urgent follow-through.",
+        "customer_success" => "Extract account health, risks, promised follow-ups, escalation points, adoption blockers, and renewal or expansion signals.",
+        _ => "Extract decisions, actions, risks, owners, and follow-up questions.",
+    }
+}
+
 async fn call_meeting_tool(
     app_handle: &AppHandle,
     tool_name: &str,
@@ -1137,6 +1253,11 @@ async fn call_meeting_tool(
         | "meetily_get_meeting_brief"
         | "meetily_compare_meetings"
         | "meetily_get_project_context"
+        | "meetily_get_daily_digest"
+        | "meetily_get_weekly_digest"
+        | "meetily_get_open_loops"
+        | "meetily_prepare_next_meeting"
+        | "meetily_prepare_role_brief"
         | "meetily_prepare_handoff" => SCOPE_READ_MEETINGS,
         _ => SCOPE_READ_STATUS,
     };
@@ -1492,6 +1613,105 @@ async fn call_meeting_tool(
                 }));
             }
             json!({ "topic": topic, "timeline": timeline })
+        }
+        "meetily_get_daily_digest" => {
+            let date = string_arg(args, "date");
+            let person = string_arg(args, "person");
+            let topic = string_arg(args, "topic");
+            let limit = bounded_i64_arg(args, "limit", 12, 1, 25) as usize;
+            let (date_from, date_to) = day_bounds(date.as_deref())?;
+            let ids = find_meeting_ids(
+                pool,
+                topic.as_deref(),
+                person.as_deref(),
+                Some(&date_from),
+                Some(&date_to),
+                limit,
+            )
+            .await?;
+            json!({
+                "date": date_from,
+                "person": person,
+                "topic": topic,
+                "meetings": digest_meeting_cards(pool, ids, 8).await?,
+                "digestGuidance": "Create a concise personal digest: meetings attended, decisions, commitments I made, commitments others made to me, risks, unresolved questions, and suggested next actions. Cite meeting ids and transcript timestamps where available."
+            })
+        }
+        "meetily_get_weekly_digest" => {
+            let person = string_arg(args, "person");
+            let topic = string_arg(args, "topic");
+            let date_from = string_arg(args, "dateFrom");
+            let date_to = string_arg(args, "dateTo");
+            let limit = bounded_i64_arg(args, "limit", 25, 1, 50) as usize;
+            let (from_bound, to_bound) = default_week_bounds(date_from.as_deref(), date_to.as_deref())?;
+            let ids = find_meeting_ids(
+                pool,
+                topic.as_deref(),
+                person.as_deref(),
+                Some(&from_bound),
+                Some(&to_bound),
+                limit,
+            )
+            .await?;
+            json!({
+                "dateFrom": from_bound,
+                "dateTo": to_bound,
+                "person": person,
+                "topic": topic,
+                "meetings": digest_meeting_cards(pool, ids, 5).await?,
+                "digestGuidance": "Create a weekly digest grouped by decisions, progress, commitments, risks, repeated themes, and recommended follow-up. Highlight items that appeared in multiple meetings."
+            })
+        }
+        "meetily_get_open_loops" => {
+            let person = string_arg(args, "person");
+            let topic = string_arg(args, "topic");
+            let limit = bounded_i64_arg(args, "limit", 25, 1, 50) as usize;
+            let ids = find_meeting_ids(pool, topic.as_deref(), person.as_deref(), None, None, limit).await?;
+            let mut loops = Vec::new();
+            for id in ids {
+                let search_term = topic.as_deref().or(person.as_deref()).unwrap_or("?");
+                loops.push(json!({
+                    "meeting": meeting_card(pool, &id, false, 0).await?,
+                    "actionContext": get_action_context_json(pool, &id).await?,
+                    "questionExcerpts": matching_transcript_excerpts(pool, &id, search_term, 8).await?
+                }));
+            }
+            json!({
+                "person": person,
+                "topic": topic,
+                "openLoops": loops,
+                "openLoopGuidance": "Identify unresolved questions, promised follow-ups, ownerless action items, risks without mitigation, and decisions that need confirmation. Mark uncertainty clearly."
+            })
+        }
+        "meetily_prepare_next_meeting" => {
+            let person = string_arg(args, "person");
+            let topic = string_arg(args, "topic");
+            if person.is_none() && topic.is_none() {
+                return Err("person or topic is required".to_string());
+            }
+            let limit = bounded_i64_arg(args, "limit", 5, 1, 10) as usize;
+            let ids = find_meeting_ids(pool, topic.as_deref(), person.as_deref(), None, None, limit).await?;
+            json!({
+                "person": person,
+                "topic": topic,
+                "sourceMeetings": digest_meeting_cards(pool, ids, 10).await?,
+                "prepGuidance": "Prepare a next-meeting brief: previous decisions, unresolved questions, promised follow-ups, likely agenda, suggested questions to ask, and points that need confirmation. Cite source meetings."
+            })
+        }
+        "meetily_prepare_role_brief" => {
+            let role = string_arg(args, "role").ok_or_else(|| "role is required".to_string())?;
+            let person = string_arg(args, "person");
+            let topic = string_arg(args, "topic");
+            let limit = bounded_i64_arg(args, "limit", 5, 1, 10) as usize;
+            let ids = find_meeting_ids(pool, topic.as_deref(), person.as_deref(), None, None, limit).await?;
+            json!({
+                "role": role,
+                "person": person,
+                "topic": topic,
+                "sourceMeetings": digest_meeting_cards(pool, ids, 10).await?,
+                "briefGuidance": role_brief_guidance(&role),
+                "outputGuidance": "Return a concise brief with evidence, owners, confidence, and explicit follow-up recommendations. Do not create external records without user approval."
+            })
         }
         "meetily_prepare_handoff" => {
             let agent = string_arg(args, "agent").unwrap_or_else(|| "manual".to_string());

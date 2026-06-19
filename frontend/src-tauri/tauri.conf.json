@@ -115,7 +115,7 @@
         "updater": {
             "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQwODAxQzg5RTY5M0JCQjIKUldTeXU1UG1pUnlBUUhGWVJYSGVkWG5WSmdRdXVDWW44Q2x5UjFCdW5oSk43cGtnclNXalZkLzkK",
             "endpoints": [
-                "https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest/download/latest.json"
+                "https://github.com/CharLEE-X/meetily/releases/latest/download/latest.json"
             ]
         }
     }

@@ -133,22 +133,23 @@ This document provides a quick overview of all available CI/CD workflows in this
 
 **Key Features:**
 - Signing REQUIRED
-- Creates GitHub Release (draft)
-- Version tags from `tauri.conf.json`
+- Creates a GitHub Release with downloadable installers
+- Uses pushed `v*` tags, or `tauri.conf.json` for manual dispatch
 - Uploads release assets
 - **macOS and Windows only** (Linux excluded from production releases)
 - Auto-generates `latest.json` for Tauri updater
-- **Auto-increment versioning**: If tag exists, auto-increments (e.g., `0.1.1` -> `0.1.1.1` -> `0.1.1.2`, up to `.100`)
+- **Manual auto-increment versioning**: If the `tauri.conf.json` tag exists during manual dispatch, auto-increments (e.g., `0.1.1` -> `0.1.1.1` -> `0.1.1.2`, up to `.100`)
 
 **Triggers:**
-- Manual dispatch only
+- Push a `v*` tag, for example `v0.4.1`
+- Manual dispatch, optionally as a draft release
 
 **Use When:**
 - Ready to publish a new version
 - Creating official release artifacts
 
 **Outputs:**
-- GitHub Release (draft)
+- GitHub Release
 - macOS: DMG installer, app.tar.gz (updater), .sig
 - Windows: MSI installer (signed), NSIS installer (signed), .sig files
 - Updater manifest: latest.json
@@ -223,9 +224,9 @@ This document provides a quick overview of all available CI/CD workflows in this
 - Full verification
 
 ### "I'm ready to release..."
-- **Use `release.yml`** (manual dispatch)
+- **Push a `v*` tag** or use `release.yml` manual dispatch
 - Creates GitHub Release
-- All platforms, fully signed
+- macOS and Windows, fully signed
 - Production-ready artifacts
 
 ---

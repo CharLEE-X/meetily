@@ -478,8 +478,8 @@ tell application "Calendar"
         repeat with ev in eventList
             set eventId to uid of ev as text
             set eventTitle to summary of ev as text
-            set eventStart to (start date of ev) as «class isot»
-            set eventEnd to (end date of ev) as «class isot»
+            set eventStart to my calendarDateText(start date of ev)
+            set eventEnd to my calendarDateText(end date of ev)
             set eventLocation to ""
             set eventDescription to ""
             try
@@ -499,6 +499,24 @@ set AppleScript's text item delimiters to rowDelimiter
 set outputRows to rows as text
 set AppleScript's text item delimiters to ""
 return outputRows
+
+on calendarDateText(rawDate)
+    set yearText to year of rawDate as text
+    set monthText to my padCalendarNumber(month of rawDate as integer)
+    set dayText to my padCalendarNumber(day of rawDate)
+    set hourText to my padCalendarNumber(hours of rawDate)
+    set minuteText to my padCalendarNumber(minutes of rawDate)
+    set secondText to my padCalendarNumber(seconds of rawDate)
+    return yearText & "-" & monthText & "-" & dayText & "T" & hourText & ":" & minuteText & ":" & secondText
+end calendarDateText
+
+on padCalendarNumber(rawNumber)
+    set numberText to rawNumber as integer as text
+    if (rawNumber as integer) is less than 10 then
+        return "0" & numberText
+    end if
+    return numberText
+end padCalendarNumber
 
 on cleanCalendarField(rawValue)
     set cleaned to rawValue as text
@@ -968,6 +986,15 @@ mod tests {
         let excerpt =
             sanitize_description_excerpt("Agenda https://meet.google.com/abc-defg-hij token");
         assert_eq!(excerpt, "Agenda [link] token");
+    }
+
+    #[test]
+    fn apple_calendar_script_formats_dates_as_text() {
+        let script = apple_calendar_script(0, 7);
+        assert!(script.contains("calendarDateText(start date of ev)"));
+        assert!(script.contains("calendarDateText(end date of ev)"));
+        assert!(script.contains("on padCalendarNumber(rawNumber)"));
+        assert!(!script.contains("class isot"));
     }
 
     #[test]

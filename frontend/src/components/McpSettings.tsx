@@ -340,7 +340,7 @@ export function McpSettings() {
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Meetily agent skill pack</h3>
             <p className="mt-1 max-w-2xl text-sm text-gray-600">
-              Installs local workflow templates for meeting search, summary review, follow-up extraction, Linear issue drafting, and manual agent handoff. The pack stores MCP references only; it does not embed meeting content or secrets.
+              Installs local workflow templates for meeting recall, daily and weekly digests, next-meeting prep, open-loop review, role briefs, Linear issue drafting, and manual agent handoff. The pack stores MCP references only; it does not embed meeting content or secrets.
             </p>
           </div>
           <div className="flex gap-2">
