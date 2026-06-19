@@ -39,6 +39,7 @@ pub mod analytics;
 pub mod api;
 pub mod audio;
 pub mod calendar;
+pub mod reminders;
 pub mod config;
 pub mod console_utils;
 pub mod database;
@@ -777,6 +778,12 @@ pub fn run() {
             calendar::sync_calendar_events,
             calendar::list_upcoming_calendar_events,
             calendar::link_meeting_calendar_event,
+            reminders::list_reminder_providers,
+            reminders::get_reminder_settings,
+            reminders::connect_reminder_provider,
+            reminders::disconnect_reminder_provider,
+            reminders::sync_reminder_lists,
+            reminders::update_default_reminder_list,
             // Export commands
             export::export_get_settings,
             export::export_update_settings,

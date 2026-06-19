@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical, Bot, CalendarDays } from 'lucide-react';
+import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical, Bot, CalendarDays, ListTodo } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { motion } from 'framer-motion';
@@ -12,6 +12,7 @@ import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
 import { McpSettings } from '@/components/McpSettings';
 import { CalendarSettings } from '@/components/CalendarSettings';
+import { ReminderSettings } from '@/components/ReminderSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
@@ -23,6 +24,7 @@ const TABS = [
   { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
   { value: 'mcp', label: 'MCP', icon: Bot },
   { value: 'calendar', label: 'Calendar', icon: CalendarDays },
+  { value: 'reminders', label: 'Reminders', icon: ListTodo },
   { value: 'beta', label: 'Beta', icon: FlaskConical }
 ] as const;
 
@@ -133,6 +135,9 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="calendar" className="mt-6">
               <CalendarSettings />
+            </TabsContent>
+            <TabsContent value="reminders" className="mt-6">
+              <ReminderSettings />
             </TabsContent>
             <TabsContent value="beta" className="mt-6">
               <BetaSettings />
