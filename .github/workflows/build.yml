@@ -466,6 +466,7 @@ jobs:
           echo "Certificate imported: $CERT_ID"
 
       - name: Prepare Apple API key for notarization
+        id: apple-api-key
         if: contains(inputs.platform, 'macos') && inputs.sign-binaries
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -475,14 +476,14 @@ jobs:
           API_KEY_PATH="$RUNNER_TEMP/apple-api-key/AuthKey_${APPLE_API_KEY}.p8"
           echo "$APPLE_API_KEY_FILE_B64" | base64 --decode > "$API_KEY_PATH"
           chmod 600 "$API_KEY_PATH"
-          echo "APPLE_API_KEY_PATH=$API_KEY_PATH" >> "$GITHUB_ENV"
-          echo "API_PRIVATE_KEYS_DIR=$RUNNER_TEMP/apple-api-key" >> "$GITHUB_ENV"
+          echo "path=$API_KEY_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Verify Apple notarization credentials
         if: contains(inputs.platform, 'macos') && inputs.sign-binaries
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ${{ steps.apple-api-key.outputs.path }}
         run: |
           xcrun notarytool history \
             --key "$APPLE_API_KEY_PATH" \
@@ -604,10 +605,13 @@ jobs:
           APPLE_ID_PASSWORD: ''
           APPLE_PASSWORD: ''
           APPLE_TEAM_ID: ${{ inputs.sign-binaries && secrets.APPLE_TEAM_ID || '' }}
-          APPLE_API_KEY: ${{ inputs.sign-binaries && secrets.APPLE_API_KEY || '' }}
-          APPLE_API_ISSUER: ${{ inputs.sign-binaries && secrets.APPLE_API_ISSUER || '' }}
-          APPLE_API_KEY_PATH: ${{ inputs.sign-binaries && format('{0}/apple-api-key/AuthKey_{1}.p8', runner.temp, secrets.APPLE_API_KEY) || '' }}
-          API_PRIVATE_KEYS_DIR: ${{ inputs.sign-binaries && format('{0}/apple-api-key', runner.temp) || '' }}
+          # Tauri's internal notarization currently returns Apple 401 in CI even
+          # though the same key succeeds with xcrun notarytool. Keep Tauri on
+          # build/signing only and notarize the release DMG explicitly below.
+          APPLE_API_KEY: ''
+          APPLE_API_ISSUER: ''
+          APPLE_API_KEY_PATH: ''
+          API_PRIVATE_KEYS_DIR: ''
           APPLE_CERTIFICATE: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
@@ -625,6 +629,45 @@ jobs:
           releaseName: ${{ inputs.release-id && format('v{0}', inputs.release-version != '' && inputs.release-version || steps.get-version.outputs.version) || '' }}
           releaseId: ${{ inputs.release-id }}
           args: ${{ inputs.build-args }} ${{ steps.build-features.outputs.features }}
+
+      - name: Notarize and staple macOS DMG
+        if: contains(inputs.platform, 'macos') && inputs.sign-binaries
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ${{ steps.apple-api-key.outputs.path }}
+        run: |
+          set -euo pipefail
+          DMG_PATH=$(find "target/${{ inputs.target }}/${{ steps.build-profile.outputs.profile }}/bundle/dmg" -name "*.dmg" -print -quit)
+          if [[ -z "$DMG_PATH" ]]; then
+            echo "No DMG found to notarize"
+            exit 1
+          fi
+
+          echo "Submitting $DMG_PATH for notarization"
+          xcrun notarytool submit "$DMG_PATH" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+
+          echo "Stapling notarization ticket to $DMG_PATH"
+          xcrun stapler staple "$DMG_PATH"
+
+      - name: Replace notarized macOS DMG release asset
+        if: contains(inputs.platform, 'macos') && inputs.sign-binaries && inputs.release-id != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.release-version != '' && inputs.release-version || steps.get-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          DMG_PATH=$(find "target/${{ inputs.target }}/${{ steps.build-profile.outputs.profile }}/bundle/dmg" -name "*.dmg" -print -quit)
+          if [[ -z "$DMG_PATH" ]]; then
+            echo "No notarized DMG found to upload"
+            exit 1
+          fi
+
+          gh release upload "v${RELEASE_VERSION}" "$DMG_PATH" --clobber
 
       - name: Upload artifacts (macOS)
         if: inputs.upload-artifacts && contains(inputs.platform, 'macos')
