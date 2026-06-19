@@ -7,6 +7,12 @@ import {
   buildAgentContextPackage,
   serializeAgentContextPackage,
 } from './agentContextPackage';
+import {
+  AgentPromptTemplateId,
+  DEFAULT_AGENT_PROMPT_TEMPLATES,
+  getAgentPromptTemplate,
+  renderAgentPromptTemplate,
+} from './agentPromptTemplates';
 
 export type AgentTarget = AgentKind | 'manual';
 export type WorkflowMode = 'off' | 'ask' | 'auto';
@@ -31,6 +37,8 @@ export interface AgentWorkflowSettings {
   budgetPreset: AgentContextBudgetPreset;
   consent: AgentContextConsent;
   rules: AgentWorkflowRule[];
+  promptTemplateId: AgentPromptTemplateId;
+  promptTemplateOverrides: Record<string, string>;
   skillPackInstalled: boolean;
   skillPackVersion: string | null;
   updatedAt: string | null;
@@ -44,6 +52,7 @@ export interface AgentWorkflowRule {
   mode: WorkflowMode;
   enabledActions: WorkflowActionId[];
   budgetPreset: AgentContextBudgetPreset;
+  promptTemplateId: AgentPromptTemplateId;
   templateId: string;
   match: {
     titleKeywords: string[];
@@ -106,6 +115,7 @@ export interface PreparedAgentWorkflow {
 }
 
 export const MEETILY_SKILL_PACK_VERSION = '2026.06.19';
+export { DEFAULT_AGENT_PROMPT_TEMPLATES, getAgentPromptTemplate };
 
 export const AGENT_WORKFLOW_ACTIONS: Array<{
   id: WorkflowActionId;
@@ -246,6 +256,8 @@ const defaultSettings: AgentWorkflowSettings = {
   budgetPreset: 'standard',
   consent: defaultConsent,
   rules: [],
+  promptTemplateId: 'codex-implementation-handoff',
+  promptTemplateOverrides: {},
   skillPackInstalled: false,
   skillPackVersion: null,
   updatedAt: null,
@@ -277,6 +289,7 @@ function sanitizeSettings(value: Partial<AgentWorkflowSettings> | null | undefin
   const allowedAgents = new Set<AgentTarget>(['claude', 'codex', 'cursor', 'manual']);
   const allowedModes = new Set<WorkflowMode>(['off', 'ask', 'auto']);
   const allowedBudgets = new Set<AgentContextBudgetPreset>(['minimal', 'standard', 'detailed', 'custom']);
+  const allowedPromptTemplates = new Set(DEFAULT_AGENT_PROMPT_TEMPLATES.map((template) => template.id));
   const enabledActions = Array.isArray(value?.enabledActions)
     ? value.enabledActions.filter((action): action is WorkflowActionId => allowedActions.has(action as WorkflowActionId))
     : defaultSettings.enabledActions;
@@ -295,6 +308,16 @@ function sanitizeSettings(value: Partial<AgentWorkflowSettings> | null | undefin
     ...defaultConsent,
     ...(value?.consent ?? {}),
   };
+  const promptTemplateId = value?.promptTemplateId && allowedPromptTemplates.has(value.promptTemplateId)
+    ? value.promptTemplateId
+    : defaultSettings.promptTemplateId;
+  const promptTemplateOverrides = value?.promptTemplateOverrides && typeof value.promptTemplateOverrides === 'object'
+    ? Object.fromEntries(
+      Object.entries(value.promptTemplateOverrides)
+        .filter(([key, override]) => allowedPromptTemplates.has(key as AgentPromptTemplateId) && typeof override === 'string')
+        .map(([key, override]) => [key, String(override).slice(0, 20000)])
+    )
+    : {};
 
   const rules = Array.isArray(value?.rules)
     ? value.rules.map((rule, index): AgentWorkflowRule => {
@@ -309,6 +332,7 @@ function sanitizeSettings(value: Partial<AgentWorkflowSettings> | null | undefin
         mode: rule.mode && allowedModes.has(rule.mode) ? rule.mode : mode,
         enabledActions: ruleActions.length ? ruleActions : enabledActions,
         budgetPreset: rule.budgetPreset && allowedBudgets.has(rule.budgetPreset) ? rule.budgetPreset : budgetPreset,
+        promptTemplateId: rule.promptTemplateId && allowedPromptTemplates.has(rule.promptTemplateId) ? rule.promptTemplateId : promptTemplateId,
         templateId: typeof rule.templateId === 'string' ? rule.templateId.trim() : '',
         match: {
           titleKeywords: normalizeKeywords(rule.match?.titleKeywords),
@@ -331,6 +355,8 @@ function sanitizeSettings(value: Partial<AgentWorkflowSettings> | null | undefin
     budgetPreset,
     consent,
     rules,
+    promptTemplateId,
+    promptTemplateOverrides,
     skillPackInstalled: Boolean(value?.skillPackInstalled),
     skillPackVersion: value?.skillPackVersion ?? null,
     updatedAt: value?.updatedAt ?? null,
@@ -368,6 +394,7 @@ function mergeRuleSettings(settings: AgentWorkflowSettings, rule: AgentWorkflowR
     mode: rule.mode,
     enabledActions: rule.enabledActions,
     budgetPreset: rule.budgetPreset,
+    promptTemplateId: rule.promptTemplateId,
     consent: rule.consent,
   };
 }
@@ -408,6 +435,7 @@ export function resolveAgentWorkflowRule(
     `Agent: ${effectiveSettings.defaultAgent}.`,
     `Mode: ${effectiveSettings.mode}.`,
     `Budget: ${effectiveSettings.budgetPreset}.`,
+    `Template: ${getAgentPromptTemplate(effectiveSettings.promptTemplateId).label}.`,
     `Actions: ${actionLabels || 'Review summary'}.`,
   ].join(' ');
 
@@ -526,7 +554,13 @@ function actionInstruction(actionId: WorkflowActionId): string {
   }
 }
 
-export function buildLinearFollowUpTemplate(context: AgentWorkflowContext, actions: WorkflowActionId[]): string {
+export function buildLinearFollowUpTemplate(
+  context: AgentWorkflowContext,
+  actions: WorkflowActionId[],
+  agent: AgentTarget = 'manual',
+  templateId: AgentPromptTemplateId = defaultSettings.promptTemplateId,
+  promptTemplateOverrides: Record<string, string> = {}
+): string {
   const actionLabels = actions
     .map((actionId) => AGENT_WORKFLOW_ACTIONS.find((action) => action.id === actionId)?.label)
     .filter(Boolean)
@@ -535,42 +569,23 @@ export function buildLinearFollowUpTemplate(context: AgentWorkflowContext, actio
     .map((actionId) => `- ${actionInstruction(actionId)}`)
     .join('\n');
 
-  return [
-    'You are helping process a Meetily meeting.',
-    '',
-    `Meeting: ${context.meetingTitle}`,
-    `Meeting ID: ${context.meetingId}`,
-    context.mcpUrl ? `Local MCP endpoint: ${context.mcpUrl}` : 'Local MCP endpoint: not enabled',
-    `Requested workflows: ${actionLabels || 'Review summary'}`,
-    '',
-    'Privacy and safety rules:',
-    '- Use only the summary/action items below or explicitly authorized MCP reads.',
-    '- Do not request screenshots, raw transcript, or private files unless the user approves.',
-    '- Do not create Linear issues automatically.',
-    '- For Linear follow-ups, propose drafts first and wait for explicit user approval.',
-    '',
-    'If proposing Linear issues, return this structure:',
-    '- title',
-    '- description with concise meeting context',
-    '- owner if known',
-    '- priority suggestion',
-    '- confidence',
-    '- source meeting reference',
-    '',
-    'Workflow instructions:',
-    actionInstructions || '- Review the meeting summary and produce concise follow-up.',
-    '',
-    'Useful MCP workflows when authorized:',
-    '- meetily_get_latest_meeting: latest meeting context',
-    '- meetily_ask_meetings: answer questions like "what did we say on the last call with X?"',
-    '- meetily_get_daily_digest and meetily_get_weekly_digest: personal productivity digests',
-    '- meetily_get_open_loops: unresolved actions, questions, risks, and confirmations',
-    '- meetily_prepare_next_meeting: preparation brief from prior related meetings',
-    '- meetily_prepare_role_brief: product, engineering, sales, hiring, manager, founder, or customer-success brief',
-    '',
-    'Source-cited context package:',
-    buildSerializedContextPackage(context),
-  ].join('\n');
+  return renderAgentPromptTemplate(templateId, {
+    meetingTitle: context.meetingTitle,
+    meetingId: context.meetingId,
+    mcpUrl: context.mcpUrl,
+    agent,
+    actions,
+    actionInstructions: actionInstructions || '- Review the meeting summary and produce concise follow-up.',
+    contextPackage: [
+      `Meeting: ${context.meetingTitle}`,
+      `Meeting ID: ${context.meetingId}`,
+      context.mcpUrl ? `Local MCP endpoint: ${context.mcpUrl}` : 'Local MCP endpoint: not enabled',
+      `Requested workflows: ${actionLabels || 'Review summary'}`,
+      '',
+      'Source-cited context package:',
+      buildSerializedContextPackage(context),
+    ].join('\n'),
+  }, promptTemplateOverrides);
 }
 
 export function prepareAgentWorkflow(
@@ -610,7 +625,13 @@ export function prepareAgentWorkflow(
     return { run, prompt: '', canRun: false, reason: run.message };
   }
 
-  const prompt = buildLinearFollowUpTemplate(effectiveContext, effectiveSettings.enabledActions);
+  const prompt = buildLinearFollowUpTemplate(
+    effectiveContext,
+    effectiveSettings.enabledActions,
+    effectiveSettings.defaultAgent,
+    effectiveSettings.promptTemplateId,
+    effectiveSettings.promptTemplateOverrides
+  );
   const run: AgentWorkflowRun = {
     ...baseRun,
     status: effectiveSettings.mode === 'ask' ? 'waitingForApproval' : 'prepared',

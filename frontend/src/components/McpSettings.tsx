@@ -7,6 +7,7 @@ import { mcpService, AgentKind, AgentSetupStatus, McpAuditEvent, McpClient, McpS
 import {
   AGENT_SUPPORT_MATRIX,
   AGENT_WORKFLOW_ACTIONS,
+  DEFAULT_AGENT_PROMPT_TEMPLATES,
   AgentWorkflowRule,
   AgentTarget,
   AgentWorkflowRun,
@@ -17,10 +18,12 @@ import {
   installMeetilySkillPack,
   listAgentWorkflowRuns,
   MEETILY_SKILL_PACK_VERSION,
+  getAgentPromptTemplate,
   removeMeetilySkillPack,
   resolveAgentWorkflowRule,
   saveAgentWorkflowSettings,
 } from "@/services/agentWorkflowService"
+import { AgentPromptTemplateId } from "@/services/agentPromptTemplates"
 import { AgentContextBudgetPreset, AgentContextConsent } from "@/services/agentContextPackage"
 
 function statusText(status: McpStatus | null): string {
@@ -235,6 +238,20 @@ export function McpSettings() {
     }))
   }
 
+  const handlePromptTemplateChange = (promptTemplateId: AgentPromptTemplateId) => {
+    updateWorkflowSettings((current) => ({ ...current, promptTemplateId }))
+  }
+
+  const handlePromptTemplateOverride = (templateId: AgentPromptTemplateId, body: string) => {
+    updateWorkflowSettings((current) => ({
+      ...current,
+      promptTemplateOverrides: {
+        ...current.promptTemplateOverrides,
+        [templateId]: body,
+      },
+    }))
+  }
+
   const handleAddRule = () => {
     updateWorkflowSettings((current) => ({
       ...current,
@@ -248,6 +265,7 @@ export function McpSettings() {
           mode: current.mode === "off" ? "ask" : current.mode,
           enabledActions: current.enabledActions,
           budgetPreset: current.budgetPreset,
+          promptTemplateId: current.promptTemplateId,
           templateId: "",
           match: {
             titleKeywords: [],
@@ -305,6 +323,8 @@ export function McpSettings() {
     summary: { markdown: "Preview summary" },
     mcpUrl: status?.url ?? null,
   }, status, agentStatuses, workflowSettings)
+  const selectedPromptTemplate = getAgentPromptTemplate(workflowSettings.promptTemplateId)
+  const selectedPromptTemplateBody = workflowSettings.promptTemplateOverrides[selectedPromptTemplate.id] ?? selectedPromptTemplate.body
 
   return (
     <div className="space-y-6">
@@ -559,12 +579,41 @@ export function McpSettings() {
             <p className="mt-2 text-xs text-gray-600">Controls how much cited meeting context is sent to the agent handoff.</p>
           </div>
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <label className="text-sm font-medium text-gray-900" htmlFor="prompt-template">Prompt template</label>
+            <select
+              id="prompt-template"
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+              value={workflowSettings.promptTemplateId}
+              onChange={(event) => handlePromptTemplateChange(event.target.value as AgentPromptTemplateId)}
+              disabled={!workflowSettings.skillPackInstalled}
+            >
+              {DEFAULT_AGENT_PROMPT_TEMPLATES.map((template) => (
+                <option key={template.id} value={template.id}>{template.label}</option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs text-gray-600">{selectedPromptTemplate.description}</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
             <div className="text-sm font-medium text-gray-900">Rule preview</div>
             <p className="mt-2 text-sm text-gray-600">{workflowPreview.preview}</p>
             {workflowPreview.blockedReason && (
               <p className="mt-2 text-xs text-amber-800">{workflowPreview.blockedReason}</p>
             )}
           </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <label className="text-sm font-medium text-gray-900" htmlFor="prompt-template-body">Prompt template preview</label>
+          <textarea
+            id="prompt-template-body"
+            className="mt-2 min-h-56 w-full resize-y rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-gray-700"
+            value={selectedPromptTemplateBody}
+            disabled={!workflowSettings.skillPackInstalled}
+            onChange={(event) => handlePromptTemplateOverride(selectedPromptTemplate.id, event.target.value)}
+          />
+          <p className="mt-2 text-xs text-gray-600">
+            Supports placeholders like {"{{contextPackage}}"}, {"{{safetyBlock}}"}, {"{{mcpBlock}}"}, and {"{{actionInstructions}}"}.
+          </p>
         </div>
 
         <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
@@ -656,6 +705,18 @@ export function McpSettings() {
                       <option value="minimal">Minimal</option>
                       <option value="standard">Standard</option>
                       <option value="detailed">Detailed</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-medium text-gray-700">
+                    Prompt template
+                    <select
+                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      value={rule.promptTemplateId}
+                      onChange={(event) => updateRule(rule.id, (current) => ({ ...current, promptTemplateId: event.target.value as AgentPromptTemplateId }))}
+                    >
+                      {DEFAULT_AGENT_PROMPT_TEMPLATES.map((template) => (
+                        <option key={template.id} value={template.id}>{template.label}</option>
+                      ))}
                     </select>
                   </label>
                 </div>
