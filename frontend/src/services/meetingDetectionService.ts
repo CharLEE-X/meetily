@@ -6,6 +6,7 @@ import {
   NativeMeetingActivitySignals,
   buildAmbientMeetingCandidate,
 } from './meetingDetectionSignals';
+import { CalendarEvent, CalendarSyncRequest, CalendarSyncResult, calendarService } from './calendarService';
 
 export type MeetingDetectionMode = 'disabled' | 'prompt' | 'autoOpen';
 export type MeetingProvider = 'google-meet' | 'zoom' | 'teams' | 'unknown';
@@ -59,6 +60,7 @@ export interface MeetingJoinCandidate {
 
 const SETTINGS_KEY = 'meetily.meetingDetectionSettings';
 const EVENTS_KEY = 'meetily.approvedMeetingEvents';
+const SELECTED_RECORDING_EVENT_KEY = 'meetily.selectedCalendarRecordingEvent';
 const DISMISSED_KEY = 'meetily.dismissedMeetingCandidates';
 const AUTO_OPENED_KEY = 'meetily.autoOpenedMeetingCandidates';
 const TRACKING_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -162,11 +164,72 @@ export function saveApprovedCalendarEvents(events: ApprovedCalendarEvent[]) {
   writeJson(EVENTS_KEY, events);
 }
 
+export function saveSyncedCalendarEvents(events: ApprovedCalendarEvent[]) {
+  const nonCalendarEvents = getApprovedCalendarEvents().filter((event) => event.source !== 'calendar');
+  writeJson(EVENTS_KEY, [...events, ...nonCalendarEvents].slice(0, 50));
+}
+
 export function addApprovedCalendarEvent(event: ApprovedCalendarEvent): ApprovedCalendarEvent[] {
   const events = getApprovedCalendarEvents();
   const nextEvents = [event, ...events.filter((item) => !(item.id === event.id && item.calendarId === event.calendarId))];
   saveApprovedCalendarEvents(nextEvents.slice(0, 50));
   return getApprovedCalendarEvents();
+}
+
+export function calendarEventToApprovedEvent(event: CalendarEvent): ApprovedCalendarEvent {
+  return {
+    id: event.id,
+    calendarId: event.calendarSourceId,
+    calendarName: event.provider,
+    source: 'calendar',
+    provider: event.meetingProvider,
+    title: event.title,
+    description: event.descriptionExcerpt,
+    location: event.location,
+    startAt: event.startsAt,
+    endAt: event.endsAt,
+    attendees: event.attendeeNames ?? [],
+    meetingUrl: event.meetingUrl,
+    updatedAt: event.updatedAt,
+  };
+}
+
+export async function syncApprovedCalendarEventsFromProvider(
+  request: CalendarSyncRequest = { provider: 'apple' },
+  limit = 25,
+): Promise<{ result: CalendarSyncResult; events: ApprovedCalendarEvent[] }> {
+  const result = await calendarService.syncEvents(request);
+  const upcomingEvents = await calendarService.listUpcomingEvents(limit);
+  const approvedEvents = upcomingEvents.map(calendarEventToApprovedEvent);
+  saveSyncedCalendarEvents(approvedEvents);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(MEETING_DETECTION_SETTINGS_EVENT));
+  }
+  return { result, events: approvedEvents };
+}
+
+export function selectCalendarEventForRecording(event: ApprovedCalendarEvent) {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.setItem(SELECTED_RECORDING_EVENT_KEY, JSON.stringify(event));
+}
+
+export function getSelectedCalendarEventForRecording(): ApprovedCalendarEvent | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(SELECTED_RECORDING_EVENT_KEY);
+    if (!raw) return null;
+    const event = JSON.parse(raw) as ApprovedCalendarEvent;
+    if (!event.id || !event.title || !event.startAt || !event.endAt) return null;
+    return event;
+  } catch (error) {
+    console.warn('Failed to read selected calendar event:', error);
+    return null;
+  }
+}
+
+export function clearSelectedCalendarEventForRecording() {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.removeItem(SELECTED_RECORDING_EVENT_KEY);
 }
 
 function timeToMinutes(value: string): number {
@@ -202,6 +265,30 @@ export function detectMeetingProvider(url: string): MeetingProvider {
 
 function candidateId(event: ApprovedCalendarEvent, meetingUrl: string): string {
   return `${event.calendarId}:${event.id}:${meetingUrl}`;
+}
+
+export function buildMeetingCandidateFromEvent(event: ApprovedCalendarEvent, now = new Date()): MeetingJoinCandidate {
+  const meetingUrl = extractMeetingUrl(event);
+  const startMs = Date.parse(event.startAt);
+  const endMs = Date.parse(event.endAt);
+  const safeStartMs = Number.isFinite(startMs) ? startMs : now.getTime();
+  const safeEndMs = Number.isFinite(endMs) ? endMs : safeStartMs;
+
+  return {
+    id: meetingUrl ? candidateId(event, meetingUrl) : `${event.calendarId}:${event.id}:selected`,
+    eventId: event.id,
+    calendarId: event.calendarId,
+    calendarName: event.calendarName ?? null,
+    title: event.title,
+    startAt: event.startAt,
+    endAt: event.endAt,
+    attendees: event.attendees ?? [],
+    meetingUrl,
+    provider: meetingUrl ? detectMeetingProvider(meetingUrl) : 'unknown',
+    source: event.source,
+    minutesUntilStart: Math.round((safeStartMs - now.getTime()) / 60000),
+    isActive: safeStartMs <= now.getTime() && now.getTime() <= safeEndMs,
+  };
 }
 
 function pruneTrackingMap(key: string): Record<string, string> {

@@ -8,7 +8,12 @@ import { recordingService } from '@/services/recordingService';
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
 import { toast } from 'sonner';
-import { MeetingJoinCandidate } from '@/services/meetingDetectionService';
+import {
+  MeetingJoinCandidate,
+  buildMeetingCandidateFromEvent,
+  clearSelectedCalendarEventForRecording,
+  getSelectedCalendarEventForRecording,
+} from '@/services/meetingDetectionService';
 
 interface UseRecordingStartReturn {
   handleRecordingStart: (candidate?: MeetingJoinCandidate) => Promise<void>;
@@ -109,21 +114,23 @@ export function useRecordingStart(
 
       console.log('Parakeet ready - setting up meeting title and state');
 
-      const meetingName = candidate?.title || generateMeetingTitle();
+      const selectedCalendarEvent = candidate ? null : getSelectedCalendarEventForRecording();
+      const recordingCandidate = candidate ?? (selectedCalendarEvent ? buildMeetingCandidateFromEvent(selectedCalendarEvent) : undefined);
+      const meetingName = recordingCandidate?.title || generateMeetingTitle();
       setMeetingTitle(meetingName);
-      if (candidate) {
+      if (recordingCandidate) {
         sessionStorage.setItem('meetingDetection:selectedCandidate', JSON.stringify({
-          eventId: candidate.eventId,
-          calendarId: candidate.calendarId,
-          calendarName: candidate.calendarName,
-          meetingUrl: candidate.meetingUrl,
-          provider: candidate.provider,
-          source: candidate.source,
-          confidence: candidate.confidence,
-          reasons: candidate.reasons,
-          startAt: candidate.startAt,
-          endAt: candidate.endAt,
-          attendees: candidate.attendees,
+          eventId: recordingCandidate.eventId,
+          calendarId: recordingCandidate.calendarId,
+          calendarName: recordingCandidate.calendarName,
+          meetingUrl: recordingCandidate.meetingUrl,
+          provider: recordingCandidate.provider,
+          source: recordingCandidate.source,
+          confidence: recordingCandidate.confidence,
+          reasons: recordingCandidate.reasons,
+          startAt: recordingCandidate.startAt,
+          endAt: recordingCandidate.endAt,
+          attendees: recordingCandidate.attendees,
         }));
       } else {
         sessionStorage.removeItem('meetingDetection:selectedCandidate');
@@ -147,6 +154,9 @@ export function useRecordingStart(
       setIsRecording(true); // This will also update the sidebar via the useEffect
       clearTranscripts(); // Clear previous transcripts when starting new recording
       setIsMeetingActive(true);
+      if (selectedCalendarEvent) {
+        clearSelectedCalendarEventForRecording();
+      }
       Analytics.trackButtonClick('start_recording', 'home_page');
 
       // Show recording notification if enabled
