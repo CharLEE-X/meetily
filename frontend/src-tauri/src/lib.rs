@@ -38,6 +38,7 @@ pub(crate) use perf_trace;
 pub mod analytics;
 pub mod api;
 pub mod audio;
+pub mod calendar;
 pub mod config;
 pub mod console_utils;
 pub mod database;
@@ -768,6 +769,14 @@ pub fn run() {
             mcp::mcp_setup_all_agents,
             // Meeting detection commands
             meeting_detection::get_meeting_activity_signals,
+            // Calendar integration commands
+            calendar::list_calendar_providers,
+            calendar::get_calendar_settings,
+            calendar::connect_calendar_provider,
+            calendar::disconnect_calendar_provider,
+            calendar::sync_calendar_events,
+            calendar::list_upcoming_calendar_events,
+            calendar::link_meeting_calendar_event,
             // Export commands
             export::export_get_settings,
             export::export_update_settings,
