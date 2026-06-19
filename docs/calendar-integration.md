@@ -13,7 +13,7 @@ are stable.
 
 | Phase | Provider | Purpose | Notes |
 | --- | --- | --- | --- |
-| 1 | Apple Calendar on macOS | Read selected local calendars and create optional linked events for recorded meetings. | Use EventKit through a small native macOS bridge. EventKit is Apple's public API for calendar access. Sandboxed macOS builds need `com.apple.security.personal-information.calendars` and calendar usage strings. |
+| 1 | Apple Calendar on macOS | Read local calendar metadata for upcoming meeting context and selected recording metadata. | The first shipped slice uses the local macOS Calendar automation bridge while the provider-neutral model and UI settle. A later hardening pass should replace this with EventKit, Apple's public API for calendar access. Sandboxed macOS builds using the current bridge need Apple Events automation permission for Calendar; EventKit builds need the calendar personal-information entitlement and usage strings. |
 | 2 | ICS subscription/import | Add read-only events from user-provided calendar feeds or files. | No OAuth, no writes, and useful for teams that publish meeting calendars. Store feed URL only when the user opts in. |
 | 3 | Google Calendar | Add direct cloud sync when desktop OAuth callback handling is approved. | Keep provider-specific tokens out of the normalized event table and store them in provider settings with revocation. |
 
@@ -27,12 +27,15 @@ without changing meeting detection, recording metadata, or artifact links.
 Calendar sync is disabled by default. Users must opt in from Settings, select a
 provider, and select which calendars are allowed.
 
-Apple Calendar should use EventKit rather than AppleScript for event reads and
-writes. EventKit gives a narrower public API surface for events and calendars;
-AppleScript should be reserved for Apple Notes or last-resort automation paths.
-On current macOS versions, the app must distinguish full event access from
-write-only event access. Read sync requires full access; creating Meetily-owned
-events can use a write-only path if the implementation supports it.
+Apple Calendar should move to EventKit for hardened event reads and writes.
+EventKit gives a narrower public API surface for events and calendars; the
+current macOS Calendar automation bridge is a temporary first local-provider
+slice and is limited to read-only event metadata sync. AppleScript should be
+reserved for Apple Notes, this Calendar bootstrap bridge, or last-resort
+automation paths. On current macOS versions, the app must distinguish full event
+access from write-only event access. Read sync requires full access; creating
+Meetily-owned events can use a write-only path if the implementation supports
+it.
 
 Permission states:
 
@@ -170,8 +173,8 @@ Default sync window:
 
 * Look back 1 day so late recordings can still match a recent event.
 * Look ahead 14 days for upcoming prompts.
-* Refresh on app start, when Settings opens, when the user clicks Sync now, and
-  periodically every 15 minutes while the app is running.
+* Refresh when Settings opens and when the user clicks Sync now in the shipped
+  UI. App-start and periodic background sync are still planned.
 * Purge event rows older than 30 days unless they are linked to a Meetily
   meeting; linked rows retain only the fields needed for the link and audit
   status after they leave the active sync window.
@@ -248,19 +251,21 @@ Rules:
 * MCP calendar exposure requires its own future scope and Settings toggle; the
   initial calendar Tauri commands are for the app UI only.
 * Provider disconnect invalidates sync cursors/tokens and hides stale prompts.
-* Provider disconnect deletes unlinked `calendar_events`, clears selected
-  calendar sources, and retains only minimal `meeting_calendar_links` rows needed
-  to show that a meeting was previously linked. User-created external calendar
-  events are not deleted without explicit confirmation.
+* Provider disconnect marks cached calendar events revoked, clears selected
+  calendar prompts, and retains only local link rows needed to show that a
+  meeting was previously linked. User-created external calendar events are not
+  deleted without explicit confirmation.
 * Meeting deletion removes local `meeting_calendar_links`; it does not silently
   delete external calendar events without a separate confirmation.
 
 ## Implementation References
 
-Planned module boundaries, to be created by implementation issues:
+Implemented module boundaries:
 
-* Rust: `frontend/src-tauri/src/calendar/` for provider bridges, sync, storage,
+* Rust: `frontend/src-tauri/src/calendar.rs` for provider bridge, sync, storage,
   and Tauri commands.
+* Database migration:
+  `frontend/src-tauri/migrations/20260102000000_add_calendar_integration_tables.sql`.
 * Frontend service: `frontend/src/services/calendarService.ts`.
 * Settings UI: `frontend/src/components/CalendarSettings.tsx` and
   `frontend/src/app/settings/page.tsx`.
@@ -275,11 +280,14 @@ Initial Tauri commands:
 
 * `list_calendar_providers`
 * `get_calendar_settings`
-* `update_calendar_settings`
 * `connect_calendar_provider`
 * `disconnect_calendar_provider`
-* `list_calendar_sources`
 * `sync_calendar_events`
 * `list_upcoming_calendar_events`
 * `link_meeting_calendar_event`
+
+Planned commands for later slices:
+
+* `update_calendar_settings`
+* `list_calendar_sources`
 * `create_or_update_meeting_calendar_event`

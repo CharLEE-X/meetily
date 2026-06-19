@@ -115,6 +115,7 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **Real-time Transcription:** Get a live transcript of your meeting as it happens.
 - **AI-Powered Summaries:** Generate summaries of your meetings using powerful language models.
 - **Advanced Exports:** Export completed meetings as Markdown, PDF, or DOCX with selectable sections and local auto-export preferences. See [Advanced Exports](docs/advanced-exports.md).
+- **Calendar Integration:** Connect Apple Calendar on macOS, sync upcoming event metadata locally, and select an event to prefill the next recording title and meeting-detection metadata. See [Calendar Integration Release Notes](docs/calendar-integration-release-notes.md).
 - **Speaker Labels:** Detect local speaker labels from transcript timing/source metadata, review them in the meeting transcript, and rename labels as user-confirmed corrections.
 - **Optional Meeting Screenshots:** On macOS, periodic screenshots can be enabled in Settings and must be confirmed for each meeting before capture starts. Screenshots stay local and can be deleted from the meeting timeline. See [Speaker Identification and Screenshots Release Notes](docs/speaker-identification-release-notes.md).
 - **Multi-Platform:** Works on macOS, Windows, and Linux.
@@ -251,7 +252,8 @@ Planned feature areas:
 - **Calendar integration:** selected-calendar sync that stores minimal event
   metadata, can be disconnected, starts with Apple Calendar on macOS, and keeps
   a provider-neutral path for future ICS and Google Calendar support. See
-  [Calendar Integration](docs/calendar-integration.md).
+  [Calendar Integration](docs/calendar-integration.md) and
+  [Calendar Integration Release Notes](docs/calendar-integration-release-notes.md).
 - **Apple Notes export:** opt-in macOS automation with destination preview before
   writing meeting content.
 - **Local MCP server:** opt-in local agent access with trusted clients, scoped
@@ -287,7 +289,7 @@ Speaker diarization is planned for mid-June, bringing automatic speaker separati
 - **Auto-detect and Join Meetings**: Automatic meeting detection and joining
 - **Speaker Identification**: Distinguish between speakers automatically *(Coming Soon)*
 - **Chat with Meetings**: AI-powered meeting insights and queries *(Coming Soon)*
-- **Calendar Integration**: Seamless integration with your calendar *(Coming Soon)*
+- **Calendar Integration**: Calendar-backed meeting context, now started in the Community fork with local Apple Calendar sync on macOS
 - **Self-Hosted Deployment**: Deploy on your own infrastructure for teams
 - **GDPR Compliance Built-In**: Privacy by design architecture with complete audit trails
 - **Priority Support**: Dedicated support for PRO users
