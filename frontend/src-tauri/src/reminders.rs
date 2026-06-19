@@ -135,6 +135,47 @@ pub struct ReminderDraftUpdateRequest {
     pub list_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateReminderRequest {
+    pub meeting_id: String,
+    pub draft_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedReminderLink {
+    pub id: String,
+    pub meeting_id: String,
+    pub draft_id: Option<String>,
+    pub dedupe_key: String,
+    pub provider: String,
+    pub provider_reminder_id: String,
+    pub list_id: Option<String>,
+    pub title: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderCreationFailure {
+    pub draft_id: String,
+    pub title: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateReminderResult {
+    pub meeting_id: String,
+    pub created: Vec<CreatedReminderLink>,
+    pub skipped: Vec<CreatedReminderLink>,
+    pub failed: Vec<ReminderCreationFailure>,
+}
+
 #[tauri::command]
 pub async fn list_reminder_providers() -> Result<Vec<ReminderProviderInfo>, String> {
     Ok(provider_infos())
@@ -374,16 +415,32 @@ pub async fn dismiss_reminder_draft(
     set_draft_status(state.db_manager.pool(), &draft_id, "dismissed").await
 }
 
+#[tauri::command]
+pub async fn create_selected_reminders(
+    state: State<'_, AppState>,
+    request: CreateReminderRequest,
+) -> Result<CreateReminderResult, String> {
+    create_reminders_for_drafts(state.db_manager.pool(), request).await
+}
+
+#[tauri::command]
+pub async fn list_created_reminders(
+    state: State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Vec<CreatedReminderLink>, String> {
+    list_created_links(state.db_manager.pool(), &meeting_id).await
+}
+
 fn provider_infos() -> Vec<ReminderProviderInfo> {
     vec![ReminderProviderInfo {
         provider: PROVIDER_APPLE_REMINDERS.to_string(),
         label: APPLE_REMINDERS_LABEL.to_string(),
         available: cfg!(target_os = "macos"),
         supports_list_discovery: cfg!(target_os = "macos"),
-        supports_create: false,
+        supports_create: cfg!(target_os = "macos"),
         notes: Some(
             if cfg!(target_os = "macos") {
-                "Lists Apple Reminders destinations locally after the user grants permission. Reminder creation is not enabled in this slice."
+                "Creates selected follow-up reminders only after review and explicit confirmation."
             } else {
                 "Apple Reminders is available only on macOS."
             }
@@ -1485,6 +1542,342 @@ async fn get_draft_by_id(pool: &sqlx::SqlitePool, draft_id: &str) -> Result<Remi
     reminder_draft_from_row(&row)
 }
 
+async fn create_reminders_for_drafts(
+    pool: &sqlx::SqlitePool,
+    request: CreateReminderRequest,
+) -> Result<CreateReminderResult, String> {
+    if request.draft_ids.is_empty() {
+        return Err("Select at least one reminder draft.".to_string());
+    }
+    if !cfg!(target_os = "macos") {
+        return Err("Apple Reminders is available only on macOS.".to_string());
+    }
+
+    let account = get_account(pool, PROVIDER_APPLE_REMINDERS)
+        .await?
+        .ok_or_else(|| "Connect Apple Reminders before creating reminders.".to_string())?;
+    if account.status != "connected" {
+        return Err(
+            "Apple Reminders permission is required before creating reminders.".to_string(),
+        );
+    }
+
+    let meeting = crate::database::repositories::meeting::MeetingsRepository::get_meeting_metadata(
+        pool,
+        &request.meeting_id,
+    )
+    .await
+    .map_err(|err| format!("Failed to load meeting metadata: {}", err))?
+    .ok_or_else(|| "Meeting was not found.".to_string())?;
+
+    let mut created = Vec::new();
+    let mut skipped = Vec::new();
+    let mut failed = Vec::new();
+
+    for draft_id in request.draft_ids {
+        let draft = match get_draft_by_id(pool, &draft_id).await {
+            Ok(draft) => draft,
+            Err(error) => {
+                failed.push(ReminderCreationFailure {
+                    draft_id,
+                    title: "Unknown reminder".to_string(),
+                    error,
+                });
+                continue;
+            }
+        };
+
+        if draft.meeting_id != request.meeting_id {
+            failed.push(ReminderCreationFailure {
+                draft_id: draft.id,
+                title: draft.title,
+                error: "Reminder draft does not belong to this meeting.".to_string(),
+            });
+            continue;
+        }
+
+        if let Some(existing) =
+            get_created_link_by_dedupe(pool, &draft.meeting_id, &draft.dedupe_key).await?
+        {
+            skipped.push(existing);
+            continue;
+        }
+
+        let list_id = draft
+            .list_id
+            .as_deref()
+            .or(account.default_list_id.as_deref())
+            .ok_or_else(|| {
+                "Choose a default Apple Reminders list before creating reminders.".to_string()
+            })?;
+        let list = get_list_by_id(pool, list_id).await?;
+        let notes = reminder_notes(&meeting.title, &meeting.id, draft.notes.as_deref());
+
+        match create_apple_reminder(
+            &list.provider_list_id,
+            &draft.title,
+            &notes,
+            draft.due_at.as_deref(),
+            draft.priority,
+        ) {
+            Ok(provider_reminder_id) => {
+                match save_created_link(pool, &draft, &list.id, &provider_reminder_id).await {
+                    Ok(link) => {
+                        if let Err(error) = set_draft_status(pool, &draft.id, "created").await {
+                            log::warn!("Failed to mark reminder draft as created: {}", error);
+                        }
+                        created.push(link);
+                    }
+                    Err(error) => failed.push(ReminderCreationFailure {
+                        draft_id: draft.id,
+                        title: draft.title,
+                        error,
+                    }),
+                }
+            }
+            Err(error) => failed.push(ReminderCreationFailure {
+                draft_id: draft.id,
+                title: draft.title,
+                error,
+            }),
+        }
+    }
+
+    Ok(CreateReminderResult {
+        meeting_id: request.meeting_id,
+        created,
+        skipped,
+        failed,
+    })
+}
+
+fn reminder_notes(meeting_title: &str, meeting_id: &str, draft_notes: Option<&str>) -> String {
+    let mut lines = Vec::new();
+    if let Some(notes) = draft_notes.map(str::trim).filter(|value| !value.is_empty()) {
+        lines.push(notes.to_string());
+    }
+    lines.push(format!("Source: Meetily meeting \"{}\"", meeting_title));
+    lines.push(format!("Meeting ID: {}", meeting_id));
+    lines.join("\n\n")
+}
+
+fn create_apple_reminder(
+    provider_list_id: &str,
+    title: &str,
+    notes: &str,
+    due_at: Option<&str>,
+    priority: Option<i64>,
+) -> Result<String, String> {
+    let script = apple_reminder_create_script();
+    let due_text = match due_at.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => apple_script_due_date(value).ok_or_else(|| {
+            "Reminder due date could not be converted for Apple Reminders.".to_string()
+        })?,
+        None => String::new(),
+    };
+    let priority_text = priority.map(|value| value.to_string()).unwrap_or_default();
+    let output = Command::new("osascript")
+        .args([
+            "-e",
+            &script,
+            "--",
+            provider_list_id,
+            title,
+            notes,
+            &due_text,
+            &priority_text,
+        ])
+        .output()
+        .map_err(|err| format!("Failed to run Apple Reminders creation: {}", err))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Apple Reminders could not create this reminder.".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    let reminder_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if reminder_id.is_empty() {
+        return Err("Apple Reminders did not return a reminder id.".to_string());
+    }
+    Ok(reminder_id)
+}
+
+fn apple_script_due_date(value: &str) -> Option<String> {
+    let date = chrono::DateTime::parse_from_rfc3339(value).ok()?;
+    Some(
+        date.with_timezone(&chrono::Local)
+            .format("%A, %B %-d, %Y at %-I:%M:%S %p")
+            .to_string(),
+    )
+}
+
+fn apple_reminder_create_script() -> String {
+    r#"on run argv
+    set targetListId to item 1 of argv
+    set reminderTitle to item 2 of argv
+    set reminderNotes to item 3 of argv
+    set dueText to item 4 of argv
+    set priorityText to item 5 of argv
+    tell application id "com.apple.reminders"
+        set targetList to missing value
+        repeat with reminderList in lists
+            try
+                set candidateId to id of reminderList as text
+                if candidateId is targetListId then
+                    set targetList to reminderList
+                    exit repeat
+                end if
+            end try
+        end repeat
+        if targetList is missing value then error "Apple Reminders list was not found."
+        set newReminder to make new reminder at end of reminders of targetList with properties {name:reminderTitle, body:reminderNotes}
+        if priorityText is not "" then
+            try
+                set priority of newReminder to priorityText as integer
+            end try
+        end if
+        if dueText is not "" then
+            try
+                set due date of newReminder to date dueText
+            end try
+        end if
+        return id of newReminder as text
+    end tell
+end run
+"#
+    .to_string()
+}
+
+async fn save_created_link(
+    pool: &sqlx::SqlitePool,
+    draft: &ReminderDraft,
+    list_id: &str,
+    provider_reminder_id: &str,
+) -> Result<CreatedReminderLink, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO reminder_created_links
+            (id, meeting_id, draft_id, dedupe_key, provider, provider_reminder_id, list_id, title, status, created_at, updated_at, last_error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?, NULL)
+         ON CONFLICT(meeting_id, dedupe_key) DO UPDATE SET
+            updated_at = reminder_created_links.updated_at",
+    )
+    .bind(&id)
+    .bind(&draft.meeting_id)
+    .bind(&draft.id)
+    .bind(&draft.dedupe_key)
+    .bind(PROVIDER_APPLE_REMINDERS)
+    .bind(provider_reminder_id)
+    .bind(list_id)
+    .bind(&draft.title)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await
+    .map_err(|err| format!("Failed to save created reminder link: {}", err))?;
+
+    get_created_link_by_dedupe(pool, &draft.meeting_id, &draft.dedupe_key)
+        .await?
+        .ok_or_else(|| "Created reminder link was not saved.".to_string())
+}
+
+async fn get_created_link_by_dedupe(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    dedupe_key: &str,
+) -> Result<Option<CreatedReminderLink>, String> {
+    let row = sqlx::query(
+        "SELECT id, meeting_id, draft_id, dedupe_key, provider, provider_reminder_id, list_id,
+                title, status, created_at, updated_at, last_error
+         FROM reminder_created_links
+         WHERE meeting_id = ? AND dedupe_key = ?",
+    )
+    .bind(meeting_id)
+    .bind(dedupe_key)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| format!("Failed to inspect created reminders: {}", err))?;
+
+    row.map(|row| created_link_from_row(&row)).transpose()
+}
+
+async fn list_created_links(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+) -> Result<Vec<CreatedReminderLink>, String> {
+    let rows = sqlx::query(
+        "SELECT id, meeting_id, draft_id, dedupe_key, provider, provider_reminder_id, list_id,
+                title, status, created_at, updated_at, last_error
+         FROM reminder_created_links
+         WHERE meeting_id = ?
+         ORDER BY created_at DESC",
+    )
+    .bind(meeting_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|err| format!("Failed to list created reminders: {}", err))?;
+
+    rows.into_iter()
+        .map(|row| created_link_from_row(&row))
+        .collect()
+}
+
+async fn get_list_by_id(pool: &sqlx::SqlitePool, list_id: &str) -> Result<ReminderList, String> {
+    let row = sqlx::query(
+        "SELECT id, provider_account_id, provider_list_id, name, color, selected,
+                is_default, last_seen_at, created_at, updated_at
+         FROM reminder_lists
+         WHERE id = ?",
+    )
+    .bind(list_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| format!("Failed to load reminder list: {}", err))?
+    .ok_or_else(|| "Reminder list was not found.".to_string())?;
+    let selected = row.get::<i64, _>("selected") != 0;
+    if !selected {
+        return Err(
+            "This Apple Reminders list is no longer enabled. Pick a different list and try again."
+                .to_string(),
+        );
+    }
+
+    Ok(ReminderList {
+        id: row.get("id"),
+        provider_account_id: row.get("provider_account_id"),
+        provider_list_id: row.get("provider_list_id"),
+        name: row.get("name"),
+        color: row.get("color"),
+        selected,
+        is_default: row.get::<i64, _>("is_default") != 0,
+        last_seen_at: row.get("last_seen_at"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    })
+}
+
+fn created_link_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<CreatedReminderLink, String> {
+    Ok(CreatedReminderLink {
+        id: row.get("id"),
+        meeting_id: row.get("meeting_id"),
+        draft_id: row.get("draft_id"),
+        dedupe_key: row.get("dedupe_key"),
+        provider: row.get("provider"),
+        provider_reminder_id: row.get("provider_reminder_id"),
+        list_id: row.get("list_id"),
+        title: row.get("title"),
+        status: row.get("status"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        last_error: row.get("last_error"),
+    })
+}
+
 fn reminder_draft_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ReminderDraft, String> {
     let evidence_json: String = row.get("source_evidence_json");
     let source_evidence = serde_json::from_str::<Vec<ReminderSourceEvidence>>(&evidence_json)
@@ -1576,6 +1969,35 @@ mod tests {
         assert!(script.contains("repeat with reminderList in lists"));
         assert!(!script.contains("every reminder"));
         assert!(!script.contains("body of"));
+    }
+
+    #[test]
+    fn apple_reminder_create_script_writes_only_selected_list() {
+        let script = apple_reminder_create_script();
+        assert!(script.contains("make new reminder"));
+        assert!(script.contains("targetListId"));
+        assert!(script.contains("body:reminderNotes"));
+        assert!(!script.contains("every reminder"));
+    }
+
+    #[test]
+    fn reminder_notes_include_meeting_backlink_context() {
+        let notes = reminder_notes("API review", "meeting-123", Some("Check CI after deploy"));
+        assert!(notes.contains("Check CI after deploy"));
+        assert!(notes.contains("Source: Meetily meeting \"API review\""));
+        assert!(notes.contains("Meeting ID: meeting-123"));
+    }
+
+    #[test]
+    fn apple_script_due_date_formats_rfc3339_values() {
+        let formatted = apple_script_due_date("2026-06-20T09:30:00Z").unwrap();
+        assert!(formatted.contains("2026"));
+        assert!(formatted.contains(":30:00"));
+    }
+
+    #[test]
+    fn apple_script_due_date_rejects_unparseable_values() {
+        assert!(apple_script_due_date("tomorrow morning").is_none());
     }
 
     #[test]

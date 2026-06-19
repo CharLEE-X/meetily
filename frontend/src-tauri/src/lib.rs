@@ -788,6 +788,8 @@ pub fn run() {
             reminders::list_reminder_drafts,
             reminders::update_reminder_draft,
             reminders::dismiss_reminder_draft,
+            reminders::create_selected_reminders,
+            reminders::list_created_reminders,
             // Export commands
             export::export_get_settings,
             export::export_update_settings,

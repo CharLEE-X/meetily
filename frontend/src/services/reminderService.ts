@@ -103,6 +103,39 @@ export interface ReminderDraftUpdateRequest {
   listId?: string | null;
 }
 
+export interface CreateReminderRequest {
+  meetingId: string;
+  draftIds: string[];
+}
+
+export interface CreatedReminderLink {
+  id: string;
+  meetingId: string;
+  draftId?: string | null;
+  dedupeKey: string;
+  provider: string;
+  providerReminderId: string;
+  listId?: string | null;
+  title: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  lastError?: string | null;
+}
+
+export interface ReminderCreationFailure {
+  draftId: string;
+  title: string;
+  error: string;
+}
+
+export interface CreateReminderResult {
+  meetingId: string;
+  created: CreatedReminderLink[];
+  skipped: CreatedReminderLink[];
+  failed: ReminderCreationFailure[];
+}
+
 const requireDesktop = () => {
   if (!isTauriRuntime()) {
     throw new Error('Apple Reminders integration is available in the desktop app.');
@@ -158,5 +191,15 @@ export const reminderService = {
   async dismissDraft(draftId: string): Promise<ReminderDraft> {
     requireDesktop();
     return invoke<ReminderDraft>('dismiss_reminder_draft', { draftId });
+  },
+
+  async createSelected(request: CreateReminderRequest): Promise<CreateReminderResult> {
+    requireDesktop();
+    return invoke<CreateReminderResult>('create_selected_reminders', { request });
+  },
+
+  async listCreated(meetingId: string): Promise<CreatedReminderLink[]> {
+    requireDesktop();
+    return invoke<CreatedReminderLink[]>('list_created_reminders', { meetingId });
   },
 };
