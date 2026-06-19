@@ -216,7 +216,9 @@ only when the existing meeting detection consent mode allows it.
 ## Apple Notes and Calendar Linking
 
 Apple Notes export and Apple Calendar event creation should share
-`meeting_calendar_links` instead of writing separate siloed metadata.
+`meeting_calendar_links` instead of writing separate siloed metadata. The Notes
+integration decision, consent model, duplicate handling, and destination design
+live in [Apple Notes Export](apple-notes-export.md).
 
 When Apple Calendar event creation is enabled:
 

@@ -121,6 +121,7 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **Advanced Exports:** Export completed meetings as Markdown, PDF, or DOCX with selectable sections and local auto-export preferences. See [Advanced Exports](docs/advanced-exports.md).
 - **Calendar Integration:** Connect Apple Calendar on macOS, sync upcoming event metadata locally, and select an event to prefill the next recording title and meeting-detection metadata. See [Calendar Integration Release Notes](docs/calendar-integration-release-notes.md).
 - **Apple Reminders Follow-Ups:** On macOS, connect Apple Reminders, review editable follow-up drafts, create only selected reminders, and return to meeting-linked reminder history. See [Apple Reminders Release Notes](docs/apple-reminders-release-notes.md).
+- **Apple Notes Export:** Planned macOS Apple Notes export is opt-in, writes only after destination preview, updates app-managed notes instead of duplicating them, and links to Calendar artifacts when both integrations are enabled. See [Apple Notes Export](docs/apple-notes-export.md).
 - **Speaker Labels:** Detect local speaker labels from transcript timing/source metadata, review them in the meeting transcript, and rename labels as user-confirmed corrections.
 - **Optional Meeting Screenshots:** On macOS, periodic screenshots can be enabled in Settings and must be confirmed for each meeting before capture starts. Screenshots stay local and can be deleted from the meeting timeline. See [Speaker Identification and Screenshots Release Notes](docs/speaker-identification-release-notes.md).
 - **Multi-Platform:** Works on macOS, Windows, and Linux.
@@ -260,7 +261,7 @@ Planned feature areas:
   [Calendar Integration](docs/calendar-integration.md) and
   [Calendar Integration Release Notes](docs/calendar-integration-release-notes.md).
 - **Apple Notes export:** opt-in macOS automation with destination preview before
-  writing meeting content.
+  writing meeting content. See [Apple Notes Export](docs/apple-notes-export.md).
 - **Local MCP server:** opt-in local agent access with trusted clients, scoped
   read-only tools, revocation, and audit logs.
 - **AI-agent skill setup:** reversible setup for supported agents and ask-first
