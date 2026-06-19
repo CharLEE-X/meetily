@@ -20,9 +20,19 @@ interface AgentInvocationAdapter {
 }
 
 function fallbackResult(prepared: PreparedAgentWorkflow, message: string): AgentInvocationResult {
+  const auditEvents = [
+    ...prepared.run.auditEvents,
+    {
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      type: 'fallbackReady' as const,
+      message,
+    },
+  ];
   updateAgentWorkflowRun(prepared.run.id, {
     status: 'fallbackReady',
     message,
+    auditEvents,
   });
   return {
     status: 'fallbackReady',
@@ -55,9 +65,19 @@ export async function triggerPreparedAgentWorkflow(
   prepared: PreparedAgentWorkflow
 ): Promise<AgentInvocationResult> {
   if (!prepared.canRun) {
+    const message = prepared.reason ?? 'Agent workflow was not runnable.';
     updateAgentWorkflowRun(prepared.run.id, {
       status: 'failed',
-      message: prepared.reason ?? 'Agent workflow was not runnable.',
+      message,
+      auditEvents: [
+        ...prepared.run.auditEvents,
+        {
+          id: `audit-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          type: 'failed',
+          message,
+        },
+      ],
     });
     return {
       status: 'failed',
@@ -88,8 +108,20 @@ export async function triggerPreparedAgentWorkflow(
 }
 
 export function markAgentWorkflowPromptCopied(runId: string) {
-  updateAgentWorkflowRun(runId, {
+  const updatedRun = updateAgentWorkflowRun(runId, {
     status: 'fallbackReady',
     message: 'Prepared prompt copied for manual agent handoff.',
+  });
+  if (!updatedRun) return;
+  updateAgentWorkflowRun(runId, {
+    auditEvents: [
+      ...updatedRun.auditEvents,
+      {
+        id: `audit-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: 'copied',
+        message: 'Prepared prompt copied for manual agent handoff.',
+      },
+    ],
   });
 }

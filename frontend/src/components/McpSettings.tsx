@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Bot, CheckCircle2, CircleAlert, CircleDashed, Play, Power, RefreshCw, ShieldCheck, Trash2, Wrench } from "lucide-react"
 import { Switch } from "./ui/switch"
+import { AgentWorkflowRunsPanel } from "./AgentWorkflowRunsPanel"
 import { mcpService, AgentKind, AgentSetupStatus, McpAuditEvent, McpClient, McpStatus } from "@/services/mcpService"
 import {
   AGENT_SUPPORT_MATRIX,
@@ -10,13 +11,11 @@ import {
   DEFAULT_AGENT_PROMPT_TEMPLATES,
   AgentWorkflowRule,
   AgentTarget,
-  AgentWorkflowRun,
   AgentWorkflowSettings,
   WorkflowActionId,
   WorkflowMode,
   getAgentWorkflowSettings,
   installMeetilySkillPack,
-  listAgentWorkflowRuns,
   MEETILY_SKILL_PACK_VERSION,
   getAgentPromptTemplate,
   removeMeetilySkillPack,
@@ -92,7 +91,6 @@ export function McpSettings() {
   const [auditEvents, setAuditEvents] = useState<McpAuditEvent[]>([])
   const [agentStatuses, setAgentStatuses] = useState<AgentSetupStatus[]>([])
   const [workflowSettings, setWorkflowSettings] = useState<AgentWorkflowSettings>(() => getAgentWorkflowSettings())
-  const [workflowRuns, setWorkflowRuns] = useState<AgentWorkflowRun[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -112,7 +110,6 @@ export function McpSettings() {
       setAuditEvents(nextAuditEvents)
       setAgentStatuses(nextAgentStatuses)
       setWorkflowSettings(getAgentWorkflowSettings())
-      setWorkflowRuns(listAgentWorkflowRuns())
     } catch (error) {
       setMessage(friendlyError(error))
     } finally {
@@ -895,26 +892,8 @@ export function McpSettings() {
 
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <h3 className="text-lg font-semibold text-gray-900">Post-meeting workflow log</h3>
-        <div className="mt-4 space-y-3">
-          {workflowRuns.length === 0 ? (
-            <p className="text-sm text-gray-600">No agent workflow runs yet.</p>
-          ) : (
-            workflowRuns.slice(0, 6).map((run) => (
-              <div key={run.id} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="font-medium text-gray-900">{run.meetingTitle}</div>
-                    <p className="mt-1 text-xs text-gray-500">{new Date(run.createdAt).toLocaleString()}</p>
-                  </div>
-                  <span className="rounded-full bg-gray-200 px-2 py-1 text-xs text-gray-700">{run.status}</span>
-                </div>
-                <p className="mt-2 text-sm text-gray-600">{run.message}</p>
-                <p className="mt-1 text-xs text-gray-500">
-                  Agent: {run.agent}; actions: {run.actions.join(", ")}
-                </p>
-              </div>
-            ))
-          )}
+        <div className="mt-4">
+          <AgentWorkflowRunsPanel limit={8} />
         </div>
       </div>
 

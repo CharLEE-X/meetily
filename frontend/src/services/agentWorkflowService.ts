@@ -72,6 +72,29 @@ export interface AgentWorkflowRun {
   mode: WorkflowMode;
   status: 'queued' | 'waitingForApproval' | 'prepared' | 'fallbackReady' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
   createdAt: string;
+  updatedAt: string;
+  promptTemplateId: AgentPromptTemplateId;
+  contextPackage: {
+    budgetPreset: AgentContextBudgetPreset;
+    includedSources: string[];
+    sensitiveSourcesAllowed: string[];
+  };
+  outcomeLinks: AgentWorkflowOutcomeLink[];
+  auditEvents: AgentWorkflowAuditEvent[];
+  message: string;
+}
+
+export interface AgentWorkflowOutcomeLink {
+  id: string;
+  label: string;
+  url: string;
+  type: 'branch' | 'pullRequest' | 'linear' | 'jira' | 'draft' | 'other';
+}
+
+export interface AgentWorkflowAuditEvent {
+  id: string;
+  timestamp: string;
+  type: 'prepared' | 'copied' | 'directlyTriggered' | 'failed' | 'completed' | 'fallbackReady';
   message: string;
 }
 
@@ -478,7 +501,33 @@ export function removeMeetilySkillPack(current = getAgentWorkflowSettings()): Ag
 }
 
 export function listAgentWorkflowRuns(): AgentWorkflowRun[] {
-  return readJson<AgentWorkflowRun[]>(RUNS_KEY, []).slice(0, 25);
+  return readJson<Partial<AgentWorkflowRun>[]>(RUNS_KEY, [])
+    .map(sanitizeRun)
+    .slice(0, 25);
+}
+
+function sanitizeRun(run: Partial<AgentWorkflowRun>): AgentWorkflowRun {
+  const createdAt = run.createdAt ?? new Date().toISOString();
+  return {
+    id: run.id ?? `workflow-${Date.now()}`,
+    meetingId: run.meetingId ?? 'unknown',
+    meetingTitle: run.meetingTitle ?? 'Untitled meeting',
+    agent: run.agent ?? 'manual',
+    actions: run.actions ?? defaultSettings.enabledActions,
+    mode: run.mode ?? 'ask',
+    status: run.status ?? 'prepared',
+    createdAt,
+    updatedAt: run.updatedAt ?? createdAt,
+    promptTemplateId: run.promptTemplateId ?? defaultSettings.promptTemplateId,
+    contextPackage: {
+      budgetPreset: run.contextPackage?.budgetPreset ?? defaultSettings.budgetPreset,
+      includedSources: run.contextPackage?.includedSources ?? ['summary'],
+      sensitiveSourcesAllowed: run.contextPackage?.sensitiveSourcesAllowed ?? [],
+    },
+    outcomeLinks: run.outcomeLinks ?? [],
+    auditEvents: run.auditEvents ?? [],
+    message: run.message ?? 'Workflow prepared.',
+  };
 }
 
 function saveRun(run: AgentWorkflowRun) {
@@ -489,16 +538,91 @@ function saveRun(run: AgentWorkflowRun) {
 
 export function updateAgentWorkflowRun(
   runId: string,
-  patch: Partial<Pick<AgentWorkflowRun, 'status' | 'message'>>
+  patch: Partial<Pick<AgentWorkflowRun, 'status' | 'message' | 'outcomeLinks' | 'auditEvents'>>
 ): AgentWorkflowRun | null {
   const run = listAgentWorkflowRuns().find((existing) => existing.id === runId);
   if (!run) return null;
   const nextRun = {
     ...run,
     ...patch,
+    updatedAt: new Date().toISOString(),
   };
   saveRun(nextRun);
   return nextRun;
+}
+
+export function addAgentWorkflowOutcomeLink(
+  runId: string,
+  link: Omit<AgentWorkflowOutcomeLink, 'id'>
+): AgentWorkflowRun | null {
+  const run = listAgentWorkflowRuns().find((existing) => existing.id === runId);
+  if (!run) return null;
+  return updateAgentWorkflowRun(runId, {
+    outcomeLinks: [
+      ...run.outcomeLinks,
+      {
+        ...link,
+        id: `link-${Date.now()}`,
+      },
+    ],
+    auditEvents: [
+      ...run.auditEvents,
+      {
+        id: `audit-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: 'completed',
+        message: `Outcome link added: ${link.label}`,
+      },
+    ],
+  });
+}
+
+export function removeAgentWorkflowOutcomeLink(runId: string, linkId: string): AgentWorkflowRun | null {
+  const run = listAgentWorkflowRuns().find((existing) => existing.id === runId);
+  if (!run) return null;
+  return updateAgentWorkflowRun(runId, {
+    outcomeLinks: run.outcomeLinks.filter((link) => link.id !== linkId),
+  });
+}
+
+function auditEvent(type: AgentWorkflowAuditEvent['type'], message: string): AgentWorkflowAuditEvent {
+  return {
+    id: `audit-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    type,
+    message,
+  };
+}
+
+function contextPackageMetadata(context: AgentWorkflowContext, settings: AgentWorkflowSettings): AgentWorkflowRun['contextPackage'] {
+  const consent = {
+    ...settings.consent,
+    ...(context.consent ?? {}),
+  };
+  const includedSources = [
+    consent.includeSummary ? 'summary' : null,
+    consent.includeActionItems ? 'action_items' : null,
+    consent.includeDecisions ? 'decisions' : null,
+    consent.includeRisks ? 'risks' : null,
+    consent.includeTranscriptExcerpts ? 'transcript_excerpts' : null,
+    consent.includeFullTranscript ? 'full_transcript' : null,
+    consent.includeScreenshotsOcr ? 'screenshot_ocr' : null,
+    consent.includeCalendarMetadata ? 'calendar_metadata' : null,
+    consent.includeArtifacts ? 'artifacts' : null,
+  ].filter(Boolean) as string[];
+  const sensitiveSourcesAllowed = includedSources.filter((source) => [
+    'transcript_excerpts',
+    'full_transcript',
+    'screenshot_ocr',
+    'calendar_metadata',
+    'artifacts',
+  ].includes(source));
+
+  return {
+    budgetPreset: context.budgetPreset ?? settings.budgetPreset,
+    includedSources,
+    sensitiveSourcesAllowed,
+  };
 }
 
 function summaryToText(summary: AgentWorkflowContext['summary']): string {
@@ -628,6 +752,11 @@ export function prepareAgentWorkflow(
     actions: effectiveSettings.enabledActions,
     mode: effectiveSettings.mode,
     createdAt,
+    updatedAt: createdAt,
+    promptTemplateId: effectiveSettings.promptTemplateId,
+    contextPackage: contextPackageMetadata(effectiveContext, effectiveSettings),
+    outcomeLinks: [],
+    auditEvents: [],
   };
 
   if (resolution.blockedReason) {
@@ -635,6 +764,7 @@ export function prepareAgentWorkflow(
       ...baseRun,
       status: effectiveSettings.mode === 'off' || !effectiveSettings.skillPackInstalled ? 'skipped' : 'failed',
       message: resolution.blockedReason,
+      auditEvents: [auditEvent(effectiveSettings.mode === 'off' ? 'prepared' : 'failed', resolution.blockedReason)],
     };
     saveRun(run);
     return { run, prompt: '', canRun: false, reason: run.message };
@@ -653,6 +783,7 @@ export function prepareAgentWorkflow(
     message: effectiveSettings.mode === 'ask'
       ? `${resolution.preview} Workflow prepared and waiting for user approval.`
       : `${resolution.preview} Workflow handoff prepared automatically.`,
+    auditEvents: [auditEvent('prepared', 'Workflow prompt prepared without storing raw prompt content.')],
   };
   saveRun(run);
   return { run, prompt, canRun: true, reason: null };

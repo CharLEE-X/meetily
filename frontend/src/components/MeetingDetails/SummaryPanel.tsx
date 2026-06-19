@@ -11,6 +11,7 @@ import { ExportMeetingDialog } from './ExportMeetingDialog';
 import { ReminderDraftReview } from './ReminderDraftReview';
 import { AppleNotesExportPanel } from './AppleNotesExportPanel';
 import { CalendarEventPanel } from './CalendarEventPanel';
+import { AgentWorkflowRunsPanel } from '@/components/AgentWorkflowRunsPanel';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
@@ -446,6 +447,12 @@ export function SummaryPanel({
           <CalendarEventPanel meetingId={meeting.id} hasSummary={!!aiSummary} />
           <AppleNotesExportPanel meetingId={meeting.id} hasSummary={!!aiSummary} summaryStatus={summaryStatus} />
           <ReminderDraftReview meetingId={meeting.id} hasSummary={!!aiSummary} />
+          <div className="mx-6 mb-6 mt-2 rounded-2xl border border-gray-200 bg-white p-4">
+            <h3 className="text-sm font-semibold text-gray-900">Agent workflow runs</h3>
+            <div className="mt-3">
+              <AgentWorkflowRunsPanel meetingId={meeting.id} limit={4} />
+            </div>
+          </div>
           {summaryStatus !== 'idle' && (
             <div className={`mx-6 mb-6 mt-2 rounded-2xl border p-4 ${summaryStatus === 'error' ? 'border-red-200 bg-red-50 text-red-700' :
               summaryStatus === 'completed' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' :
