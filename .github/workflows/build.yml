@@ -593,6 +593,7 @@ jobs:
           APPLE_TEAM_ID: ${{ inputs.sign-binaries && secrets.APPLE_TEAM_ID || '' }}
           APPLE_API_KEY: ${{ inputs.sign-binaries && secrets.APPLE_API_KEY || '' }}
           APPLE_API_ISSUER: ${{ inputs.sign-binaries && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY_PATH: ${{ inputs.sign-binaries && format('{0}/apple-api-key/AuthKey_{1}.p8', runner.temp, secrets.APPLE_API_KEY) || '' }}
           APPLE_CERTIFICATE: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
