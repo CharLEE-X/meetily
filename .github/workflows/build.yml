@@ -601,21 +601,11 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_ID: ''
-          APPLE_ID_PASSWORD: ''
-          APPLE_PASSWORD: ''
-          APPLE_TEAM_ID: ''
           # The certificate is imported into a temporary keychain above. Do not
           # pass Apple account, API key, or certificate blob variables into
           # Tauri here: their presence makes Tauri attempt internal notarization,
           # which returns Apple 401 in CI even though xcrun notarytool succeeds.
           # Keep Tauri on build/signing only and notarize the DMG explicitly.
-          APPLE_API_KEY: ''
-          APPLE_API_ISSUER: ''
-          APPLE_API_KEY_PATH: ''
-          API_PRIVATE_KEYS_DIR: ''
-          APPLE_CERTIFICATE: ''
-          APPLE_CERTIFICATE_PASSWORD: ''
           APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
           # Tauri updater signing (ALWAYS enabled for .sig files)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
