@@ -1,3 +1,5 @@
+use crate::database::repositories::meeting::MeetingsRepository;
+use crate::database::repositories::summary::SummaryProcessesRepository;
 use crate::state::AppState;
 use chrono::{DateTime, Duration, Local, NaiveDateTime, TimeZone, Utc};
 use regex::Regex;
@@ -32,6 +34,8 @@ pub struct CalendarProviderAccount {
     pub status: String,
     pub last_sync_at: Option<String>,
     pub last_error: Option<String>,
+    pub target_calendar_name: String,
+    pub auto_create_events: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -88,6 +92,41 @@ pub struct CalendarSyncRequest {
     pub provider: Option<String>,
     pub lookback_days: Option<i64>,
     pub lookahead_days: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarWriteSettingsRequest {
+    pub provider: Option<String>,
+    pub target_calendar_name: Option<String>,
+    pub auto_create_events: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEventCreationRequest {
+    pub meeting_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEventCreationResult {
+    pub meeting_id: String,
+    pub calendar_event_id: String,
+    pub apple_event_identifier: String,
+    pub calendar_name: String,
+    pub status: String,
+}
+
+struct MeetingCalendarLinkRow {
+    id: String,
+    apple_event_identifier: Option<String>,
+}
+
+struct AppleCalendarWriteResult {
+    apple_event_identifier: String,
+    calendar_name: String,
+    status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,8 +189,9 @@ async fn connect_provider_account(
 
     sqlx::query(
         "INSERT INTO calendar_provider_accounts
-            (id, provider, account_label, status, last_sync_at, last_error, created_at, updated_at)
-         VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
+            (id, provider, account_label, status, last_sync_at, last_error,
+             target_calendar_name, auto_create_events, created_at, updated_at)
+         VALUES (?, ?, ?, ?, NULL, ?, ?, 0, ?, ?)
          ON CONFLICT(provider) DO UPDATE SET
             account_label = excluded.account_label,
             status = excluded.status,
@@ -163,6 +203,7 @@ async fn connect_provider_account(
     .bind(label)
     .bind(status)
     .bind(error)
+    .bind("Meetily")
     .bind(&now)
     .bind(&now)
     .execute(pool)
@@ -234,6 +275,48 @@ pub async fn disconnect_calendar_provider(
     get_account(pool, &provider)
         .await?
         .ok_or_else(|| "Calendar provider was not found after disconnect".to_string())
+}
+
+#[tauri::command]
+pub async fn update_calendar_write_settings(
+    state: State<'_, AppState>,
+    request: CalendarWriteSettingsRequest,
+) -> Result<CalendarProviderAccount, String> {
+    let provider = normalize_provider(request.provider.as_deref().unwrap_or(PROVIDER_APPLE))?;
+    let pool = state.db_manager.pool();
+    let existing = match get_account(pool, &provider).await? {
+        Some(account) => account,
+        None => connect_provider_account(pool, &provider).await?,
+    };
+    let now = Utc::now().to_rfc3339();
+    let target_calendar_name = request
+        .target_calendar_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&existing.target_calendar_name);
+    let auto_create_events = request
+        .auto_create_events
+        .unwrap_or(existing.auto_create_events);
+
+    sqlx::query(
+        "UPDATE calendar_provider_accounts
+         SET target_calendar_name = ?,
+             auto_create_events = ?,
+             updated_at = ?
+         WHERE provider = ?",
+    )
+    .bind(target_calendar_name)
+    .bind(if auto_create_events { 1 } else { 0 })
+    .bind(&now)
+    .bind(&provider)
+    .execute(pool)
+    .await
+    .map_err(|err| format!("Failed to update calendar write settings: {}", err))?;
+
+    get_account(pool, &provider)
+        .await?
+        .ok_or_else(|| "Calendar settings were not saved".to_string())
 }
 
 #[tauri::command]
@@ -354,6 +437,142 @@ pub async fn link_meeting_calendar_event(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn create_or_update_meeting_calendar_event(
+    state: State<'_, AppState>,
+    request: CalendarEventCreationRequest,
+) -> Result<CalendarEventCreationResult, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("Apple Calendar event creation is available only on macOS.".to_string());
+    }
+
+    let pool = state.db_manager.pool();
+    let account = match get_account(pool, PROVIDER_APPLE).await? {
+        Some(account) if account.status == "connected" || account.status == "permission_needed" => {
+            account
+        }
+        Some(_) => return Err("Reconnect Apple Calendar before creating events.".to_string()),
+        None => return Err("Connect Apple Calendar before creating events.".to_string()),
+    };
+    if !account.auto_create_events {
+        return Err(
+            "Enable Apple Calendar event creation in Settings before creating events.".to_string(),
+        );
+    }
+
+    let meeting = MeetingsRepository::get_meeting_metadata(pool, &request.meeting_id)
+        .await
+        .map_err(|err| {
+            format!(
+                "Failed to load meeting for calendar event creation: {}",
+                err
+            )
+        })?
+        .ok_or_else(|| "Meeting was not found for calendar event creation.".to_string())?;
+    let summary = SummaryProcessesRepository::get_summary_data(pool, &request.meeting_id)
+        .await
+        .map_err(|err| {
+            format!(
+                "Failed to inspect summary for calendar event creation: {}",
+                err
+            )
+        })?;
+    let transcript_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE meeting_id = ?")
+            .bind(&request.meeting_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|err| {
+                format!(
+                    "Failed to inspect transcript for calendar event creation: {}",
+                    err
+                )
+            })?;
+
+    let existing_link = latest_meeting_calendar_link(pool, &request.meeting_id).await?;
+    let existing_apple_event_id = existing_link
+        .as_ref()
+        .and_then(|row| row.apple_event_identifier.as_deref());
+    let starts_at = meeting.created_at.0;
+    let mut ends_at = meeting.updated_at.0;
+    if ends_at <= starts_at {
+        ends_at = starts_at + Duration::minutes(30);
+    }
+    let summary_status = summary
+        .as_ref()
+        .map(|summary| summary.status.as_str())
+        .unwrap_or("not_generated");
+    let notes = calendar_event_notes(&meeting.id, summary_status, transcript_count > 0);
+    let write = write_apple_calendar_event(
+        existing_apple_event_id,
+        &account.target_calendar_name,
+        &meeting.title,
+        starts_at,
+        ends_at,
+        &notes,
+    )
+    .map_err(|error| sanitize_calendar_write_error(&error))?;
+
+    let source_id = ensure_source(
+        pool,
+        &account.id,
+        &format!("apple-calendar-write-{}", write.calendar_name),
+        &write.calendar_name,
+        true,
+        false,
+    )
+    .await?;
+    let event_id = deterministic_id(&[
+        PROVIDER_APPLE,
+        &source_id,
+        &write.apple_event_identifier,
+        &starts_at.to_rfc3339(),
+    ]);
+    let event = CalendarEvent {
+        id: event_id.clone(),
+        provider: PROVIDER_APPLE.to_string(),
+        provider_event_id: write.apple_event_identifier.clone(),
+        calendar_source_id: source_id,
+        title: meeting.title.clone(),
+        starts_at: starts_at.to_rfc3339(),
+        ends_at: ends_at.to_rfc3339(),
+        timezone: None,
+        location: None,
+        meeting_url: None,
+        meeting_provider: None,
+        attendee_count: None,
+        attendee_names: None,
+        organizer_name: None,
+        description_excerpt: Some("Created by Meetily.".to_string()),
+        content_hash: content_hash(&[
+            &write.apple_event_identifier,
+            &meeting.title,
+            &starts_at.to_rfc3339(),
+            &ends_at.to_rfc3339(),
+            &notes,
+        ]),
+        sync_status: "active".to_string(),
+        updated_at: Utc::now().to_rfc3339(),
+    };
+    upsert_event(pool, &event).await?;
+    upsert_meeting_calendar_link(
+        pool,
+        &request.meeting_id,
+        &event_id,
+        &write.apple_event_identifier,
+    )
+    .await?;
+    update_account_sync(pool, PROVIDER_APPLE, "connected", Some(Utc::now()), None).await?;
+
+    Ok(CalendarEventCreationResult {
+        meeting_id: request.meeting_id,
+        calendar_event_id: event_id,
+        apple_event_identifier: write.apple_event_identifier,
+        calendar_name: write.calendar_name,
+        status: write.status,
+    })
+}
+
 fn provider_infos() -> Vec<CalendarProviderInfo> {
     vec![
         CalendarProviderInfo {
@@ -361,10 +580,10 @@ fn provider_infos() -> Vec<CalendarProviderInfo> {
             label: APPLE_ACCOUNT_LABEL.to_string(),
             available: cfg!(target_os = "macos"),
             supports_read: cfg!(target_os = "macos"),
-            supports_write: false,
+            supports_write: cfg!(target_os = "macos"),
             notes: Some(
                 if cfg!(target_os = "macos") {
-                    "Reads Apple Calendar metadata through the local macOS calendar bridge after the user grants permission."
+                    "Reads Apple Calendar metadata and can create Meetily-owned events through the local macOS calendar bridge after explicit opt-in."
                 } else {
                     "Apple Calendar is available only on macOS."
                 }
@@ -532,6 +751,150 @@ end cleanCalendarField"#,
     )
 }
 
+fn write_apple_calendar_event(
+    existing_event_id: Option<&str>,
+    target_calendar_name: &str,
+    title: &str,
+    starts_at: DateTime<Utc>,
+    ends_at: DateTime<Utc>,
+    notes: &str,
+) -> Result<AppleCalendarWriteResult, String> {
+    let start_text = apple_calendar_date_text(starts_at);
+    let end_text = apple_calendar_date_text(ends_at);
+    let script = apple_calendar_write_script();
+    let output = Command::new("osascript")
+        .args([
+            "-e",
+            &script,
+            "--",
+            existing_event_id.unwrap_or(""),
+            target_calendar_name,
+            title,
+            &start_text,
+            &end_text,
+            notes,
+        ])
+        .output()
+        .map_err(|err| format!("Failed to run Apple Calendar event creation: {}", err))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Apple Calendar could not create this event.".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    parse_calendar_write_result(String::from_utf8_lossy(&output.stdout).trim())
+}
+
+fn apple_calendar_date_text(value: DateTime<Utc>) -> String {
+    value
+        .with_timezone(&Local)
+        .format("%A, %B %-d, %Y at %-I:%M:%S %p")
+        .to_string()
+}
+
+fn apple_calendar_write_script() -> String {
+    r#"on run argv
+    set existingEventId to item 1 of argv
+    set targetCalendarName to item 2 of argv
+    set eventTitle to item 3 of argv
+    set startText to item 4 of argv
+    set endText to item 5 of argv
+    set eventDescription to item 6 of argv
+    tell application "Calendar"
+        set targetCalendar to missing value
+        repeat with cal in calendars
+            if (name of cal as text) is targetCalendarName then
+                set targetCalendar to cal
+                exit repeat
+            end if
+        end repeat
+        if targetCalendar is missing value then
+            set targetCalendar to make new calendar with properties {name:targetCalendarName}
+        end if
+        set targetEvent to missing value
+        if existingEventId is not "" then
+            try
+                set matches to every event of targetCalendar whose uid is existingEventId
+                if (count of matches) is greater than 0 then set targetEvent to item 1 of matches
+            end try
+        end if
+        set writeStatus to "created"
+        if targetEvent is missing value then
+            set targetEvent to make new event at end of events of targetCalendar with properties {summary:eventTitle, start date:date startText, end date:date endText, description:eventDescription}
+        else
+            set summary of targetEvent to eventTitle
+            set start date of targetEvent to date startText
+            set end date of targetEvent to date endText
+            set description of targetEvent to eventDescription
+            set writeStatus to "updated"
+        end if
+        return (uid of targetEvent as text) & (character id 30) & (name of targetCalendar as text) & (character id 30) & writeStatus
+    end tell
+end run
+"#
+    .to_string()
+}
+
+fn parse_calendar_write_result(row: &str) -> Result<AppleCalendarWriteResult, String> {
+    let parts = row.split('\u{1e}').collect::<Vec<_>>();
+    if parts.len() < 3 {
+        return Err("Apple Calendar did not return event metadata.".to_string());
+    }
+    let apple_event_identifier = parts[0].trim();
+    if apple_event_identifier.is_empty() {
+        return Err("Apple Calendar did not return an event identifier.".to_string());
+    }
+    Ok(AppleCalendarWriteResult {
+        apple_event_identifier: apple_event_identifier.to_string(),
+        calendar_name: if parts[1].trim().is_empty() {
+            "Meetily"
+        } else {
+            parts[1].trim()
+        }
+        .to_string(),
+        status: if parts[2].trim() == "updated" {
+            "updated"
+        } else {
+            "created"
+        }
+        .to_string(),
+    })
+}
+
+fn calendar_event_notes(meeting_id: &str, summary_status: &str, has_transcript: bool) -> String {
+    format!(
+        "Created by Meetily\n\nMeeting ID: {}\nSummary status: {}\nTranscript: {}",
+        meeting_id,
+        summary_status,
+        if has_transcript {
+            "available locally"
+        } else {
+            "not available"
+        }
+    )
+}
+
+fn sanitize_calendar_write_error(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("-1743")
+        || lower.contains("not authorized")
+        || lower.contains("not permitted")
+    {
+        return "Apple Calendar permission is required. Allow Meetily to control Calendar in System Settings > Privacy & Security > Automation, then retry.".to_string();
+    }
+    let trimmed = error.trim();
+    if trimmed.is_empty() {
+        "Apple Calendar event creation failed. Check Calendar permissions and try again."
+            .to_string()
+    } else {
+        trimmed.chars().take(280).collect()
+    }
+}
+
 fn parse_apple_calendar_row(row: &str, source_id: &str) -> Result<Option<CalendarEvent>, String> {
     let parts = row.split('\u{1e}').collect::<Vec<_>>();
     if parts.len() < 8 {
@@ -615,7 +978,8 @@ fn parse_apple_datetime(value: &str) -> Result<String, String> {
 
 async fn list_accounts(pool: &sqlx::SqlitePool) -> Result<Vec<CalendarProviderAccount>, String> {
     let rows = sqlx::query(
-        "SELECT id, provider, account_label, status, last_sync_at, last_error, created_at, updated_at
+        "SELECT id, provider, account_label, status, last_sync_at, last_error,
+                target_calendar_name, auto_create_events, created_at, updated_at
          FROM calendar_provider_accounts
          ORDER BY provider ASC",
     )
@@ -645,7 +1009,8 @@ async fn get_account(
     provider: &str,
 ) -> Result<Option<CalendarProviderAccount>, String> {
     let row = sqlx::query(
-        "SELECT id, provider, account_label, status, last_sync_at, last_error, created_at, updated_at
+        "SELECT id, provider, account_label, status, last_sync_at, last_error,
+                target_calendar_name, auto_create_events, created_at, updated_at
          FROM calendar_provider_accounts WHERE provider = ?",
     )
     .bind(provider)
@@ -765,6 +1130,78 @@ async fn upsert_event(pool: &sqlx::SqlitePool, event: &CalendarEvent) -> Result<
     Ok(())
 }
 
+async fn latest_meeting_calendar_link(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+) -> Result<Option<MeetingCalendarLinkRow>, String> {
+    let row = sqlx::query(
+        "SELECT id, calendar_event_id, apple_event_identifier
+         FROM meeting_calendar_links
+         WHERE meeting_id = ?
+         ORDER BY updated_at DESC
+         LIMIT 1",
+    )
+    .bind(meeting_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| format!("Failed to inspect meeting calendar link: {}", err))?;
+    Ok(row.map(|row| MeetingCalendarLinkRow {
+        id: row.get("id"),
+        apple_event_identifier: row.get("apple_event_identifier"),
+    }))
+}
+
+async fn upsert_meeting_calendar_link(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    calendar_event_id: &str,
+    apple_event_identifier: &str,
+) -> Result<(), String> {
+    let now = Utc::now().to_rfc3339();
+    if let Some(existing) = latest_meeting_calendar_link(pool, meeting_id).await? {
+        sqlx::query(
+            "UPDATE meeting_calendar_links
+             SET calendar_event_id = ?,
+                 link_source = 'created_by_meetily',
+                 confidence = 1.0,
+                 apple_event_identifier = ?,
+                 updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(calendar_event_id)
+        .bind(apple_event_identifier)
+        .bind(&now)
+        .bind(existing.id)
+        .execute(pool)
+        .await
+        .map_err(|err| format!("Failed to update meeting calendar link: {}", err))?;
+        return Ok(());
+    }
+
+    let link_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO meeting_calendar_links
+            (id, meeting_id, calendar_event_id, link_source, confidence,
+             apple_event_identifier, created_at, updated_at)
+         VALUES (?, ?, ?, 'created_by_meetily', 1.0, ?, ?, ?)
+         ON CONFLICT(meeting_id, calendar_event_id) DO UPDATE SET
+             link_source = 'created_by_meetily',
+             confidence = 1.0,
+             apple_event_identifier = excluded.apple_event_identifier,
+             updated_at = excluded.updated_at",
+    )
+    .bind(link_id)
+    .bind(meeting_id)
+    .bind(calendar_event_id)
+    .bind(apple_event_identifier)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await
+    .map_err(|err| format!("Failed to save meeting calendar link: {}", err))?;
+    Ok(())
+}
+
 async fn update_account_sync(
     pool: &sqlx::SqlitePool,
     provider: &str,
@@ -789,6 +1226,7 @@ async fn update_account_sync(
 }
 
 fn account_from_row(row: sqlx::sqlite::SqliteRow) -> Result<CalendarProviderAccount, String> {
+    let auto_create_events: i64 = row.get("auto_create_events");
     Ok(CalendarProviderAccount {
         id: row.get("id"),
         provider: row.get("provider"),
@@ -796,6 +1234,8 @@ fn account_from_row(row: sqlx::sqlite::SqliteRow) -> Result<CalendarProviderAcco
         status: row.get("status"),
         last_sync_at: row.get("last_sync_at"),
         last_error: row.get("last_error"),
+        target_calendar_name: row.get("target_calendar_name"),
+        auto_create_events: auto_create_events != 0,
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })

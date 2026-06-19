@@ -17,6 +17,8 @@ export interface CalendarProviderAccount {
   status: string;
   lastSyncAt?: string | null;
   lastError?: string | null;
+  targetCalendarName: string;
+  autoCreateEvents: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -76,6 +78,24 @@ export interface CalendarSyncResult {
   error?: string | null;
 }
 
+export interface CalendarWriteSettingsRequest {
+  provider?: string;
+  targetCalendarName?: string;
+  autoCreateEvents?: boolean;
+}
+
+export interface CalendarEventCreationRequest {
+  meetingId: string;
+}
+
+export interface CalendarEventCreationResult {
+  meetingId: string;
+  calendarEventId: string;
+  appleEventIdentifier: string;
+  calendarName: string;
+  status: string;
+}
+
 const requireDesktop = () => {
   if (!isTauriRuntime()) {
     throw new Error('Calendar integration is available in the desktop app.');
@@ -103,6 +123,11 @@ export const calendarService = {
     return invoke<CalendarProviderAccount>('disconnect_calendar_provider', { provider });
   },
 
+  async updateWriteSettings(request: CalendarWriteSettingsRequest): Promise<CalendarProviderAccount> {
+    requireDesktop();
+    return invoke<CalendarProviderAccount>('update_calendar_write_settings', { request });
+  },
+
   async syncEvents(request?: CalendarSyncRequest): Promise<CalendarSyncResult> {
     requireDesktop();
     return invoke<CalendarSyncResult>('sync_calendar_events', { request });
@@ -126,5 +151,10 @@ export const calendarService = {
       linkSource,
       confidence,
     });
+  },
+
+  async createOrUpdateMeetingEvent(request: CalendarEventCreationRequest): Promise<CalendarEventCreationResult> {
+    requireDesktop();
+    return invoke<CalendarEventCreationResult>('create_or_update_meeting_calendar_event', { request });
   },
 };

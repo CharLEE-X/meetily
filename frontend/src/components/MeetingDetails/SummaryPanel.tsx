@@ -10,6 +10,7 @@ import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
 import { ExportMeetingDialog } from './ExportMeetingDialog';
 import { ReminderDraftReview } from './ReminderDraftReview';
 import { AppleNotesExportPanel } from './AppleNotesExportPanel';
+import { CalendarEventPanel } from './CalendarEventPanel';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
@@ -442,6 +443,7 @@ export function SummaryPanel({
               }}
             />
           </div>
+          <CalendarEventPanel meetingId={meeting.id} hasSummary={!!aiSummary} />
           <AppleNotesExportPanel meetingId={meeting.id} hasSummary={!!aiSummary} summaryStatus={summaryStatus} />
           <ReminderDraftReview meetingId={meeting.id} hasSummary={!!aiSummary} />
           {summaryStatus !== 'idle' && (

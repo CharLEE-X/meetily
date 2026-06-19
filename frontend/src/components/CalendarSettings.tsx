@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { CalendarCheck2, CalendarClock, CheckCircle2, CircleAlert, Loader2, PlugZap, RefreshCw, Trash2 } from "lucide-react"
+import { CalendarCheck2, CalendarClock, CheckCircle2, CircleAlert, Loader2, PlugZap, RefreshCw, Save, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { calendarService, CalendarEvent, CalendarProviderAccount, CalendarSettingsState, CalendarSyncResult } from "@/services/calendarService"
 import {
@@ -65,6 +65,9 @@ export function CalendarSettings() {
   const [syncResult, setSyncResult] = useState<CalendarSyncResult | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<"connect" | "sync" | "disconnect" | null>(null)
+  const [writeLoading, setWriteLoading] = useState(false)
+  const [targetCalendarName, setTargetCalendarName] = useState("Meetily")
+  const [autoCreateEvents, setAutoCreateEvents] = useState(false)
   const [selectedRecordingEventId, setSelectedRecordingEventId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
@@ -83,6 +86,9 @@ export function CalendarSettings() {
       ])
       setSettings(nextSettings)
       setEvents(nextEvents)
+      const account = nextSettings.accounts.find((account) => account.provider === "apple")
+      setTargetCalendarName(account?.targetCalendarName ?? "Meetily")
+      setAutoCreateEvents(account?.autoCreateEvents ?? false)
       if (nextEvents.length > 0) {
         saveSyncedCalendarEvents(nextEvents.map(calendarEventToApprovedEvent))
       }
@@ -151,6 +157,26 @@ export function CalendarSettings() {
       setMessage(friendlyError(error))
     } finally {
       setActionLoading(null)
+    }
+  }
+
+  const handleSaveWriteSettings = async () => {
+    setWriteLoading(true)
+    setMessage(null)
+    try {
+      const account = await calendarService.updateWriteSettings({
+        provider: "apple",
+        targetCalendarName,
+        autoCreateEvents,
+      })
+      setSettings(await calendarService.getSettings())
+      setTargetCalendarName(account.targetCalendarName)
+      setAutoCreateEvents(account.autoCreateEvents)
+      setMessage("Apple Calendar event creation settings saved.")
+    } catch (error) {
+      setMessage(friendlyError(error))
+    } finally {
+      setWriteLoading(false)
     }
   }
 
@@ -236,6 +262,47 @@ export function CalendarSettings() {
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-950">Event creation</h3>
+          <p className="text-sm text-gray-600">Create or update Meetily-owned Apple Calendar events for completed recordings.</p>
+        </div>
+        <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Target calendar</span>
+            <input
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              value={targetCalendarName}
+              disabled={writeLoading}
+              onChange={(event) => setTargetCalendarName(event.target.value)}
+              placeholder="Meetily"
+            />
+          </label>
+          <button
+            type="button"
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            onClick={handleSaveWriteSettings}
+            disabled={isLoading || writeLoading}
+          >
+            {writeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save
+          </button>
+        </div>
+        <label className="mt-5 flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600"
+            checked={autoCreateEvents}
+            disabled={writeLoading}
+            onChange={(event) => setAutoCreateEvents(event.target.checked)}
+          />
+          <span>
+            <span className="block text-sm font-medium text-gray-950">Allow Meetily to create calendar events</span>
+            <span className="mt-1 block text-xs text-gray-500">Off by default. Meetily only updates events it created or linked.</span>
+          </span>
+        </label>
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
