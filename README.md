@@ -249,7 +249,9 @@ Planned feature areas:
 - **Meeting chat:** local-first retrieval over transcripts, summaries, and
   enabled artifacts with citations back to meeting sources.
 - **Calendar integration:** selected-calendar sync that stores minimal event
-  metadata and can be disconnected.
+  metadata, can be disconnected, starts with Apple Calendar on macOS, and keeps
+  a provider-neutral path for future ICS and Google Calendar support. See
+  [Calendar Integration](docs/calendar-integration.md).
 - **Apple Notes export:** opt-in macOS automation with destination preview before
   writing meeting content.
 - **Local MCP server:** opt-in local agent access with trusted clients, scoped

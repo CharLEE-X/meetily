@@ -77,7 +77,7 @@ transactions, generated files, and deletion cleanup.
 | Notifications | Available | Use for background job completion and recoverable failures. |
 | AppleScript/Shortcuts automation | Not implemented | Required for Apple Notes/Calendar automation if chosen; needs Apple Events entitlement and UX disclosure. |
 | Screenshots | Not implemented | Requires macOS Screen Recording permission and a visible capture state. |
-| Calendar access | Not implemented | Needs provider decision: EventKit/Apple Calendar, Google Calendar, ICS, or a staged combination. |
+| Calendar access | Not implemented | Provider strategy is documented in [Calendar Integration](calendar-integration.md): Apple Calendar/EventKit first, then ICS, then Google Calendar. |
 | Meeting chat index | Not implemented | Needs artifact model, retention/deletion rules, and provider/local model routing. |
 
 ### Refactoring Before Feature Work
@@ -422,7 +422,7 @@ Exit gates:
 | System audio capture | Screen/audio capture implementation dependent | Partially platform-specific | Re-test per release |
 | Screenshots | Screen Recording privacy permission, possible user prompt only | Not present in app flow | Add feature-gated permission UX before implementation |
 | Apple Notes automation | Apple Events automation entitlement/usage copy if AppleScript is used | Not present | Add only when Notes implementation path is chosen |
-| Apple Calendar/EventKit | Calendar usage description/entitlement or Apple Events depending path | Not present | Decide provider path before coding |
+| Apple Calendar/EventKit | Calendar usage description/entitlement | Not present | Use EventKit for calendar reads/writes; reserve AppleScript for Apple Notes or last-resort automation. Apple Notes may still need Apple Events separately. |
 | Local MCP | Network server entitlement for App Store | Present in App Store entitlements | Keep loopback-only and default-off |
 | File exports | User-selected file paths or app-managed storage | Tauri fs plugin present | Preview destination and avoid broad file access |
 | Sidecars | Code signing for nested binaries | App Store script signs known nested executables | Update script when adding sidecars |
@@ -469,7 +469,7 @@ explicit destination/provider/client setup.
 
 | Decision | Needed before | Current default |
 | --- | --- | --- |
-| Calendar provider path: Apple Calendar, Google, ICS, or staged mix | CHA-1669 and CHA-1666 | Stage provider-neutral metadata first |
+| Calendar provider path | CHA-1669, CHA-1700, and CHA-1666 | Apple Calendar/EventKit first, then ICS, then Google Calendar; stage provider-neutral metadata first |
 | Apple Notes implementation path: AppleScript, Shortcuts, or native bridge | CHA-1670 | Do not implement until entitlement and UX are finalized |
 | Chat index engine and embedding model | CHA-1668 | Start with local, deleteable index abstraction |
 | PDF/DOCX renderer dependencies | CHA-1665 | Review license and bundle size before adding |

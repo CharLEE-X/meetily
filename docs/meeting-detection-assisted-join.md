@@ -30,7 +30,8 @@ Settings must make this clear:
 ## Event Matching Rules
 
 The first implementation accepts provider-neutral calendar event metadata from
-future calendar sync and a local approved-event form in Settings:
+[Calendar Integration](calendar-integration.md) and a local approved-event form
+in Settings:
 
 * event ID, calendar ID, optional calendar name;
 * title, start and end time;
