@@ -56,10 +56,11 @@ Default destination:
   as `Meetily - Client Name` and record the fallback in local status.
 
 Destination preview includes the account label, folder label, note title, and
-the content sections that will be written. The preview must be shown before the
-first manual export, before automatic export is enabled, and whenever the
-resolved account, folder, grouping mode, or note title pattern differs from the
-last confirmed destination.
+the content sections that will be written. The preview is shown from meeting
+details before export and must be confirmed whenever the resolved account,
+folder, grouping mode, or note title pattern differs from the last confirmed
+destination. Settings also shows whether the destination has been confirmed so
+users can understand whether automation can run reliably.
 
 If the selected account is iCloud-backed, preview copy must say that Apple Notes
 may sync the exported meeting content through the user's Apple account. This is
@@ -123,8 +124,8 @@ Apple Notes and Apple Calendar share local meeting artifact metadata:
   when a linked calendar event exists.
 * Calendar event creation can include the Notes destination label or note id
   after export.
-* Notes export can include the linked calendar event title/time when the user
-  has separately enabled Calendar access.
+* Notes export attaches its local export id to any existing meeting calendar
+  link.
 
 Neither integration implies consent for the other. Notes export must not expose
 calendar metadata unless Calendar access and Notes export are both enabled.
@@ -142,7 +143,7 @@ calendar metadata unless Calendar access and Notes export are both enabled.
 
 ## Implementation References
 
-Planned module boundaries:
+Implemented module boundaries:
 
 * Rust: `frontend/src-tauri/src/apple_notes.rs`.
 * Database migration:
@@ -153,13 +154,27 @@ Planned module boundaries:
 * Calendar link updates: `frontend/src-tauri/src/calendar.rs` and
   `frontend/src-tauri/migrations/20260102000000_add_calendar_integration_tables.sql`.
 
-Initial Tauri commands:
+Tauri commands:
 
 * `list_apple_notes_providers`
 * `get_apple_notes_settings`
 * `connect_apple_notes_provider`
 * `disconnect_apple_notes_provider`
+* `update_apple_notes_settings`
 * `preview_apple_notes_export`
 * `export_meeting_to_apple_notes`
 * `get_meeting_apple_notes_export`
 * `list_recent_apple_notes_exports`
+
+## QA Matrix
+
+| Scenario | Expected result |
+| --- | --- |
+| Open Settings before connecting Notes | Apple Notes shows not connected, automation health explains setup is incomplete, and no Notes commands run. |
+| Connect Apple Notes | The account enters permission-needed/ready state and the first write can request macOS Automation permission. |
+| Preview a meeting export | Meeting details shows the destination folder, note title, included sections, and destination confirmation requirement. |
+| Confirm and export | A note is created in the configured folder, an `apple_notes_exports` record is saved, and repeat export updates the same note id. |
+| Export after Calendar event creation | The existing `meeting_calendar_links` row is backfilled with `notes_export_id`. |
+| Create Calendar event after Notes export | The Calendar event notes include Apple Notes export metadata. |
+| Automation disabled | Manual export still works after preview; automatic export does not run. |
+| Disconnect Notes | Future writes stop, external Notes content is not deleted, and local history remains visible. |

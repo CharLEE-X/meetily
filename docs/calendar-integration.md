@@ -30,12 +30,12 @@ provider, and select which calendars are allowed.
 Apple Calendar should move to EventKit for hardened event reads and writes.
 EventKit gives a narrower public API surface for events and calendars; the
 current macOS Calendar automation bridge is a temporary first local-provider
-slice and is limited to read-only event metadata sync. AppleScript should be
-reserved for Apple Notes, this Calendar bootstrap bridge, or last-resort
-automation paths. On current macOS versions, the app must distinguish full event
-access from write-only event access. Read sync requires full access; creating
-Meetily-owned events can use a write-only path if the implementation supports
-it.
+slice for event metadata sync and Meetily-owned event creation. AppleScript
+should be reserved for Apple Notes, this Calendar bootstrap bridge, or
+last-resort automation paths. On current macOS versions, the app must
+distinguish full event access from write-only event access. Read sync requires
+full access; creating Meetily-owned events can use a write-only path if the
+implementation supports it.
 
 Permission states:
 
@@ -174,7 +174,7 @@ Default sync window:
 * Look back 1 day so late recordings can still match a recent event.
 * Look ahead 14 days for upcoming prompts.
 * Refresh when Settings opens and when the user clicks Sync now in the shipped
-  UI. App-start and periodic background sync are still planned.
+  UI. App-start and periodic background sync remain follow-up work.
 * Purge event rows older than 30 days unless they are linked to a Meetily
   meeting; linked rows retain only the fields needed for the link and audit
   status after they leave the active sync window.
@@ -227,8 +227,8 @@ When Apple Calendar event creation is enabled:
   status.
 * If an Apple Notes summary exists, the calendar event notes include the Notes
   reference or destination label.
-* If the calendar event exists first, later Apple Notes export backfills the
-  linked artifact section with calendar metadata.
+* If the calendar event exists first, later Apple Notes export attaches the
+  Notes export id to the existing `meeting_calendar_links` row.
 * Meetily only updates events it created or previously linked through
   `meeting_calendar_links.apple_event_identifier`; it must not modify unrelated
   user calendar events based on title/time similarity alone.
@@ -284,12 +284,8 @@ Initial Tauri commands:
 * `get_calendar_settings`
 * `connect_calendar_provider`
 * `disconnect_calendar_provider`
+* `update_calendar_write_settings`
 * `sync_calendar_events`
 * `list_upcoming_calendar_events`
 * `link_meeting_calendar_event`
-
-Planned commands for later slices:
-
-* `update_calendar_settings`
-* `list_calendar_sources`
 * `create_or_update_meeting_calendar_event`

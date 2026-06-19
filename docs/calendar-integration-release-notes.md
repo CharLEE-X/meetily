@@ -9,18 +9,20 @@
 * Upcoming meetings list with sync status, last sync, and permission/error state.
 * Event selection for the next manual recording, including title and metadata
   prefill through the existing meeting detection metadata path.
+* Explicit Apple Calendar event creation settings with target calendar and
+  default-off write opt-in.
+* Automation health checks for connection, cached events, event creation, last
+  sync, and errors.
 
 ## Provider Limitations
 
 * Apple Calendar is the only enabled provider in this release.
 * The first Apple Calendar slice uses the local macOS Calendar automation bridge
-  for read-only event metadata. A later hardening pass should move event reads
-  to EventKit before broad distribution.
+  for event metadata and Meetily-owned event creation. A later hardening pass
+  should move event reads/writes to EventKit before broad distribution.
 * ICS and Google Calendar are visible in the provider model but remain planned.
-* Calendar writes are not enabled. Apple Notes back-links and Apple Calendar
-  event creation are planned for the Notes/calendar linking work.
 * Calendar sync is user-triggered from Settings. App-start and periodic
-  background sync are planned.
+  background sync remain follow-up work.
 * Calendar source selection is represented in the database model, but the first
   UI slice syncs the Apple Calendar account as a single local source.
 
@@ -33,9 +35,9 @@ prompts and recording setup: title, start/end time, local source identifiers,
 event location, supported meeting URL, provider label, and sanitized short
 description context.
 
-Meetily does not expose calendar metadata to MCP tools, exports, Apple Notes, or
-cloud AI providers in this release. Those destinations require separate opt-in
-and destination-specific preview before calendar metadata can be included.
+Meetily does not expose calendar metadata to MCP tools or cloud AI providers in
+this release. Apple Notes and Apple Calendar linking requires separate opt-in for
+both destinations before metadata is shared between them.
 
 Disconnecting Apple Calendar revokes cached prompts and marks cached calendar
 events as revoked. It does not delete or modify external Apple Calendar events.
@@ -52,9 +54,12 @@ events as revoked. It does not delete or modify external Apple Calendar events.
 | Overlapping events | Multiple upcoming events remain visible and sorted by start time; duplicate meeting prompts are still deduplicated by existing meeting detection rules. |
 | Select an upcoming event | Event card shows selected state and the next manual recording uses the event title and metadata. |
 | Unselect an event | Selected state clears and the next manual recording returns to generated title behavior unless a prompt candidate is used. |
+| Enable event creation | Settings saves the target calendar and write opt-in separately from read sync. |
+| Create a Calendar event from meeting details | A completed meeting with a summary creates a Meetily-owned event and stores the Apple event identifier locally. |
+| Create the same event again | The existing event is updated instead of duplicated. |
+| Create an event after Apple Notes export | Event notes include Apple Notes export metadata. |
 | Disconnect provider | Calendar prompts are cleared, cached events are revoked locally, and non-calendar/local approved meeting candidates are preserved. |
 | Offline or sync failure after prior sync | Existing non-stale local cache remains available until disconnect or stale-window filtering hides prompts. |
-| Export a meeting | Calendar metadata is not included beyond already stored meeting title/summary output unless a future explicit calendar export option is added. |
 | MCP client reads meetings | Calendar metadata is not exposed through MCP in this release; future MCP calendar access requires a separate scope and Settings toggle. |
 
 ## Manual Verification Notes
