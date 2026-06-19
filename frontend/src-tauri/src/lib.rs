@@ -38,6 +38,7 @@ pub(crate) use perf_trace;
 pub mod analytics;
 pub mod api;
 pub mod audio;
+pub mod apple_notes;
 pub mod calendar;
 pub mod reminders;
 pub mod config;
@@ -778,6 +779,14 @@ pub fn run() {
             calendar::sync_calendar_events,
             calendar::list_upcoming_calendar_events,
             calendar::link_meeting_calendar_event,
+            apple_notes::list_apple_notes_providers,
+            apple_notes::get_apple_notes_settings,
+            apple_notes::connect_apple_notes_provider,
+            apple_notes::disconnect_apple_notes_provider,
+            apple_notes::preview_apple_notes_export,
+            apple_notes::export_meeting_to_apple_notes,
+            apple_notes::get_meeting_apple_notes_export,
+            apple_notes::list_recent_apple_notes_exports,
             reminders::list_reminder_providers,
             reminders::get_reminder_settings,
             reminders::connect_reminder_provider,
