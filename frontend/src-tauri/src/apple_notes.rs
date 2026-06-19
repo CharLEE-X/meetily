@@ -93,6 +93,14 @@ pub struct AppleNotesExportRequest {
     pub confirm_destination_hash: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppleNotesSettingsUpdateRequest {
+    pub provider: Option<String>,
+    pub root_folder_name: Option<String>,
+    pub auto_export_enabled: Option<bool>,
+}
+
 #[derive(Debug, Clone)]
 struct NotesExportPayload {
     meeting_id: String,
@@ -181,6 +189,53 @@ pub async fn disconnect_apple_notes_provider(
 }
 
 #[tauri::command]
+pub async fn update_apple_notes_settings(
+    state: State<'_, AppState>,
+    request: AppleNotesSettingsUpdateRequest,
+) -> Result<AppleNotesProviderAccount, String> {
+    let provider = normalize_provider(request.provider.as_deref().unwrap_or(PROVIDER_APPLE_NOTES))?;
+    let pool = state.db_manager.pool();
+    let existing = match get_account(pool, &provider).await? {
+        Some(account) => account,
+        None => connect_provider_account(pool, &provider).await?,
+    };
+    let now = Utc::now().to_rfc3339();
+    let root_folder_name = request
+        .root_folder_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&existing.root_folder_name);
+    let auto_export_enabled = request
+        .auto_export_enabled
+        .unwrap_or(existing.auto_export_enabled);
+
+    sqlx::query(
+        "UPDATE apple_notes_provider_accounts
+         SET root_folder_name = ?,
+             auto_export_enabled = ?,
+             confirmed_destination_hash = CASE
+                WHEN root_folder_name = ? THEN confirmed_destination_hash
+                ELSE NULL
+             END,
+             updated_at = ?
+         WHERE provider = ?",
+    )
+    .bind(root_folder_name)
+    .bind(if auto_export_enabled { 1 } else { 0 })
+    .bind(root_folder_name)
+    .bind(&now)
+    .bind(&provider)
+    .execute(pool)
+    .await
+    .map_err(|err| format!("Failed to update Apple Notes settings: {}", err))?;
+
+    get_account(pool, &provider)
+        .await?
+        .ok_or_else(|| "Apple Notes settings were not saved.".to_string())
+}
+
+#[tauri::command]
 pub async fn preview_apple_notes_export(
     state: State<'_, AppState>,
     meeting_id: String,
@@ -200,8 +255,12 @@ pub async fn preview_apple_notes_export(
         .as_ref()
         .map(|account| account.grouping_mode.as_str())
         .unwrap_or("none");
-    let destination_hash =
-        destination_hash(&account_label, &folder_name, grouping_mode, &payload.note_title);
+    let destination_hash = destination_hash(
+        &account_label,
+        &folder_name,
+        grouping_mode,
+        &payload.note_title,
+    );
     let requires_destination_confirmation = account
         .as_ref()
         .and_then(|account| account.confirmed_destination_hash.as_deref())

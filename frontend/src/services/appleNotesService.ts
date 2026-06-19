@@ -67,6 +67,12 @@ export interface AppleNotesExportRequest {
   confirmDestinationHash?: string | null;
 }
 
+export interface AppleNotesSettingsUpdateRequest {
+  provider?: string;
+  rootFolderName?: string;
+  autoExportEnabled?: boolean;
+}
+
 const requireDesktop = () => {
   if (!isTauriRuntime()) {
     throw new Error('Apple Notes export is available in the desktop app.');
@@ -92,6 +98,11 @@ export const appleNotesService = {
   async disconnectProvider(provider = 'apple_notes'): Promise<AppleNotesProviderAccount> {
     requireDesktop();
     return invoke<AppleNotesProviderAccount>('disconnect_apple_notes_provider', { provider });
+  },
+
+  async updateSettings(request: AppleNotesSettingsUpdateRequest): Promise<AppleNotesProviderAccount> {
+    requireDesktop();
+    return invoke<AppleNotesProviderAccount>('update_apple_notes_settings', { request });
   },
 
   async previewExport(meetingId: string): Promise<AppleNotesExportPreview> {

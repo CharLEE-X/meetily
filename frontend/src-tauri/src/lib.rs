@@ -783,6 +783,7 @@ pub fn run() {
             apple_notes::get_apple_notes_settings,
             apple_notes::connect_apple_notes_provider,
             apple_notes::disconnect_apple_notes_provider,
+            apple_notes::update_apple_notes_settings,
             apple_notes::preview_apple_notes_export,
             apple_notes::export_meeting_to_apple_notes,
             apple_notes::get_meeting_apple_notes_export,
