@@ -46,10 +46,15 @@ export interface AgentSetupStatus {
   configPath: string;
   installed: boolean;
   configured: boolean;
+  endpointConfigured: boolean;
   working: boolean;
   status: AgentStatusValue;
   lastCheckedAt: string;
   message: string;
+  invocationMode: 'copyPrompt';
+  capabilities: string[];
+  fallback: string;
+  setupHint: string;
 }
 
 const defaultStatus: McpStatus = {
@@ -109,10 +114,15 @@ export const mcpService = {
         configPath: '',
         installed: false,
         configured: false,
+        endpointConfigured: false,
         working: false,
         status: 'notInstalled' as AgentStatusValue,
         lastCheckedAt: new Date().toISOString(),
         message: 'Open the desktop app to inspect local agent configuration.',
+        invocationMode: 'copyPrompt',
+        capabilities: ['Open the desktop app to inspect local agent configuration.'],
+        fallback: 'Copy a prepared prompt into the selected agent after setup.',
+        setupHint: 'Open the desktop app and run Agent setup.',
       }));
     }
     return invoke<AgentSetupStatus[]>('mcp_get_agent_statuses');

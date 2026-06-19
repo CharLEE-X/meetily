@@ -4,7 +4,13 @@ use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{fs, io, path::PathBuf, sync::Arc, sync::Mutex as StdMutex, time::Duration};
+use std::{
+    env, fs, io,
+    path::{Path, PathBuf},
+    sync::Arc,
+    sync::Mutex as StdMutex,
+    time::Duration,
+};
 use tauri::{AppHandle, Manager, State};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -2056,10 +2062,15 @@ pub struct AgentSetupStatus {
     pub config_path: String,
     pub installed: bool,
     pub configured: bool,
+    pub endpoint_configured: bool,
     pub working: bool,
     pub status: String,
     pub last_checked_at: String,
     pub message: String,
+    pub invocation_mode: String,
+    pub capabilities: Vec<String>,
+    pub fallback: String,
+    pub setup_hint: String,
 }
 
 fn home_dir() -> Result<PathBuf> {
@@ -2108,13 +2119,111 @@ fn config_contains_meetily(path: &PathBuf, agent: &AgentKind, url: &str) -> bool
     }
 }
 
+fn command_exists(command: &str) -> bool {
+    let Some(paths) = env::var_os("PATH") else {
+        return false;
+    };
+
+    env::split_paths(&paths).any(|dir| {
+        let candidate = dir.join(command);
+        candidate.is_file()
+            || if cfg!(target_os = "windows") {
+                dir.join(format!("{command}.exe")).is_file()
+            } else {
+                false
+            }
+    })
+}
+
+fn macos_app_exists(name: &str) -> bool {
+    cfg!(target_os = "macos") && Path::new("/Applications").join(name).exists()
+}
+
+fn agent_installed(agent: &AgentKind, config_path: &Path) -> bool {
+    let config_parent_exists = config_path
+        .parent()
+        .map(|parent| parent.exists())
+        .unwrap_or(false);
+    match agent {
+        AgentKind::Claude => {
+            config_parent_exists || command_exists("claude") || macos_app_exists("Claude.app")
+        }
+        AgentKind::Codex => config_parent_exists || command_exists("codex"),
+        AgentKind::Cursor => {
+            config_parent_exists || command_exists("cursor") || macos_app_exists("Cursor.app")
+        }
+    }
+}
+
+fn agent_invocation_mode(agent: &AgentKind) -> &'static str {
+    match agent {
+        AgentKind::Claude | AgentKind::Codex | AgentKind::Cursor => "copyPrompt",
+    }
+}
+
+fn agent_fallback(agent: &AgentKind) -> &'static str {
+    match agent {
+        AgentKind::Claude => "Open Claude Desktop and paste the prepared prompt. The prompt references Meetily MCP sources after setup.",
+        AgentKind::Codex => "Open Codex in the target workspace and paste the prepared prompt. The prompt references Meetily MCP sources after setup.",
+        AgentKind::Cursor => "Open Cursor and paste the prepared prompt. The prompt references Meetily MCP sources after setup.",
+    }
+}
+
+fn agent_setup_hint(agent: &AgentKind) -> &'static str {
+    match agent {
+        AgentKind::Claude => "Install Claude Desktop or create its config file, then run setup to add the Meetily MCP server.",
+        AgentKind::Codex => "Install Codex or create ~/.codex/config.toml, then run setup to add the Meetily MCP server.",
+        AgentKind::Cursor => "Install Cursor or create ~/.cursor/mcp.json, then run setup to add the Meetily MCP server.",
+    }
+}
+
+fn agent_capabilities(agent: &AgentKind, configured: bool, working: bool) -> Vec<String> {
+    let mut capabilities = vec![
+        "Source-cited meeting handoff prompt".to_string(),
+        "Copyable fallback prompt".to_string(),
+    ];
+
+    if configured {
+        capabilities.push("Meetily MCP endpoint configured".to_string());
+    }
+
+    if working {
+        capabilities.push("Local MCP server reachable".to_string());
+    }
+
+    match agent {
+        AgentKind::Codex => {
+            capabilities
+                .push("Agent can use local codebase and developer tools after handoff".to_string());
+        }
+        AgentKind::Claude => {
+            capabilities.push("Agent can use Claude Desktop MCP tools after handoff".to_string());
+        }
+        AgentKind::Cursor => {
+            capabilities.push("Agent can use Cursor workspace context after handoff".to_string());
+        }
+    }
+
+    capabilities
+}
+
 fn status_for_agent(
     agent: AgentKind,
     settings: &McpSettings,
     server_running: bool,
 ) -> AgentSetupStatus {
     let path = agent_config_path(&agent).unwrap_or_default();
-    let installed = path.parent().map(|parent| parent.exists()).unwrap_or(false);
+    let installed = agent_installed(&agent, &path);
+    status_for_agent_at_path(agent, path, settings, server_running, installed)
+}
+
+fn status_for_agent_at_path(
+    agent: AgentKind,
+    path: PathBuf,
+    settings: &McpSettings,
+    server_running: bool,
+    installed: bool,
+) -> AgentSetupStatus {
     let configured = config_contains_meetily(&path, &agent, &expected_url(settings));
     let working = configured && server_running;
     let status = if working {
@@ -2133,6 +2242,7 @@ fn status_for_agent(
         config_path: path.display().to_string(),
         installed,
         configured,
+        endpoint_configured: configured,
         working,
         status: status.to_string(),
         last_checked_at: now_string(),
@@ -2142,6 +2252,10 @@ fn status_for_agent(
             "notConfigured" => "App config found, but Meetily MCP is not configured.".to_string(),
             _ => "Config folder was not found on this machine.".to_string(),
         },
+        invocation_mode: agent_invocation_mode(&agent).to_string(),
+        capabilities: agent_capabilities(&agent, configured, working),
+        fallback: agent_fallback(&agent).to_string(),
+        setup_hint: agent_setup_hint(&agent).to_string(),
     }
 }
 
@@ -2437,5 +2551,34 @@ mod tests {
         let raw = fs::read_to_string(temp.path()).unwrap();
         assert!(raw.contains("[mcp_servers.meetily]"));
         assert!(raw.contains("Authorization: Bearer token"));
+    }
+
+    #[test]
+    fn readiness_status_does_not_expose_authorization_token() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        merge_codex_config(
+            &temp.path().to_path_buf(),
+            "http://127.0.0.1:43118/mcp",
+            "local-secret-token",
+        )
+        .unwrap();
+
+        let status = status_for_agent_at_path(
+            AgentKind::Codex,
+            temp.path().to_path_buf(),
+            &McpSettings::default(),
+            true,
+            true,
+        );
+        let serialized = serde_json::to_string(&status).unwrap();
+
+        assert!(status.working);
+        assert!(status.endpoint_configured);
+        assert!(status
+            .capabilities
+            .iter()
+            .any(|capability| capability.contains("MCP")));
+        assert!(!serialized.contains("local-secret-token"));
+        assert!(!serialized.contains("Authorization: Bearer"));
     }
 }

@@ -31,7 +31,22 @@ function statusText(status: McpStatus | null): string {
 function agentIcon(agent: AgentSetupStatus) {
   if (agent.working) return <CheckCircle2 className="h-4 w-4 text-emerald-600" />
   if (agent.configured) return <CircleDashed className="h-4 w-4 text-blue-600" />
+  if (!agent.installed) return <CircleAlert className="h-4 w-4 text-gray-500" />
   return <CircleAlert className="h-4 w-4 text-amber-600" />
+}
+
+function agentStatusLabel(agent: AgentSetupStatus): string {
+  if (agent.working) return "Working"
+  if (agent.configured) return "Configured"
+  if (agent.installed) return "Needs setup"
+  return "Unavailable"
+}
+
+function agentStatusClass(agent: AgentSetupStatus): string {
+  if (agent.working) return "bg-emerald-100 text-emerald-800"
+  if (agent.configured) return "bg-blue-100 text-blue-800"
+  if (agent.installed) return "bg-amber-100 text-amber-800"
+  return "bg-gray-200 text-gray-700"
 }
 
 function friendlyError(error: unknown): string {
@@ -211,6 +226,7 @@ export function McpSettings() {
   const serverUrl = status?.url ?? `http://127.0.0.1:${status?.port ?? 43118}/mcp`
   const selectedAgentStatus = agentStatuses.find((agent) => agent.agent === workflowSettings.defaultAgent)
   const selectedAgentNeedsSetup = workflowSettings.defaultAgent !== "manual" && !selectedAgentStatus?.configured
+  const selectedAgentNotReadyForAuto = workflowSettings.mode === "auto" && workflowSettings.defaultAgent !== "manual" && !selectedAgentStatus?.working
   const selectedAgentLabel = AGENT_SUPPORT_MATRIX.find((agent) => agent.agent === workflowSettings.defaultAgent)?.label ?? workflowSettings.defaultAgent
 
   return (
@@ -316,7 +332,18 @@ export function McpSettings() {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   {agentIcon(agent)}
-                  <div className="font-medium text-gray-900">{agent.label}</div>
+                  <div>
+                    <div className="font-medium text-gray-900">{agent.label}</div>
+                    <div className="mt-1 text-xs text-gray-500">Checked {new Date(agent.lastCheckedAt).toLocaleString()}</div>
+                  </div>
+                </div>
+                <span className={`rounded-full px-2 py-0.5 text-xs ${agentStatusClass(agent)}`}>
+                  {agentStatusLabel(agent)}
+                </span>
+              </div>
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <div className="text-xs text-gray-600">
+                  Invocation: {agent.invocationMode === "copyPrompt" ? "copy prompt fallback" : agent.invocationMode}
                 </div>
                 <button
                   className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-white disabled:opacity-50"
@@ -327,6 +354,17 @@ export function McpSettings() {
                 </button>
               </div>
               <p className="mt-3 text-sm text-gray-600">{agent.message}</p>
+              {!agent.configured && (
+                <p className="mt-2 text-xs text-gray-500">{agent.setupHint}</p>
+              )}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {agent.capabilities.map((capability) => (
+                  <span key={capability} className="rounded-full bg-white px-2 py-1 text-xs text-gray-600 ring-1 ring-gray-200">
+                    {capability}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-gray-600">{agent.fallback}</p>
               {agent.configPath && (
                 <p className="mt-3 break-all font-mono text-xs text-gray-500">{agent.configPath}</p>
               )}
@@ -430,6 +468,11 @@ export function McpSettings() {
         {selectedAgentNeedsSetup && (
           <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             The selected default agent is not configured yet. Run Agent setup for {selectedAgentLabel} before enabling post-meeting handoffs for that target.
+          </div>
+        )}
+        {selectedAgentNotReadyForAuto && (
+          <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Auto mode is selected, but {selectedAgentLabel} is not working yet. Start Meetily MCP and confirm the agent readiness check before relying on automatic post-meeting handoffs.
           </div>
         )}
 
