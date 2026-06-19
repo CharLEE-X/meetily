@@ -94,6 +94,15 @@ export interface ReminderDraftGenerationResult {
   generatedAt: string;
 }
 
+export interface ReminderDraftUpdateRequest {
+  draftId: string;
+  title: string;
+  notes?: string | null;
+  dueAt?: string | null;
+  priority?: number | null;
+  listId?: string | null;
+}
+
 const requireDesktop = () => {
   if (!isTauriRuntime()) {
     throw new Error('Apple Reminders integration is available in the desktop app.');
@@ -139,5 +148,15 @@ export const reminderService = {
   async listDrafts(meetingId: string, includeLowConfidence = false): Promise<ReminderDraft[]> {
     requireDesktop();
     return invoke<ReminderDraft[]>('list_reminder_drafts', { meetingId, includeLowConfidence });
+  },
+
+  async updateDraft(request: ReminderDraftUpdateRequest): Promise<ReminderDraft> {
+    requireDesktop();
+    return invoke<ReminderDraft>('update_reminder_draft', { request });
+  },
+
+  async dismissDraft(draftId: string): Promise<ReminderDraft> {
+    requireDesktop();
+    return invoke<ReminderDraft>('dismiss_reminder_draft', { draftId });
   },
 };

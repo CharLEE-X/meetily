@@ -124,6 +124,17 @@ pub struct ReminderDraftGenerationResult {
     pub generated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderDraftUpdateRequest {
+    pub draft_id: String,
+    pub title: String,
+    pub notes: Option<String>,
+    pub due_at: Option<String>,
+    pub priority: Option<i64>,
+    pub list_id: Option<String>,
+}
+
 #[tauri::command]
 pub async fn list_reminder_providers() -> Result<Vec<ReminderProviderInfo>, String> {
     Ok(provider_infos())
@@ -345,6 +356,22 @@ pub async fn list_reminder_drafts(
         include_low_confidence.unwrap_or(false),
     )
     .await
+}
+
+#[tauri::command]
+pub async fn update_reminder_draft(
+    state: State<'_, AppState>,
+    request: ReminderDraftUpdateRequest,
+) -> Result<ReminderDraft, String> {
+    update_draft(state.db_manager.pool(), request).await
+}
+
+#[tauri::command]
+pub async fn dismiss_reminder_draft(
+    state: State<'_, AppState>,
+    draft_id: String,
+) -> Result<ReminderDraft, String> {
+    set_draft_status(state.db_manager.pool(), &draft_id, "dismissed").await
 }
 
 fn provider_infos() -> Vec<ReminderProviderInfo> {
@@ -1349,6 +1376,9 @@ async fn list_drafts(
          FROM reminder_drafts
          WHERE meeting_id = ?"
         .to_string();
+    // Created and dismissed drafts move out of the review flow. Low-confidence drafts are
+    // separately controlled because users can explicitly ask to inspect them.
+    query.push_str(" AND status NOT IN ('created', 'dismissed')");
     if !include_low_confidence {
         query.push_str(" AND confidence >= 0.5 AND status != 'low_confidence'");
     }
@@ -1361,6 +1391,98 @@ async fn list_drafts(
     rows.into_iter()
         .map(|row| reminder_draft_from_row(&row))
         .collect()
+}
+
+async fn update_draft(
+    pool: &sqlx::SqlitePool,
+    request: ReminderDraftUpdateRequest,
+) -> Result<ReminderDraft, String> {
+    let title = request.title.trim();
+    if title.chars().count() < 3 {
+        return Err("Reminder title is required.".to_string());
+    }
+    if let Some(priority) = request.priority {
+        if !(1..=9).contains(&priority) {
+            return Err("Reminder priority must be between 1 and 9.".to_string());
+        }
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let notes = request
+        .notes
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let due_at = request
+        .due_at
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let list_id = request
+        .list_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    let result = sqlx::query(
+        "UPDATE reminder_drafts
+         SET title = ?, notes = ?, due_at = ?, priority = ?, list_id = ?, updated_at = ?
+         WHERE id = ? AND status NOT IN ('created', 'dismissed')",
+    )
+    .bind(title)
+    .bind(notes)
+    .bind(due_at)
+    .bind(request.priority)
+    .bind(list_id)
+    .bind(now)
+    .bind(&request.draft_id)
+    .execute(pool)
+    .await
+    .map_err(|err| format!("Failed to update reminder draft: {}", err))?;
+    if result.rows_affected() == 0 {
+        return Err("Reminder draft could not be edited.".to_string());
+    }
+
+    get_draft_by_id(pool, &request.draft_id).await
+}
+
+async fn set_draft_status(
+    pool: &sqlx::SqlitePool,
+    draft_id: &str,
+    status: &str,
+) -> Result<ReminderDraft, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let result = sqlx::query("UPDATE reminder_drafts SET status = ?, updated_at = ? WHERE id = ?")
+        .bind(status)
+        .bind(now)
+        .bind(draft_id)
+        .execute(pool)
+        .await
+        .map_err(|err| format!("Failed to update reminder draft status: {}", err))?;
+    if result.rows_affected() == 0 {
+        return Err("Reminder draft was not found.".to_string());
+    }
+
+    get_draft_by_id(pool, draft_id).await
+}
+
+async fn get_draft_by_id(pool: &sqlx::SqlitePool, draft_id: &str) -> Result<ReminderDraft, String> {
+    let row = sqlx::query(
+        "SELECT id, meeting_id, summary_id, title, notes, due_at, priority, list_id,
+            category, confidence, source_evidence_json, dedupe_key, status, created_at, updated_at
+         FROM reminder_drafts
+         WHERE id = ?",
+    )
+    .bind(draft_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| format!("Failed to load reminder draft: {}", err))?
+    .ok_or_else(|| "Reminder draft was not found.".to_string())?;
+
+    reminder_draft_from_row(&row)
 }
 
 fn reminder_draft_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ReminderDraft, String> {

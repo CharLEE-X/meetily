@@ -8,6 +8,7 @@ import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
 import { ExportMeetingDialog } from './ExportMeetingDialog';
+import { ReminderDraftReview } from './ReminderDraftReview';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
@@ -440,6 +441,7 @@ export function SummaryPanel({
               }}
             />
           </div>
+          <ReminderDraftReview meetingId={meeting.id} hasSummary={!!aiSummary} />
           {summaryStatus !== 'idle' && (
             <div className={`mx-6 mb-6 mt-2 rounded-2xl border p-4 ${summaryStatus === 'error' ? 'border-red-200 bg-red-50 text-red-700' :
               summaryStatus === 'completed' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' :
