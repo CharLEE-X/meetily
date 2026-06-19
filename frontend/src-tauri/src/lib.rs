@@ -46,6 +46,7 @@ pub mod console_utils;
 pub mod database;
 pub mod export;
 pub mod mcp;
+pub mod meeting_chat;
 pub mod meeting_detection;
 pub mod notifications;
 pub mod ollama;
@@ -769,6 +770,9 @@ pub fn run() {
             mcp::mcp_get_agent_statuses,
             mcp::mcp_setup_agent,
             mcp::mcp_setup_all_agents,
+            meeting_chat::meeting_chat_ask,
+            meeting_chat::meeting_chat_cancel,
+            meeting_chat::meeting_chat_list_messages,
             // Meeting detection commands
             meeting_detection::get_meeting_activity_signals,
             // Calendar integration commands
