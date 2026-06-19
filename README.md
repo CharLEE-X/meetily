@@ -94,6 +94,10 @@ The Community fork upgrade roadmap is documented in
 Sensitive automation in that roadmap is default-off and requires explicit user
 opt-in before it captures, exports, indexes, syncs, or exposes meeting data.
 
+Apple Reminders follow-up creation is designed in
+[Apple Reminders Follow-Up Integration](docs/apple-reminders-follow-ups.md). The
+workflow is default-off, local-first, and always review-before-write.
+
 <details>
 <summary>The Privacy Problem</summary>
 
