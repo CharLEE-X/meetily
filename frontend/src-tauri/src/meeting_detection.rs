@@ -26,7 +26,7 @@ pub struct NativeMeetingActivitySignals {
 #[tauri::command]
 pub async fn get_meeting_activity_signals() -> Result<NativeMeetingActivitySignals, String> {
     let running_apps = get_running_app_names();
-    let mut errors = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
 
     #[cfg(target_os = "macos")]
     let (active_app_name, active_window_title, browser_tabs) = {
