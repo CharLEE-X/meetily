@@ -62,6 +62,26 @@ function fromDateTimeInput(value: string): string | null {
   return Number.isFinite(date.getTime()) ? date.toISOString() : null
 }
 
+function formatCompactDate(value?: string | null): string {
+  if (!value) return "No due date"
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return "No due date"
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date)
+}
+
+function statusPillClass(status: string): string {
+  if (status === "completed") return "bg-emerald-100 text-emerald-800"
+  if (status === "open") return "bg-blue-100 text-blue-800"
+  if (status === "missing") return "bg-amber-100 text-amber-800"
+  if (status === "unavailable") return "bg-slate-100 text-slate-600"
+  return "bg-white/80 text-emerald-800"
+}
+
 function isConnected(account?: ReminderProviderAccount): boolean {
   return account?.status === "connected"
 }
@@ -341,14 +361,26 @@ export function ReminderDraftReview({ meetingId, hasSummary }: ReminderDraftRevi
       {createdLinks.length > 0 && (
         <div className="mx-4 mt-4 rounded-md border border-emerald-100 bg-emerald-50 p-3">
           <p className="text-sm font-medium text-emerald-900">Created reminders</p>
-          <div className="mt-2 space-y-1">
-            {createdLinks.slice(0, 4).map((link) => (
-              <div key={link.id} className="flex items-center justify-between gap-3 text-sm text-emerald-800">
-                <span className="min-w-0 truncate">{link.title}</span>
-                <span className="shrink-0 rounded-full bg-white/80 px-2 py-0.5 text-xs font-medium">{link.status}</span>
+          <div className="mt-2 space-y-2">
+            {createdLinks.slice(0, 5).map((link) => (
+              <div key={link.id} className="rounded-md bg-white/80 px-3 py-2 text-sm text-emerald-900">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 truncate font-medium">{link.title}</span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${statusPillClass(link.status)}`}>
+                    {link.status}
+                  </span>
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-emerald-700">
+                  <span>{link.listName ?? "Apple Reminders"}</span>
+                  <span>Due {formatCompactDate(link.dueAt)}</span>
+                  <span>Created {formatCompactDate(link.createdAt)}</span>
+                </div>
               </div>
             ))}
           </div>
+          {!isConnected(appleAccount) && (
+            <p className="mt-2 text-xs text-emerald-700">Status refresh is unavailable until Apple Reminders is reconnected.</p>
+          )}
         </div>
       )}
 

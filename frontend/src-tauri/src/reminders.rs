@@ -191,12 +191,15 @@ pub struct CreateReminderRequest {
 pub struct CreatedReminderLink {
     pub id: String,
     pub meeting_id: String,
+    pub meeting_title: Option<String>,
     pub draft_id: Option<String>,
     pub dedupe_key: String,
     pub provider: String,
     pub provider_reminder_id: String,
     pub list_id: Option<String>,
+    pub list_name: Option<String>,
     pub title: String,
+    pub due_at: Option<String>,
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
@@ -492,7 +495,17 @@ pub async fn list_created_reminders(
     state: State<'_, AppState>,
     meeting_id: String,
 ) -> Result<Vec<CreatedReminderLink>, String> {
+    refresh_created_link_statuses(state.db_manager.pool(), Some(&meeting_id)).await?;
     list_created_links(state.db_manager.pool(), &meeting_id).await
+}
+
+#[tauri::command]
+pub async fn list_recent_created_reminders(
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+) -> Result<Vec<CreatedReminderLink>, String> {
+    refresh_created_link_statuses(state.db_manager.pool(), None).await?;
+    list_recent_created_links(state.db_manager.pool(), limit.unwrap_or(12).clamp(1, 50)).await
 }
 
 fn provider_infos() -> Vec<ReminderProviderInfo> {
@@ -2156,7 +2169,7 @@ async fn save_created_link(
     sqlx::query(
         "INSERT INTO reminder_created_links
             (id, meeting_id, draft_id, dedupe_key, provider, provider_reminder_id, list_id, title, status, created_at, updated_at, last_error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?, NULL)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, NULL)
          ON CONFLICT(meeting_id, dedupe_key) DO UPDATE SET
             updated_at = reminder_created_links.updated_at",
     )
@@ -2185,10 +2198,14 @@ async fn get_created_link_by_dedupe(
     dedupe_key: &str,
 ) -> Result<Option<CreatedReminderLink>, String> {
     let row = sqlx::query(
-        "SELECT id, meeting_id, draft_id, dedupe_key, provider, provider_reminder_id, list_id,
-                title, status, created_at, updated_at, last_error
-         FROM reminder_created_links
-         WHERE meeting_id = ? AND dedupe_key = ?",
+        "SELECT r.id, r.meeting_id, m.title AS meeting_title, r.draft_id, r.dedupe_key,
+                r.provider, r.provider_reminder_id, r.list_id, l.name AS list_name,
+                r.title, d.due_at AS due_at, r.status, r.created_at, r.updated_at, r.last_error
+         FROM reminder_created_links r
+         LEFT JOIN reminder_drafts d ON d.id = r.draft_id
+         LEFT JOIN reminder_lists l ON l.id = r.list_id
+         LEFT JOIN meetings m ON m.id = r.meeting_id
+         WHERE r.meeting_id = ? AND r.dedupe_key = ?",
     )
     .bind(meeting_id)
     .bind(dedupe_key)
@@ -2204,11 +2221,15 @@ async fn list_created_links(
     meeting_id: &str,
 ) -> Result<Vec<CreatedReminderLink>, String> {
     let rows = sqlx::query(
-        "SELECT id, meeting_id, draft_id, dedupe_key, provider, provider_reminder_id, list_id,
-                title, status, created_at, updated_at, last_error
-         FROM reminder_created_links
-         WHERE meeting_id = ?
-         ORDER BY created_at DESC",
+        "SELECT r.id, r.meeting_id, m.title AS meeting_title, r.draft_id, r.dedupe_key,
+                r.provider, r.provider_reminder_id, r.list_id, l.name AS list_name,
+                r.title, d.due_at AS due_at, r.status, r.created_at, r.updated_at, r.last_error
+         FROM reminder_created_links r
+         LEFT JOIN reminder_drafts d ON d.id = r.draft_id
+         LEFT JOIN reminder_lists l ON l.id = r.list_id
+         LEFT JOIN meetings m ON m.id = r.meeting_id
+         WHERE r.meeting_id = ?
+         ORDER BY r.created_at DESC",
     )
     .bind(meeting_id)
     .fetch_all(pool)
@@ -2218,6 +2239,146 @@ async fn list_created_links(
     rows.into_iter()
         .map(|row| created_link_from_row(&row))
         .collect()
+}
+
+async fn list_recent_created_links(
+    pool: &sqlx::SqlitePool,
+    limit: i64,
+) -> Result<Vec<CreatedReminderLink>, String> {
+    let rows = sqlx::query(
+        "SELECT r.id, r.meeting_id, m.title AS meeting_title, r.draft_id, r.dedupe_key,
+                r.provider, r.provider_reminder_id, r.list_id, l.name AS list_name,
+                r.title, d.due_at AS due_at, r.status, r.created_at, r.updated_at, r.last_error
+         FROM reminder_created_links r
+         LEFT JOIN reminder_drafts d ON d.id = r.draft_id
+         LEFT JOIN reminder_lists l ON l.id = r.list_id
+         LEFT JOIN meetings m ON m.id = r.meeting_id
+         ORDER BY r.created_at DESC
+         LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|err| format!("Failed to list reminder follow-up history: {}", err))?;
+
+    rows.into_iter()
+        .map(|row| created_link_from_row(&row))
+        .collect()
+}
+
+async fn refresh_created_link_statuses(
+    pool: &sqlx::SqlitePool,
+    meeting_id: Option<&str>,
+) -> Result<(), String> {
+    let account = get_account(pool, PROVIDER_APPLE_REMINDERS).await?;
+    if !cfg!(target_os = "macos")
+        || !matches!(
+            account.as_ref().map(|a| a.status.as_str()),
+            Some("connected")
+        )
+    {
+        let now = chrono::Utc::now().to_rfc3339();
+        let query = if meeting_id.is_some() {
+            "UPDATE reminder_created_links SET status = 'unavailable', updated_at = ? WHERE meeting_id = ?"
+        } else {
+            "UPDATE reminder_created_links SET status = 'unavailable', updated_at = ?"
+        };
+        let mut statement = sqlx::query(query).bind(&now);
+        if let Some(meeting_id) = meeting_id {
+            statement = statement.bind(meeting_id);
+        }
+        statement
+            .execute(pool)
+            .await
+            .map_err(|err| format!("Failed to mark reminder statuses unavailable: {}", err))?;
+        return Ok(());
+    }
+
+    let rows = if let Some(meeting_id) = meeting_id {
+        sqlx::query("SELECT id, provider_reminder_id FROM reminder_created_links WHERE meeting_id = ?")
+            .bind(meeting_id)
+            .fetch_all(pool)
+            .await
+    } else {
+        sqlx::query("SELECT id, provider_reminder_id FROM reminder_created_links ORDER BY created_at DESC LIMIT 50")
+            .fetch_all(pool)
+            .await
+    }
+    .map_err(|err| format!("Failed to load reminders for status refresh: {}", err))?;
+
+    for row in rows {
+        let id: String = row.get("id");
+        let provider_reminder_id: String = row.get("provider_reminder_id");
+        let (status, error) = match read_apple_reminder_status(&provider_reminder_id) {
+            Ok(status) => (status, None),
+            Err(error) => (
+                "unavailable".to_string(),
+                Some(sanitize_reminder_error(&error)),
+            ),
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "UPDATE reminder_created_links
+             SET status = ?, last_error = ?, updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(status)
+        .bind(error)
+        .bind(now)
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|err| format!("Failed to save reminder status: {}", err))?;
+    }
+    Ok(())
+}
+
+fn read_apple_reminder_status(provider_reminder_id: &str) -> Result<String, String> {
+    let output = Command::new("osascript")
+        .args([
+            "-e",
+            &apple_reminder_status_script(),
+            "--",
+            provider_reminder_id,
+        ])
+        .output()
+        .map_err(|err| format!("Failed to read Apple Reminders status: {}", err))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Apple Reminders status is unavailable.".to_string()
+        } else {
+            stderr
+        });
+    }
+    let status = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    match status.as_str() {
+        "open" | "completed" | "missing" => Ok(status),
+        _ => Ok("unavailable".to_string()),
+    }
+}
+
+fn apple_reminder_status_script() -> String {
+    r#"on run argv
+    set targetReminderId to item 1 of argv
+    tell application id "com.apple.reminders"
+        try
+            set targetReminder to reminder id targetReminderId
+        on error
+            return "missing"
+        end try
+        try
+            if completed of targetReminder then
+                return "completed"
+            end if
+            return "open"
+        on error
+            return "unavailable"
+        end try
+    end tell
+end run
+"#
+    .to_string()
 }
 
 async fn get_list_by_id(pool: &sqlx::SqlitePool, list_id: &str) -> Result<ReminderList, String> {
@@ -2258,12 +2419,15 @@ fn created_link_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<CreatedReminde
     Ok(CreatedReminderLink {
         id: row.get("id"),
         meeting_id: row.get("meeting_id"),
+        meeting_title: row.try_get("meeting_title").ok(),
         draft_id: row.get("draft_id"),
         dedupe_key: row.get("dedupe_key"),
         provider: row.get("provider"),
         provider_reminder_id: row.get("provider_reminder_id"),
         list_id: row.get("list_id"),
+        list_name: row.try_get("list_name").ok(),
         title: row.get("title"),
+        due_at: row.try_get("due_at").ok(),
         status: row.get("status"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),

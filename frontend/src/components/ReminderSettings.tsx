@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { CheckCircle2, CircleAlert, ListTodo, Loader2, PlugZap, RefreshCw, SlidersHorizontal, Trash2 } from "lucide-react"
-import { reminderService, ReminderList, ReminderProviderAccount, ReminderSettingsState, ReminderListSyncResult, ReminderWorkflowPreset } from "@/services/reminderService"
+import { reminderService, CreatedReminderLink, ReminderList, ReminderProviderAccount, ReminderSettingsState, ReminderListSyncResult, ReminderWorkflowPreset } from "@/services/reminderService"
 
 function friendlyError(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -63,9 +63,29 @@ function priorityLabel(priority?: number | null): string {
   return "Low"
 }
 
+function formatDate(value?: string | null): string {
+  if (!value) return "No due date"
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return "No due date"
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date)
+}
+
+function statusClassName(status: string): string {
+  if (status === "completed") return "bg-emerald-100 text-emerald-800"
+  if (status === "open") return "bg-blue-100 text-blue-800"
+  if (status === "missing") return "bg-amber-100 text-amber-800"
+  return "bg-gray-100 text-gray-700"
+}
+
 export function ReminderSettings() {
   const [settings, setSettings] = useState<ReminderSettingsState | null>(null)
   const [syncResult, setSyncResult] = useState<ReminderListSyncResult | null>(null)
+  const [recentReminders, setRecentReminders] = useState<CreatedReminderLink[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<"connect" | "sync" | "disconnect" | "default" | "workflow" | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -89,7 +109,12 @@ export function ReminderSettings() {
     setIsLoading(true)
     setMessage(null)
     try {
-      setSettings(await reminderService.getSettings())
+      const [nextSettings, nextRecentReminders] = await Promise.all([
+        reminderService.getSettings(),
+        reminderService.listRecentCreated(10),
+      ])
+      setSettings(nextSettings)
+      setRecentReminders(nextRecentReminders)
     } catch (error) {
       setMessage(friendlyError(error))
     } finally {
@@ -423,6 +448,44 @@ export function ReminderSettings() {
         <p className="mt-3 text-xs text-gray-500">
           Presets only affect future local reminder drafts. Created Apple Reminders stay unchanged.
         </p>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-950">Follow-up history</h3>
+            <p className="text-sm text-gray-600">Recent Apple Reminders created from Meetily meetings.</p>
+          </div>
+          {isLoading && <Loader2 className="h-5 w-5 animate-spin text-gray-400" />}
+        </div>
+        <div className="mt-5 space-y-3">
+          {!isLoading && recentReminders.length === 0 && (
+            <div className="rounded-md border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
+              Created meeting follow-ups will appear here.
+            </div>
+          )}
+          {recentReminders.map((reminder) => (
+            <div key={reminder.id} className="rounded-lg border border-gray-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-gray-950">{reminder.title}</p>
+                  <p className="mt-1 truncate text-xs text-gray-500">{reminder.meetingTitle ?? "Meetily meeting"}</p>
+                </div>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${statusClassName(reminder.status)}`}>
+                  {reminder.status}
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
+                <span>{reminder.listName ?? "Apple Reminders"}</span>
+                <span>Due {formatDate(reminder.dueAt)}</span>
+                <span>Created {formatDate(reminder.createdAt)}</span>
+              </div>
+              {reminder.lastError && (
+                <p className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">{reminder.lastError}</p>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

@@ -140,12 +140,15 @@ export interface CreateReminderRequest {
 export interface CreatedReminderLink {
   id: string;
   meetingId: string;
+  meetingTitle?: string | null;
   draftId?: string | null;
   dedupeKey: string;
   provider: string;
   providerReminderId: string;
   listId?: string | null;
+  listName?: string | null;
   title: string;
+  dueAt?: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -235,5 +238,10 @@ export const reminderService = {
   async listCreated(meetingId: string): Promise<CreatedReminderLink[]> {
     requireDesktop();
     return invoke<CreatedReminderLink[]>('list_created_reminders', { meetingId });
+  },
+
+  async listRecentCreated(limit = 12): Promise<CreatedReminderLink[]> {
+    requireDesktop();
+    return invoke<CreatedReminderLink[]>('list_recent_created_reminders', { limit });
   },
 };
