@@ -17,6 +17,10 @@ import {
   getAgentWorkflowSettings,
   prepareAgentWorkflow,
 } from '@/services/agentWorkflowService';
+import {
+  markAgentWorkflowPromptCopied,
+  triggerPreparedAgentWorkflow,
+} from '@/services/agentInvocationService';
 
 async function resolveSummaryLanguage(
   meetingId: string,
@@ -120,17 +124,36 @@ export function useSummaryGeneration({
           return;
         }
         navigator.clipboard.writeText(prepared.prompt).then(
-          () => toast.success('Agent handoff copied'),
+          () => {
+            markAgentWorkflowPromptCopied(prepared.run.id);
+            toast.success('Agent handoff copied');
+          },
           () => toast.error('Unable to copy agent handoff')
         );
       };
 
+      if (prepared.run.mode === 'auto') {
+        const result = await triggerPreparedAgentWorkflow(prepared);
+        toast.info(
+          result.status === 'fallbackReady' ? 'Agent handoff fallback ready' : 'Post-meeting agent workflow triggered',
+          {
+            description: result.message,
+            duration: 12000,
+            action: result.prompt
+              ? {
+                label: 'Copy prompt',
+                onClick: copyPrompt,
+              }
+              : undefined,
+          }
+        );
+        return;
+      }
+
       toast.info(
-        settings.mode === 'ask' ? 'Post-meeting workflow ready' : 'Post-meeting handoff prepared',
+        'Post-meeting workflow ready',
         {
-          description: settings.mode === 'ask'
-            ? 'Review and copy the prepared agent prompt before running it.'
-            : 'Automatic mode prepares a safe handoff; external writes still require approval.',
+          description: 'Review and copy the prepared agent prompt before running it.',
           duration: 12000,
           action: {
             label: 'Copy prompt',

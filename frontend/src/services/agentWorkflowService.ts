@@ -70,7 +70,7 @@ export interface AgentWorkflowRun {
   agent: AgentTarget;
   actions: WorkflowActionId[];
   mode: WorkflowMode;
-  status: 'queued' | 'waitingForApproval' | 'prepared' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
+  status: 'queued' | 'waitingForApproval' | 'prepared' | 'fallbackReady' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
   createdAt: string;
   message: string;
 }
@@ -482,8 +482,23 @@ export function listAgentWorkflowRuns(): AgentWorkflowRun[] {
 }
 
 function saveRun(run: AgentWorkflowRun) {
-  const next = [run, ...listAgentWorkflowRuns()].slice(0, 25);
+  const previousRuns = listAgentWorkflowRuns().filter((existing) => existing.id !== run.id);
+  const next = [run, ...previousRuns].slice(0, 25);
   writeJson(RUNS_KEY, next);
+}
+
+export function updateAgentWorkflowRun(
+  runId: string,
+  patch: Partial<Pick<AgentWorkflowRun, 'status' | 'message'>>
+): AgentWorkflowRun | null {
+  const run = listAgentWorkflowRuns().find((existing) => existing.id === runId);
+  if (!run) return null;
+  const nextRun = {
+    ...run,
+    ...patch,
+  };
+  saveRun(nextRun);
+  return nextRun;
 }
 
 function summaryToText(summary: AgentWorkflowContext['summary']): string {
