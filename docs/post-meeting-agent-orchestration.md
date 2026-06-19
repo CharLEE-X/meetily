@@ -34,7 +34,7 @@ subject to the agent's own confirmations, permissions, and tool policies.
 | --- | --- |
 | Off | No context package is prepared after summary completion. Manual handoff actions may still be available from meeting details. |
 | Ask before triggering | Meetily prepares a context package and prompt, then waits for explicit user approval before launching, copying, or handing off to an agent. |
-| Auto-trigger | Meetily prepares the package and attempts the configured supported adapter automatically after summary completion. If the adapter is unavailable or unsafe, it records `waiting_for_approval` and shows a copyable prompt instead. |
+| Auto-trigger | Meetily prepares the package and attempts the configured supported adapter automatically after summary completion. If the adapter is unavailable or unsafe, it records `fallbackReady` and shows a copyable prompt instead. |
 
 Auto-trigger is still not consent for external writes. It only starts or hands
 off the agent run. The agent remains responsible for any separate approval
@@ -95,17 +95,52 @@ available.
 | Status | Meaning |
 | --- | --- |
 | `prepared` | Context package and prompt were generated locally. |
-| `waiting_for_approval` | User approval is required before handoff or trigger. |
-| `triggered` | Meetily handed the package to a supported adapter or opened a handoff target. |
-| `running_unknown` | The agent was triggered but Meetily cannot observe progress. |
-| `needs_input` | The run requires user clarification, missing setup, or unavailable agent capability. |
+| `waitingForApproval` | User approval is required before handoff or trigger. |
+| `fallbackReady` | Direct invocation is unavailable or failed, and the copyable prompt is ready. |
+| `running` | A future supported adapter has accepted the handoff, but Meetily cannot observe all downstream progress. |
 | `failed` | Preparation or trigger failed before a useful agent handoff. |
 | `completed` | User or supported adapter marked the run complete. |
-| `linked` | The run has one or more outcome links such as PR, branch, issue, doc, or local file reference. |
+| `skipped` | Settings, readiness, or consent gates prevented the workflow from preparing. |
 
-`running_unknown` is expected for most local handoff paths. The UI should be
+`fallbackReady` is expected for most local handoff paths in the first release.
+The UI should be
 honest about limited observability rather than implying Meetily controls the
 agent.
+
+## Prompt Templates
+
+The first template library includes:
+
+* Codex implementation handoff;
+* repository investigation;
+* PR review;
+* docs update;
+* Linear/Jira issue grooming;
+* incident follow-up;
+* product planning;
+* open-loop review.
+
+Templates distinguish Codex-leaning implementation/repo work from
+Claude-leaning planning, synthesis, and issue-grooming work. Users can preview
+and edit the local template body in Settings. Template overrides are local and
+do not change the default packaged templates.
+
+## QA Matrix
+
+Release QA should cover these cases before shipping:
+
+| Case | Expected result |
+| --- | --- |
+| Mode off | Summary completion creates no agent prompt and records no external action. |
+| Ask mode | Summary completion prepares a run in `waitingForApproval`; user must copy or trigger manually. |
+| Auto mode with ready agent | Gates pass, adapter runner is called, and unsupported direct invocation records `fallbackReady`. |
+| Auto mode with missing setup | Run fails/skips with a user-safe readiness message and no prompt is copied automatically. |
+| Copy prompt fallback | Prompt remains available through the toast action; run audit records `copied` and no raw prompt is stored. |
+| Direct trigger failure | Adapter failure records `fallbackReady` with preserved prompt context. |
+| Run history | Meeting detail filters runs to that meeting; Settings shows recent cross-meeting runs with template, budget, source metadata, audit event, and outcome links. |
+| Outcome links | User can add/remove PR, branch, Linear, Jira, draft, or other links without storing meeting content. |
+| Privacy scan | localStorage run records contain metadata only, not transcript text, screenshot OCR, raw prompts, MCP tokens, or provider secrets. |
+| External writes | Meetily itself performs no GitHub, GitLab, Linear, Jira, repo, file, or message writes as part of agent orchestration. |
 
 ## Audit And Retention
 

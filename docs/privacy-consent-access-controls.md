@@ -44,6 +44,16 @@ Revoking consent must stop future automation immediately. Derived artifacts crea
 
 During a meeting, recording, transcription, screenshots, assisted join, and exports must expose immediate pause/stop/disable controls where the user is already working. Post-meeting views must disclose which sensitive automations ran, what artifacts were created, and where external writes were attempted.
 
+Post-meeting agent orchestration stores local run metadata only: meeting id,
+agent target, trigger mode, template id, context budget, content-source flags,
+status, timestamps, user-safe messages, audit event type, and user-entered
+outcome links. It must not persist raw transcript text, screenshot OCR, full
+prompts, MCP authorization headers, provider secrets, or third-party auth
+responses. Auto-trigger consent is consent to prepare or hand off a prompt, not
+consent for GitHub, GitLab, Linear, Jira, repository, file, or message writes.
+Those writes remain agent-owned and must follow the selected agent's approval
+flow.
+
 ## Threat Model
 
 Primary risks:

@@ -86,7 +86,9 @@ read-only MCP tool and authorization contract is documented in
 Post-meeting Codex and Claude orchestration is documented separately in
 [Post-Meeting Agent Orchestration](docs/post-meeting-agent-orchestration.md);
 Meetily packages meeting context and hands it off, while agents own downstream
-codebase, GitHub/GitLab, Linear/Jira, docs, and research work.
+codebase, GitHub/GitLab, Linear/Jira, docs, and research work. Current release
+limitations and QA gates are listed in
+[Post-Meeting Agent Orchestration Release Notes](docs/post-meeting-agent-orchestration-release-notes.md).
 
 Meeting detection and assisted join are documented in
 [Meeting Detection and Assisted Join](docs/meeting-detection-assisted-join.md).
