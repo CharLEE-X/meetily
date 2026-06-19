@@ -309,7 +309,6 @@ struct ProviderSettings {
 struct MeetingChatContext {
     citations: Vec<MeetingChatCitation>,
     prompt_context: String,
-    transcript_count: usize,
 }
 
 async fn load_provider_settings(pool: &SqlitePool) -> Result<ProviderSettings, String> {
@@ -451,7 +450,6 @@ fn build_context_from_transcripts(
     MeetingChatContext {
         citations,
         prompt_context: prompt_parts.join("\n"),
-        transcript_count: transcripts.len(),
     }
 }
 
@@ -555,7 +553,6 @@ mod tests {
         assert_eq!(context.citations[0].transcript_id, "t2");
         assert!(context.prompt_context.contains("[T1] 00:02"));
         assert!(context.prompt_context.contains("[T2] 00:03"));
-        assert_eq!(context.transcript_count, 3);
     }
 
     #[test]
