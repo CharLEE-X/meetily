@@ -1,6 +1,6 @@
 # Privacy, Consent, and Access Controls
 
-This policy is the release gate for sensitive Meetily automation. It applies to recording, transcription, calendar access, assisted meeting join, screenshots, exports, Apple Notes automation, local MCP access, meeting chat indexes, and agent skill setup.
+This policy is the release gate for sensitive Meetily automation. It applies to recording, transcription, calendar access, assisted meeting join, screenshots, exports, Apple Notes automation, local MCP access, meeting chat indexes, agent skill setup, and post-meeting agent orchestration.
 
 Speaker identification and screenshot implementation details are defined in
 [Speaker Identification and Screenshots](speaker-identification-screenshots.md).
@@ -36,6 +36,7 @@ Sensitive features use explicit consent states:
 | Local MCP access | Off | Global server enablement plus per-client authorization | Settings | Client list, per-tool permissions, revoke, audit log |
 | Meeting chat index | Off until chat/search feature is enabled | Global opt-in plus per-meeting inclusion control | Settings and meeting detail | Rebuild, exclude meeting, delete index, index build history |
 | Agent skill setup | Off | Per install/update action | Settings | Source preview, install log, uninstall, revoke file access |
+| Post-meeting agent orchestration | Off | Global trigger mode plus per-run approval unless auto-trigger is explicitly enabled | Settings and meeting detail | Preferred agent, content scope, context budget, approval, fallback prompt, run history, disable |
 
 Consent must be informed and reversible. The first-run path can explain benefits, but it must not preselect or silently enable sensitive automation. If a permission is denied or later revoked, Meetily must show the affected feature as unavailable, keep existing local meeting data accessible, and provide a path to retry or disable the feature.
 
@@ -174,6 +175,7 @@ Meetily is local-first by default. Meeting data leaves app-managed local storage
 | Apple Reminders follow-ups | Selected meeting action items, summary follow-ups, and short source evidence snippets | User-selected Reminders list after draft review | Provider account/list label, app-created reminder identifier, meeting id, draft id, dedupe key, creation/status timestamps, result status | Reminders list preview, editable reminder draft review, create selected only, retry failed creation, disconnect |
 | Cloud LLM summaries or chat | The prompt payload required by the selected provider, including selected transcript/summary/context | Provider receives request payload and returns generated text | Provider name, timestamp, model where available, result status, generated output stored locally if user keeps it | Provider disclosure, local-provider recommendation, model selector, clear provider history, provider history retention window |
 | MCP clients | Meeting metadata or content only within authorized scopes | Local response to authorized client; no external network by default | Client fingerprint, scopes, meeting IDs, tool name, result status | Enable MCP, authorize client, revoke client, audit log |
+| Post-meeting agent orchestration | Approved summary, action items, bounded transcript excerpts, selected artifact links, and source ids | Handoff package to selected local agent or copyable prompt; no direct Meetily writes to GitHub/GitLab/Linear/Jira/repos | Run id, meeting id, agent, trigger mode, template id, context budget, content scopes, hashes, status, timestamps, user-safe errors, outcome links | Trigger mode, preferred agent, content scope, context preview/approval, fallback prompt, run history, disable |
 
 External-boundary rules:
 

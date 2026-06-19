@@ -83,6 +83,10 @@ Sensitive automation is required to be explicit opt-in and auditable before it s
 Local AI agents can connect to Meetily through the opt-in local MCP server. The
 read-only MCP tool and authorization contract is documented in
 [Meetily Local MCP Contract](docs/meetily-mcp.md).
+Post-meeting Codex and Claude orchestration is documented separately in
+[Post-Meeting Agent Orchestration](docs/post-meeting-agent-orchestration.md);
+Meetily packages meeting context and hands it off, while agents own downstream
+codebase, GitHub/GitLab, Linear/Jira, docs, and research work.
 
 Meeting detection and assisted join are documented in
 [Meeting Detection and Assisted Join](docs/meeting-detection-assisted-join.md).

@@ -260,6 +260,12 @@ pack is default-off, reversible, and stores only workflow templates plus MCP
 endpoint references. It must not write meeting content, raw client tokens, API
 keys, or secrets into agent configuration files.
 
+The broader Codex/Claude orchestration contract is defined in
+[Post-Meeting Agent Orchestration](post-meeting-agent-orchestration.md). That
+document is the source of truth for trigger modes, consent boundaries,
+Codex-vs-Claude responsibilities, invocation fallback, run status lifecycle, and
+content-free audit metadata.
+
 The first skill pack contains workflows for:
 
 * meeting search and meeting lookup through the authorized MCP server;
