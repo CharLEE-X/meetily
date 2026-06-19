@@ -293,6 +293,7 @@ pub async fn set_audio_backend(backend: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         use crate::audio::capture::AudioCaptureBackend;
+        #[cfg(feature = "private-macos-apis")]
         use crate::audio::permissions::{
             check_screen_recording_permission, request_screen_recording_permission,
         };
@@ -301,6 +302,7 @@ pub async fn set_audio_backend(backend: String) -> Result<(), String> {
             .ok_or_else(|| format!("Invalid backend: {}", backend))?;
 
         // If switching to Core Audio, log information about Audio Capture permission
+        #[cfg(feature = "private-macos-apis")]
         if backend_enum == AudioCaptureBackend::CoreAudio {
             info!("🔐 Core Audio backend requires Audio Capture permission (macOS 14.4+)");
             info!("📍 Permission dialog will appear automatically when recording starts");
@@ -358,20 +360,21 @@ pub async fn get_audio_backend_info() -> Result<Vec<BackendInfo>, String> {
     {
         use crate::audio::capture::AudioCaptureBackend;
 
-        let backends = vec![
-            BackendInfo {
-                id: AudioCaptureBackend::ScreenCaptureKit.to_string(),
-                name: AudioCaptureBackend::ScreenCaptureKit.name().to_string(),
-                description: AudioCaptureBackend::ScreenCaptureKit
-                    .description()
-                    .to_string(),
-            },
-            BackendInfo {
-                id: AudioCaptureBackend::CoreAudio.to_string(),
-                name: AudioCaptureBackend::CoreAudio.name().to_string(),
-                description: AudioCaptureBackend::CoreAudio.description().to_string(),
-            },
-        ];
+        let mut backends = vec![BackendInfo {
+            id: AudioCaptureBackend::ScreenCaptureKit.to_string(),
+            name: AudioCaptureBackend::ScreenCaptureKit.name().to_string(),
+            description: AudioCaptureBackend::ScreenCaptureKit
+                .description()
+                .to_string(),
+        }];
+
+        #[cfg(feature = "private-macos-apis")]
+        backends.push(BackendInfo {
+            id: AudioCaptureBackend::CoreAudio.to_string(),
+            name: AudioCaptureBackend::CoreAudio.name().to_string(),
+            description: AudioCaptureBackend::CoreAudio.description().to_string(),
+        });
+
         Ok(backends)
     }
 
@@ -384,4 +387,3 @@ pub async fn get_audio_backend_info() -> Result<Vec<BackendInfo>, String> {
         }])
     }
 }
-

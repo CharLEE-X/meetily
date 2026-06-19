@@ -1,7 +1,7 @@
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 use std::time::{Duration, Instant};
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 use cidre::{core_audio as ca, os};
 
 /// Event types for system audio detection
@@ -71,12 +71,12 @@ impl Drop for BackgroundTask {
 }
 
 /// Detects system audio usage on macOS
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 pub struct MacOSSystemAudioDetector {
     background: BackgroundTask,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 impl Default for MacOSSystemAudioDetector {
     fn default() -> Self {
         Self {
@@ -85,21 +85,21 @@ impl Default for MacOSSystemAudioDetector {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 const DEVICE_IS_RUNNING_SOMEWHERE: ca::PropAddr = ca::PropAddr {
     selector: ca::PropSelector::DEVICE_IS_RUNNING_SOMEWHERE,
     scope: ca::PropScope::GLOBAL,
     element: ca::PropElement::MAIN,
 };
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 struct DetectorState {
     last_state: bool,
     last_change: Instant,
     debounce_duration: Duration,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 impl DetectorState {
     fn new() -> Self {
         Self {
@@ -125,7 +125,7 @@ impl DetectorState {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 impl MacOSSystemAudioDetector {
     pub fn start(&mut self, callback: SystemAudioCallback) {
         self.background.start(|running, mut stop_rx| {
@@ -354,7 +354,7 @@ impl MacOSSystemAudioDetector {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 fn list_system_audio_using_apps() -> Vec<String> {
     match ca::System::processes() {
         Ok(processes) => {
@@ -378,18 +378,18 @@ fn list_system_audio_using_apps() -> Vec<String> {
     }
 }
 
-// Stub implementation for non-macOS platforms
-#[cfg(not(target_os = "macos"))]
+// Stub implementation for non-macOS and App Store-safe macOS builds.
+#[cfg(not(all(target_os = "macos", feature = "private-macos-apis")))]
 pub struct MacOSSystemAudioDetector;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(all(target_os = "macos", feature = "private-macos-apis")))]
 impl Default for MacOSSystemAudioDetector {
     fn default() -> Self {
         Self
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(all(target_os = "macos", feature = "private-macos-apis")))]
 impl MacOSSystemAudioDetector {
     pub fn start(&mut self, _callback: SystemAudioCallback) {
         tracing::warn!("System audio detection is only supported on macOS");

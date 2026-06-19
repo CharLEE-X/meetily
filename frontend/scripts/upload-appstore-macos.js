@@ -6,9 +6,15 @@ const os = require("os");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..", "..");
+const frontend = path.resolve(__dirname, "..");
+const appStoreConfigPath = path.join(frontend, "src-tauri", "tauri.appstore.conf.json");
+const appStoreConfig = JSON.parse(fs.readFileSync(appStoreConfigPath, "utf8"));
+const packageVersion = appStoreConfig.version || JSON.parse(
+  fs.readFileSync(path.join(frontend, "src-tauri", "tauri.conf.json"), "utf8"),
+).version;
 const pkgPath =
   process.env.MEETILY_APPSTORE_PKG ||
-  path.join(root, "target", "release", "bundle", "macos", "meetily_0.4.0_appstore.pkg");
+  path.join(root, "target", "release", "bundle", "macos", `meetily_${packageVersion}_appstore.pkg`);
 const apiKey = process.env.APPLE_API_KEY || process.env.APPLE_API_KEY_ID;
 const apiIssuer = process.env.APPLE_API_ISSUER;
 const sourceKeyPath = process.env.APPLE_API_KEY_PATH;

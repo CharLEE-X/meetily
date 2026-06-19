@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use chrono::Utc;
+use chrono::{NaiveDate, NaiveTime, TimeZone, Utc};
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -34,6 +34,7 @@ const SCOPE_READ_STATUS: &str = "mcp:read_status";
 const SCOPE_LIST_MEETINGS: &str = "meetings:list";
 const SCOPE_READ_MEETINGS: &str = "meetings:read";
 const SCOPE_SEARCH_MEETINGS: &str = "meetings:search";
+const LOCAL_LOOPBACK_CLIENT_ID: &str = "local-loopback";
 
 static AUDIT_FILE_LOCK: std::sync::LazyLock<StdMutex<()>> =
     std::sync::LazyLock::new(|| StdMutex::new(()));
@@ -385,7 +386,6 @@ struct AuthorizedClient {
 
 #[derive(Debug, Clone)]
 enum AuthFailure {
-    Missing,
     Invalid,
     Expired { client_id: String },
     Revoked { client_id: String },
@@ -402,7 +402,6 @@ impl AuthFailure {
 
     fn reason(&self) -> &'static str {
         match self {
-            Self::Missing => "missing_authorization",
             Self::Invalid => "invalid_authorization",
             Self::Expired { .. } => "expired_client",
             Self::Revoked { .. } => "revoked_client",
@@ -415,7 +414,6 @@ impl AuthFailure {
             Self::Expired { client_id }
             | Self::Revoked { client_id }
             | Self::InsufficientScope { client_id } => client_id.clone(),
-            Self::Missing => "unauthorized".to_string(),
             Self::Invalid => "unknown".to_string(),
         }
     }
@@ -426,7 +424,9 @@ fn authorize_client(
     required_scope: &str,
 ) -> Result<AuthorizedClient, AuthFailure> {
     let Some(header) = authorization else {
-        return Err(AuthFailure::Missing);
+        return Ok(AuthorizedClient {
+            id: LOCAL_LOOPBACK_CLIENT_ID.to_string(),
+        });
     };
     let Some(token) = header.trim().strip_prefix("Bearer ") else {
         return Err(AuthFailure::Invalid);
@@ -661,6 +661,130 @@ fn tool_schema() -> Value {
                     "required": ["meetingId"],
                     "properties": { "meetingId": { "type": "string" } }
                 }
+            },
+            {
+                "name": "meetily_get_latest_meeting",
+                "description": "Get the most recent meeting, optionally including summary, transcript excerpts, and action items.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "includeTranscript": { "type": "boolean" },
+                        "transcriptLimit": { "type": "integer", "minimum": 1, "maximum": 50 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_find_meetings",
+                "description": "Find meetings by topic, person, title text, or date range.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string" },
+                        "person": { "type": "string" },
+                        "dateFrom": { "type": "string", "description": "Inclusive YYYY-MM-DD or RFC3339 date." },
+                        "dateTo": { "type": "string", "description": "Inclusive YYYY-MM-DD or RFC3339 date." },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_ask_meetings",
+                "description": "Gather answer-ready meeting context for natural questions such as what was said on the last call with someone.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["question"],
+                    "properties": {
+                        "question": { "type": "string", "minLength": 1 },
+                        "person": { "type": "string" },
+                        "topic": { "type": "string" },
+                        "latestOnly": { "type": "boolean" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 10 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_get_recent_action_items",
+                "description": "List recent action items and follow-ups across meetings.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "person": { "type": "string" },
+                        "topic": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_get_decisions",
+                "description": "Find decision-like excerpts and summary sections for a topic across meetings.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "topic": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_get_followups_for_person",
+                "description": "Find action items, promises, and follow-up context involving a person.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["person"],
+                    "properties": {
+                        "person": { "type": "string", "minLength": 1 },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_get_meeting_brief",
+                "description": "Create an agent-ready brief for one meeting or the latest meeting.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "meetingId": { "type": "string" },
+                        "latest": { "type": "boolean" },
+                        "transcriptLimit": { "type": "integer", "minimum": 1, "maximum": 100 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_compare_meetings",
+                "description": "Compare two meetings or the latest meetings matching a topic.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "meetingIds": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 5 },
+                        "topic": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 2, "maximum": 5 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_get_project_context",
+                "description": "Build a topic timeline across meetings with summaries, decisions, action items, and excerpts.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["topic"],
+                    "properties": {
+                        "topic": { "type": "string", "minLength": 1 },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 20 }
+                    }
+                }
+            },
+            {
+                "name": "meetily_prepare_handoff",
+                "description": "Prepare a Codex/Claude/Cursor/Linear handoff from a meeting or topic.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "meetingId": { "type": "string" },
+                        "topic": { "type": "string" },
+                        "agent": { "type": "string", "enum": ["codex", "claude", "cursor", "linear", "manual"] },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 10 }
+                    }
+                }
             }
         ]
     })
@@ -732,6 +856,264 @@ async fn ensure_meeting_exists(pool: &sqlx::SqlitePool, meeting_id: &str) -> Res
         .ok_or_else(|| "Meeting not found".to_string())
 }
 
+fn bool_arg(args: &Value, name: &str, default: bool) -> bool {
+    args.get(name).and_then(Value::as_bool).unwrap_or(default)
+}
+
+fn string_array_arg(args: &Value, name: &str) -> Vec<String> {
+    args.get(name)
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn contains_ci(haystack: &str, needle: &str) -> bool {
+    haystack.to_lowercase().contains(&needle.to_lowercase())
+}
+
+fn summary_json(summary: Option<String>) -> Value {
+    summary
+        .and_then(|raw| {
+            serde_json::from_str::<Value>(&raw)
+                .ok()
+                .or_else(|| Some(json!(raw)))
+        })
+        .unwrap_or(Value::Null)
+}
+
+async fn get_summary_json(pool: &sqlx::SqlitePool, meeting_id: &str) -> Result<Value, String> {
+    SummaryProcessesRepository::get_summary_data(pool, meeting_id)
+        .await
+        .map_err(|error| format!("Failed to get summary: {}", error))
+        .map(|summary| summary_json(summary.and_then(|summary| summary.result)))
+}
+
+async fn get_transcript_excerpt_json(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    limit: i64,
+) -> Result<Vec<Value>, String> {
+    let (segments, _) =
+        MeetingsRepository::get_meeting_transcripts_paginated(pool, meeting_id, limit, 0)
+            .await
+            .map_err(|error| format!("Failed to get transcript excerpts: {}", error))?;
+    Ok(segments
+        .into_iter()
+        .map(|segment| {
+            json!({
+                "transcriptId": segment.id,
+                "text": segment.transcript,
+                "timestamp": segment.timestamp,
+                "audioStartTime": segment.audio_start_time,
+                "audioEndTime": segment.audio_end_time
+            })
+        })
+        .collect())
+}
+
+async fn get_action_context_json(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+) -> Result<Vec<Value>, String> {
+    let rows = sqlx::query_as::<_, (String, Option<String>, Option<String>, String)>(
+        "SELECT id, action_items, key_points, transcript FROM transcripts
+         WHERE meeting_id = ? AND (action_items IS NOT NULL OR key_points IS NOT NULL)
+         ORDER BY audio_start_time ASC",
+    )
+    .bind(meeting_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("Failed to get action context: {}", error))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(id, action_items, key_points, transcript)| {
+            json!({
+                "transcriptId": id,
+                "actionItems": action_items,
+                "keyPoints": key_points,
+                "sourceText": transcript
+            })
+        })
+        .collect())
+}
+
+async fn meeting_card(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    include_transcript: bool,
+    transcript_limit: i64,
+) -> Result<Value, String> {
+    let meeting = MeetingsRepository::get_meeting_metadata(pool, meeting_id)
+        .await
+        .map_err(|error| format!("Failed to get meeting: {}", error))?
+        .ok_or_else(|| "Meeting not found".to_string())?;
+    let summary = get_summary_json(pool, meeting_id).await?;
+    let actions = get_action_context_json(pool, meeting_id).await?;
+    let transcript = if include_transcript {
+        get_transcript_excerpt_json(pool, meeting_id, transcript_limit).await?
+    } else {
+        Vec::new()
+    };
+
+    Ok(json!({
+        "id": meeting.id,
+        "title": meeting.title,
+        "createdAt": meeting.created_at.0.to_rfc3339(),
+        "updatedAt": meeting.updated_at.0.to_rfc3339(),
+        "summary": summary,
+        "actionContext": actions,
+        "transcriptExcerpts": transcript
+    }))
+}
+
+async fn latest_meeting_id(pool: &sqlx::SqlitePool) -> Result<String, String> {
+    MeetingsRepository::get_meetings(pool)
+        .await
+        .map_err(|error| format!("Failed to list meetings: {}", error))?
+        .into_iter()
+        .next()
+        .map(|meeting| meeting.id)
+        .ok_or_else(|| "No meetings found".to_string())
+}
+
+async fn transcript_matches_meeting(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    query: &str,
+) -> Result<bool, String> {
+    if query.trim().is_empty() {
+        return Ok(true);
+    }
+    let pattern = format!("%{}%", query.to_lowercase());
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM transcripts WHERE meeting_id = ? AND LOWER(transcript) LIKE ?",
+    )
+    .bind(meeting_id)
+    .bind(pattern)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| format!("Failed to search meeting transcripts: {}", error))?;
+    Ok(count.0 > 0)
+}
+
+async fn find_meeting_ids(
+    pool: &sqlx::SqlitePool,
+    query: Option<&str>,
+    person: Option<&str>,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+    limit: usize,
+) -> Result<Vec<String>, String> {
+    let from_bound = parse_date_bound(date_from, false)?;
+    let to_bound = parse_date_bound(date_to, true)?;
+    let meetings = MeetingsRepository::get_meetings(pool)
+        .await
+        .map_err(|error| format!("Failed to list meetings: {}", error))?;
+    let mut matches = Vec::new();
+    for meeting in meetings {
+        if from_bound
+            .as_ref()
+            .map(|from| meeting.created_at.0 < *from)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        if to_bound
+            .as_ref()
+            .map(|to| meeting.created_at.0 > *to)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let mut matched = true;
+        if let Some(query) = query {
+            matched = contains_ci(&meeting.title, query)
+                || transcript_matches_meeting(pool, &meeting.id, query).await?;
+        }
+        if matched {
+            if let Some(person) = person {
+                matched = contains_ci(&meeting.title, person)
+                    || transcript_matches_meeting(pool, &meeting.id, person).await?;
+            }
+        }
+        if matched {
+            matches.push(meeting.id);
+        }
+        if matches.len() >= limit {
+            break;
+        }
+    }
+    Ok(matches)
+}
+
+fn parse_date_bound(
+    value: Option<&str>,
+    end_of_day: bool,
+) -> Result<Option<chrono::DateTime<Utc>>, String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+
+    if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Ok(Some(datetime.with_timezone(&Utc)));
+    }
+
+    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|_| format!("Invalid date '{}'. Use YYYY-MM-DD or RFC3339.", value))?;
+    let time = if end_of_day {
+        NaiveTime::from_hms_opt(23, 59, 59)
+    } else {
+        NaiveTime::from_hms_opt(0, 0, 0)
+    }
+    .ok_or_else(|| "Failed to build date boundary".to_string())?;
+
+    Ok(Some(Utc.from_utc_datetime(&date.and_time(time))))
+}
+
+async fn matching_transcript_excerpts(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    query: &str,
+    limit: i64,
+) -> Result<Vec<Value>, String> {
+    let pattern = format!("%{}%", query.to_lowercase());
+    let rows = sqlx::query_as::<_, (String, String, String, Option<f64>, Option<f64>)>(
+        "SELECT id, transcript, timestamp, audio_start_time, audio_end_time FROM transcripts
+         WHERE meeting_id = ? AND LOWER(transcript) LIKE ?
+         ORDER BY audio_start_time ASC LIMIT ?",
+    )
+    .bind(meeting_id)
+    .bind(pattern)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("Failed to get matching excerpts: {}", error))?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, transcript, timestamp, audio_start_time, audio_end_time)| {
+                json!({
+                    "transcriptId": id,
+                    "text": transcript,
+                    "timestamp": timestamp,
+                    "audioStartTime": audio_start_time,
+                    "audioEndTime": audio_end_time
+                })
+            },
+        )
+        .collect())
+}
+
 async fn call_meeting_tool(
     app_handle: &AppHandle,
     tool_name: &str,
@@ -745,7 +1127,17 @@ async fn call_meeting_tool(
         | "meetily_get_summary"
         | "meetily_get_transcript"
         | "meetily_get_action_items"
-        | "meetily_get_artifacts" => SCOPE_READ_MEETINGS,
+        | "meetily_get_artifacts"
+        | "meetily_get_latest_meeting"
+        | "meetily_find_meetings"
+        | "meetily_ask_meetings"
+        | "meetily_get_recent_action_items"
+        | "meetily_get_decisions"
+        | "meetily_get_followups_for_person"
+        | "meetily_get_meeting_brief"
+        | "meetily_compare_meetings"
+        | "meetily_get_project_context"
+        | "meetily_prepare_handoff" => SCOPE_READ_MEETINGS,
         _ => SCOPE_READ_STATUS,
     };
 
@@ -916,6 +1308,210 @@ async fn call_meeting_tool(
                 ]
             })
         }
+        "meetily_get_latest_meeting" => {
+            let latest_id = latest_meeting_id(pool).await?;
+            let include_transcript = bool_arg(args, "includeTranscript", true);
+            let transcript_limit = bounded_i64_arg(args, "transcriptLimit", 12, 1, 50);
+            json!({
+                "meeting": meeting_card(pool, &latest_id, include_transcript, transcript_limit).await?
+            })
+        }
+        "meetily_find_meetings" => {
+            let limit = bounded_i64_arg(args, "limit", 10, 1, 50) as usize;
+            let query = string_arg(args, "query");
+            let person = string_arg(args, "person");
+            let date_from = string_arg(args, "dateFrom");
+            let date_to = string_arg(args, "dateTo");
+            let ids = find_meeting_ids(
+                pool,
+                query.as_deref(),
+                person.as_deref(),
+                date_from.as_deref(),
+                date_to.as_deref(),
+                limit,
+            )
+            .await?;
+            let mut meetings = Vec::new();
+            for id in ids {
+                meetings.push(meeting_card(pool, &id, false, 0).await?);
+            }
+            json!({
+                "query": query,
+                "person": person,
+                "dateFrom": date_from,
+                "dateTo": date_to,
+                "meetings": meetings
+            })
+        }
+        "meetily_ask_meetings" => {
+            let question = string_arg(args, "question").ok_or_else(|| "question is required".to_string())?;
+            let person = string_arg(args, "person");
+            let topic = string_arg(args, "topic").or_else(|| Some(question.clone()));
+            let latest_only = bool_arg(args, "latestOnly", false);
+            let limit = if latest_only { 1 } else { bounded_i64_arg(args, "limit", 5, 1, 10) as usize };
+            let ids = if latest_only {
+                vec![latest_meeting_id(pool).await?]
+            } else {
+                find_meeting_ids(pool, topic.as_deref(), person.as_deref(), None, None, limit).await?
+            };
+            let mut context = Vec::new();
+            for id in ids {
+                let search_term = person.as_deref().or(topic.as_deref()).unwrap_or(&question);
+                context.push(json!({
+                    "meeting": meeting_card(pool, &id, false, 0).await?,
+                    "matchingExcerpts": matching_transcript_excerpts(pool, &id, search_term, 8).await?
+                }));
+            }
+            json!({
+                "question": question,
+                "answerGuidance": "Use the meeting summaries and matching excerpts as evidence. Cite meeting id/title and transcript timestamps when answering.",
+                "context": context
+            })
+        }
+        "meetily_get_recent_action_items" => {
+            let limit = bounded_i64_arg(args, "limit", 25, 1, 100) as usize;
+            let person = string_arg(args, "person");
+            let topic = string_arg(args, "topic");
+            let ids = find_meeting_ids(pool, topic.as_deref(), person.as_deref(), None, None, limit).await?;
+            let mut items = Vec::new();
+            for id in ids {
+                let meeting = MeetingsRepository::get_meeting_metadata(pool, &id)
+                    .await
+                    .map_err(|error| format!("Failed to get meeting: {}", error))?
+                    .ok_or_else(|| "Meeting not found".to_string())?;
+                for item in get_action_context_json(pool, &id).await? {
+                    if person.as_ref().map(|p| contains_ci(&item.to_string(), p)).unwrap_or(true) {
+                        items.push(json!({
+                            "meetingId": meeting.id,
+                            "meetingTitle": meeting.title,
+                            "createdAt": meeting.created_at.0.to_rfc3339(),
+                            "item": item
+                        }));
+                    }
+                    if items.len() >= limit {
+                        break;
+                    }
+                }
+                if items.len() >= limit {
+                    break;
+                }
+            }
+            json!({ "person": person, "topic": topic, "actionItems": items })
+        }
+        "meetily_get_decisions" => {
+            let topic = string_arg(args, "topic");
+            let limit = bounded_i64_arg(args, "limit", 20, 1, 50) as usize;
+            let ids = find_meeting_ids(pool, topic.as_deref(), None, None, None, limit).await?;
+            let mut decisions = Vec::new();
+            for id in ids {
+                let meeting = MeetingsRepository::get_meeting_metadata(pool, &id)
+                    .await
+                    .map_err(|error| format!("Failed to get meeting: {}", error))?
+                    .ok_or_else(|| "Meeting not found".to_string())?;
+                let decision_query = topic.as_deref().unwrap_or("decision");
+                let excerpts = matching_transcript_excerpts(pool, &id, decision_query, 8).await?;
+                decisions.push(json!({
+                    "meetingId": meeting.id,
+                    "meetingTitle": meeting.title,
+                    "createdAt": meeting.created_at.0.to_rfc3339(),
+                    "summary": get_summary_json(pool, &id).await?,
+                    "matchingExcerpts": excerpts,
+                    "guidance": "Inspect summary sections named decisions/key decisions and transcript excerpts for final decisions."
+                }));
+            }
+            json!({ "topic": topic, "decisions": decisions })
+        }
+        "meetily_get_followups_for_person" => {
+            let person = string_arg(args, "person").ok_or_else(|| "person is required".to_string())?;
+            let limit = bounded_i64_arg(args, "limit", 25, 1, 50) as usize;
+            let ids = find_meeting_ids(pool, Some(&person), Some(&person), None, None, limit).await?;
+            let mut followups = Vec::new();
+            for id in ids {
+                let meeting = MeetingsRepository::get_meeting_metadata(pool, &id)
+                    .await
+                    .map_err(|error| format!("Failed to get meeting: {}", error))?
+                    .ok_or_else(|| "Meeting not found".to_string())?;
+                followups.push(json!({
+                    "meetingId": meeting.id,
+                    "meetingTitle": meeting.title,
+                    "createdAt": meeting.created_at.0.to_rfc3339(),
+                    "actionContext": get_action_context_json(pool, &id).await?,
+                    "personExcerpts": matching_transcript_excerpts(pool, &id, &person, 8).await?
+                }));
+            }
+            json!({ "person": person, "followups": followups })
+        }
+        "meetily_get_meeting_brief" => {
+            let id = match meeting_id {
+                Some(id) => id,
+                None => latest_meeting_id(pool).await?,
+            };
+            let transcript_limit = bounded_i64_arg(args, "transcriptLimit", 25, 1, 100);
+            json!({
+                "brief": meeting_card(pool, &id, true, transcript_limit).await?,
+                "suggestedUse": "Use this as a compact context packet before replying, filing issues, or planning follow-up work."
+            })
+        }
+        "meetily_compare_meetings" => {
+            let limit = bounded_i64_arg(args, "limit", 2, 2, 5) as usize;
+            let mut ids = string_array_arg(args, "meetingIds");
+            if ids.len() < 2 {
+                let topic = string_arg(args, "topic");
+                ids = find_meeting_ids(pool, topic.as_deref(), None, None, None, limit).await?;
+            }
+            if ids.len() < 2 {
+                return Err("At least two meetings are required for comparison".to_string());
+            }
+            ids.truncate(limit);
+            let mut meetings = Vec::new();
+            for id in ids {
+                meetings.push(meeting_card(pool, &id, true, 10).await?);
+            }
+            json!({
+                "meetings": meetings,
+                "comparisonGuidance": "Compare decisions, action items, summary deltas, risks, and repeated or changed topics across these meetings."
+            })
+        }
+        "meetily_get_project_context" => {
+            let topic = string_arg(args, "topic").ok_or_else(|| "topic is required".to_string())?;
+            let limit = bounded_i64_arg(args, "limit", 10, 1, 20) as usize;
+            let ids = find_meeting_ids(pool, Some(&topic), None, None, None, limit).await?;
+            let mut timeline = Vec::new();
+            for id in ids {
+                let meeting = MeetingsRepository::get_meeting_metadata(pool, &id)
+                    .await
+                    .map_err(|error| format!("Failed to get meeting: {}", error))?
+                    .ok_or_else(|| "Meeting not found".to_string())?;
+                timeline.push(json!({
+                    "meetingId": meeting.id,
+                    "meetingTitle": meeting.title,
+                    "createdAt": meeting.created_at.0.to_rfc3339(),
+                    "summary": get_summary_json(pool, &id).await?,
+                    "actionContext": get_action_context_json(pool, &id).await?,
+                    "topicExcerpts": matching_transcript_excerpts(pool, &id, &topic, 8).await?
+                }));
+            }
+            json!({ "topic": topic, "timeline": timeline })
+        }
+        "meetily_prepare_handoff" => {
+            let agent = string_arg(args, "agent").unwrap_or_else(|| "manual".to_string());
+            let topic = string_arg(args, "topic");
+            let limit = bounded_i64_arg(args, "limit", 3, 1, 10) as usize;
+            let ids = match meeting_id {
+                Some(id) => vec![id],
+                None => find_meeting_ids(pool, topic.as_deref(), None, None, None, limit).await?,
+            };
+            let mut source = Vec::new();
+            for id in ids {
+                source.push(meeting_card(pool, &id, true, 15).await?);
+            }
+            json!({
+                "agent": agent,
+                "topic": topic,
+                "sourceMeetings": source,
+                "handoffPrompt": "Review the source meetings. Extract concrete follow-ups, decisions, risks, and implementation tasks. Preserve citations to meeting ids and transcript timestamps. Do not invent facts outside this MCP context."
+            })
+        }
             _ => return Err("Unknown tool".to_string()),
         };
         Ok(value)
@@ -972,7 +1568,7 @@ async fn json_rpc_response(
                         "name": "meetily",
                         "version": env!("CARGO_PKG_VERSION"),
                         "transport": "streamable-http",
-                        "policy": "local-only read-only meeting tools require bearer authorization"
+                        "policy": "local-only read-only meeting tools are available without authorization on 127.0.0.1; bearer tokens remain supported for trusted client audit"
                     }))
                 })
                 .to_string();
@@ -1565,6 +2161,12 @@ mod tests {
         assert_ne!(hash, token);
         assert!(fingerprint.starts_with("sha256:"));
         assert!(!fingerprint.contains(token));
+    }
+
+    #[test]
+    fn missing_authorization_uses_local_loopback_client() {
+        let client = authorize_client(None, SCOPE_READ_MEETINGS).unwrap();
+        assert_eq!(client.id, LOCAL_LOOPBACK_CLIENT_ID);
     }
 
     #[test]

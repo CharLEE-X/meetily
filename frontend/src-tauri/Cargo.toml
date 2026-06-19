@@ -36,10 +36,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 #   .\build-gpu.ps1 (Windows PowerShell)
 #
 [features]
-default = ["platform-default"]  # Automatically enables best backend per platform
+default = ["platform-default", "macos-private-api"]  # Automatically enables best backend per platform
 
 # Platform-appropriate defaults - see target-specific dependencies below
 platform-default = []
+macos-private-api = ["private-macos-apis"]
+private-macos-apis = ["cidre", "tauri/macos-private-api"]
 
 # Manual GPU acceleration options (for power users to override defaults)
 metal = ["whisper-rs/metal"]       # macOS: Apple Metal GPU (Auto-enabled on macOS)
@@ -149,7 +151,7 @@ ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", bran
 sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono"] }
 
 # Common Tauri configuration
-tauri = { version = "2.6.2", features = [ "macos-private-api", "protocol-asset", "tray-icon"] }
+tauri = { version = "2.6.2", features = ["macos-private-api", "protocol-asset", "tray-icon"] }
 tauri-plugin-fs = "2.4.0"
 tauri-plugin-dialog = "2.3.0"
 tauri-plugin-store = "2.4.0"
@@ -163,7 +165,7 @@ tauri-plugin-single-instance = "=2.3.7"
 
 # macOS-specific dependencies with Metal GPU acceleration
 [target.'cfg(target_os = "macos")'.dependencies]
-tauri = { version = "2.6.2", features = ["protocol-asset", "macos-private-api", "tray-icon"] }
+tauri = { version = "2.6.2", features = ["protocol-asset", "tray-icon"] }
 once_cell = "1.17.1"
 objc = "0.2.7"
 tauri-plugin-log = { version = "2.6.0", features = ["colored"] }
@@ -171,7 +173,7 @@ anyhow = "1.0"
 time = { version = "0.3", features = ["formatting"] }
 reqwest = { version = "0.11", features = ["multipart", "json"] }
 core-graphics = "0.23"
-cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
+cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"], optional = true }
 dasp = "0.11.0"
 futures-channel = "0.3.31"
 

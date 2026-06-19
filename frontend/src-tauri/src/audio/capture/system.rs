@@ -1,15 +1,14 @@
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use futures_util::{Stream, StreamExt};
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait};
+use futures_util::{Stream, StreamExt};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-
-#[cfg(target_os = "macos")]
-use futures_channel::mpsc;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 use super::core_audio::CoreAudioCapture;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
+use futures_channel::mpsc;
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 use log::info;
 
 /// System audio capture using Core Audio tap (macOS) or CPAL (other platforms)
@@ -25,7 +24,8 @@ impl SystemAudioCapture {
 
     pub fn list_system_devices() -> Result<Vec<String>> {
         let host = cpal::default_host();
-        let devices = host.output_devices()
+        let devices = host
+            .output_devices()
             .map_err(|e| anyhow::anyhow!("Failed to enumerate output devices: {}", e))?;
 
         let mut device_names = Vec::new();
@@ -39,7 +39,7 @@ impl SystemAudioCapture {
     }
 
     pub fn start_system_audio_capture(&self) -> Result<SystemAudioStream> {
-        #[cfg(target_os = "macos")]
+        #[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
         {
             info!("Starting Core Audio system capture (macOS)");
             // Use Core Audio tap for system audio capture
@@ -96,10 +96,9 @@ impl SystemAudioCapture {
             })
         }
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(all(target_os = "macos", feature = "private-macos-apis")))]
         {
-            // For non-macOS platforms, you would implement WASAPI/ALSA loopback here
-            anyhow::bail!("System audio capture not yet implemented for this platform")
+            anyhow::bail!("Direct system audio capture is unavailable in this build")
         }
     }
 

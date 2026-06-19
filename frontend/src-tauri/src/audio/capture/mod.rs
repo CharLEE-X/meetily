@@ -1,24 +1,23 @@
 // Audio capture implementations module
 
+pub mod backend_config;
 pub mod microphone;
 pub mod system;
-pub mod backend_config;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 pub mod core_audio;
 
 // Re-export capture functionality
 pub use system::{
+    check_system_audio_permissions, list_system_audio_devices, start_system_audio_capture,
     SystemAudioCapture, SystemAudioStream,
-    start_system_audio_capture, list_system_audio_devices,
-    check_system_audio_permissions
 };
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "private-macos-apis"))]
 pub use core_audio::{CoreAudioCapture, CoreAudioStream};
 
 // Re-export backend configuration
 pub use backend_config::{
-    AudioCaptureBackend, BackendConfig, BACKEND_CONFIG,
-    get_current_backend, set_current_backend, get_available_backends
+    get_available_backends, get_current_backend, set_current_backend, AudioCaptureBackend,
+    BackendConfig, BACKEND_CONFIG,
 };

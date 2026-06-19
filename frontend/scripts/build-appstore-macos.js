@@ -11,8 +11,13 @@ const signingDir = path.join(root, ".signing");
 const profilePath = process.env.MEETILY_APPSTORE_PROFILE
   ? path.resolve(process.env.MEETILY_APPSTORE_PROFILE)
   : path.join(signingDir, "meetily-mac-app-store-connect.provisionprofile");
+const appStoreConfigPath = path.join(frontend, "src-tauri", "tauri.appstore.conf.json");
+const appStoreConfig = JSON.parse(fs.readFileSync(appStoreConfigPath, "utf8"));
+const packageVersion = appStoreConfig.version || JSON.parse(
+  fs.readFileSync(path.join(frontend, "src-tauri", "tauri.conf.json"), "utf8"),
+).version;
 const appPath = path.join(root, "target", "release", "bundle", "macos", "meetily.app");
-const pkgPath = path.join(root, "target", "release", "bundle", "macos", "meetily_0.4.0_appstore.pkg");
+const pkgPath = path.join(root, "target", "release", "bundle", "macos", `meetily_${packageVersion}_appstore.pkg`);
 const appEntitlements = path.join(frontend, "src-tauri", "entitlements.appstore.plist");
 const nestedEntitlements = path.join(frontend, "src-tauri", "entitlements.appstore.nested.plist");
 const embeddedProfile = path.join(appPath, "Contents", "embedded.provisionprofile");
@@ -60,12 +65,26 @@ if (!fs.existsSync(profilePath)) {
 }
 
 const feature = detectFeature();
-const featureArgs = feature && feature !== "none" ? ["--", "--features", feature] : [];
+const featureArgs =
+  feature && feature !== "none"
+    ? ["--", "--no-default-features", "--features", feature]
+    : ["--", "--no-default-features"];
 const env = {
   APPLE_SIGNING_IDENTITY: appIdentity,
 };
 
-run("pnpm", ["tauri", "build", "--no-bundle", ...featureArgs], { env });
+run(
+  "pnpm",
+  [
+    "tauri",
+    "build",
+    "--no-bundle",
+    "--config",
+    "src-tauri/tauri.appstore.conf.json",
+    ...featureArgs,
+  ],
+  { env },
+);
 run(
   "pnpm",
   [
