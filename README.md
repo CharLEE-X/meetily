@@ -120,6 +120,7 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **AI-Powered Summaries:** Generate summaries of your meetings using powerful language models.
 - **Advanced Exports:** Export completed meetings as Markdown, PDF, or DOCX with selectable sections and local auto-export preferences. See [Advanced Exports](docs/advanced-exports.md).
 - **Calendar Integration:** Connect Apple Calendar on macOS, sync upcoming event metadata locally, and select an event to prefill the next recording title and meeting-detection metadata. See [Calendar Integration Release Notes](docs/calendar-integration-release-notes.md).
+- **Apple Reminders Follow-Ups:** On macOS, connect Apple Reminders, review editable follow-up drafts, create only selected reminders, and return to meeting-linked reminder history. See [Apple Reminders Release Notes](docs/apple-reminders-release-notes.md).
 - **Speaker Labels:** Detect local speaker labels from transcript timing/source metadata, review them in the meeting transcript, and rename labels as user-confirmed corrections.
 - **Optional Meeting Screenshots:** On macOS, periodic screenshots can be enabled in Settings and must be confirmed for each meeting before capture starts. Screenshots stay local and can be deleted from the meeting timeline. See [Speaker Identification and Screenshots Release Notes](docs/speaker-identification-release-notes.md).
 - **Multi-Platform:** Works on macOS, Windows, and Linux.

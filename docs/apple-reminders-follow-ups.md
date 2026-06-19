@@ -108,7 +108,7 @@ tables.
 | `status` | text | `suggested`, `selected`, `dismissed`, `created`, `duplicate`, or `failed`. |
 | `created_at` / `updated_at` | datetime | Local timestamps. |
 
-`created_reminder_links`
+`reminder_created_links`
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -121,8 +121,7 @@ tables.
 | `title` | text | Title at creation time for display and history. |
 | `dedupe_key` | text | Same dedupe key used by the draft. |
 | `status` | text | `created`, `open`, `completed`, `missing`, `unavailable`, or `error`. |
-| `created_at` | datetime | Creation timestamp. |
-| `last_status_at` | datetime nullable | Last status refresh timestamp. |
+| `created_at` / `updated_at` | datetime | Creation and last local status refresh timestamps. |
 | `last_error` | text nullable | User-safe status/read error. |
 
 Local records must not store unrelated reminder contents. Status refresh may
@@ -235,6 +234,39 @@ The primary action must communicate the number of reminders that will be
 created. No keyboard shortcut, auto-export, or post-summary automation may create
 reminders without the same explicit review state.
 
+## Current Workflow
+
+1. Open Settings and connect Apple Reminders.
+2. Refresh lists to trigger macOS Reminders automation permission and discover
+   local lists.
+3. Choose a global default list and optionally configure developer workflow
+   presets.
+4. After a meeting summary exists, Meetily generates local reminder drafts from
+   action items and follow-up language.
+5. Review each draft in meeting details, including title, notes, due date,
+   priority, list, category, confidence, and source evidence.
+6. Create selected reminders only. Meetily writes those reminders to Apple
+   Reminders, stores local link metadata, and leaves unselected/dismissed drafts
+   local.
+7. Return to the meeting or Settings history to see app-created reminders,
+   known status, list, due date, and creation time.
+
+Default programmer presets are conservative:
+
+| Category | Enabled by default | Due default | Priority |
+| --- | --- | --- | --- |
+| PR review | Yes | Tomorrow morning | Medium |
+| Linear follow-up | Yes | Tomorrow morning | Medium |
+| Deploy or alert check | Yes | 2 hours | High |
+| Docs update | Yes | 2 days | Low |
+| Implementation task | Yes | No automatic due date | Medium |
+| Experiment revisit | Yes | 1 week | Low |
+| Clarification follow-up | Yes | Tomorrow morning | Medium |
+
+Users can disable categories, choose category-specific lists, or fall back to
+the global list and global priority. Settings changes affect new or regenerated
+local drafts only; they do not modify already-created Apple Reminders.
+
 ## Privacy, Revoke, And Deletion Behavior
 
 Apple Reminders follows the shared
@@ -256,6 +288,38 @@ Specific rules:
   reminders exist, the delete flow must show them and ask before attempting to
   delete or modify Apple Reminders items.
 * Clearing local history never silently deletes Apple Reminders items.
+
+## QA Matrix
+
+Run this matrix before releasing Apple Reminders follow-ups:
+
+| Scenario | Expected result |
+| --- | --- |
+| Connect on macOS | Settings creates or updates the local Apple Reminders account and shows a state that can request permission on refresh. |
+| Permission denied or revoked | Settings shows a user-safe permission message; draft creation and status refresh are unavailable; recording, summaries, and local meetings continue to work. |
+| List discovery | Refresh lists shows selected local Reminders lists, chooses a default when needed, and clears stale category list defaults when a list disappears. |
+| Default list selection | Selecting a default list updates future drafts and does not modify existing external reminders. |
+| Workflow presets | Each category can be enabled/disabled; due default, priority, and category list/global list choices are persisted and reflected in newly generated drafts. |
+| Draft generation | Summary action items generate high-signal local drafts with category, confidence, source evidence, preset explanation in notes, and conservative due dates. |
+| Edit draft | Title, notes, due date, priority, and list can be edited and saved before creation. |
+| Dismiss draft | Dismissed drafts leave the review flow and are not created. |
+| Create selected | Only selected drafts are written to Apple Reminders; local created links are stored with provider id, meeting id, draft id, list id, dedupe key, status, and timestamps. |
+| Partial failure | Successful reminders remain linked; failed reminders report user-safe errors and can be retried without losing successes. |
+| Duplicate prevention | Re-running creation for an already-created dedupe key returns the existing link and does not create another reminder. |
+| Status refresh | Meeting details/history show open, completed, missing, or unavailable for app-created reminders only. |
+| Disconnect | Future writes and status refresh stop; existing local link history remains visible as unavailable; external reminders are not deleted. |
+| Meeting deletion | Local drafts and links are removed with the meeting. If future external deletion is added, it must require explicit confirmation and must never happen silently. |
+| Non-Meetily reminders | No unrelated reminder titles, notes, due dates, or contents appear in Meetily UI, logs, exports, or MCP responses. |
+
+Manual verification should include at least one real Apple Reminders creation on
+macOS, one permission-denied run, one duplicate retry, and one deleted external
+reminder marked `missing`.
+
+## Release Notes
+
+See [Apple Reminders Release Notes](apple-reminders-release-notes.md) for the
+user-facing release summary, provider limitations, and known out-of-scope
+behavior.
 
 ## Out Of Scope For First Release
 
