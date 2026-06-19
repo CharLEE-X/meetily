@@ -465,6 +465,18 @@ jobs:
           echo "CERT_ID=$CERT_ID" >> $GITHUB_ENV
           echo "Certificate imported: $CERT_ID"
 
+      - name: Prepare Apple API key for notarization
+        if: contains(inputs.platform, 'macos') && inputs.sign-binaries
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_FILE_B64: ${{ secrets.APPLE_API_KEY_FILE_B64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/apple-api-key"
+          API_KEY_PATH="$RUNNER_TEMP/apple-api-key/AuthKey_${APPLE_API_KEY}.p8"
+          echo "$APPLE_API_KEY_FILE_B64" | base64 --decode > "$API_KEY_PATH"
+          chmod 600 "$API_KEY_PATH"
+          echo "APPLE_API_KEY_PATH=$API_KEY_PATH" >> "$GITHUB_ENV"
+
       - name: Configure build acceleration
         if: contains(inputs.platform, 'macos')
         run: |
@@ -575,10 +587,12 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_ID: ${{ inputs.sign-binaries && secrets.APPLE_ID || '' }}
-          APPLE_ID_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_ID_PASSWORD || '' }}
-          APPLE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_PASSWORD || '' }}
+          APPLE_ID: ''
+          APPLE_ID_PASSWORD: ''
+          APPLE_PASSWORD: ''
           APPLE_TEAM_ID: ${{ inputs.sign-binaries && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_API_KEY: ${{ inputs.sign-binaries && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_ISSUER: ${{ inputs.sign-binaries && secrets.APPLE_API_ISSUER || '' }}
           APPLE_CERTIFICATE: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
