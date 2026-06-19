@@ -59,6 +59,24 @@ function statusClass(account?: CalendarProviderAccount): string {
   return "bg-red-100 text-red-800"
 }
 
+interface HealthItem {
+  label: string
+  detail: string
+  status: "ready" | "warning" | "disabled"
+}
+
+function healthClass(status: HealthItem["status"]): string {
+  if (status === "ready") return "border-emerald-200 bg-emerald-50 text-emerald-900"
+  if (status === "warning") return "border-amber-200 bg-amber-50 text-amber-900"
+  return "border-gray-200 bg-gray-50 text-gray-700"
+}
+
+function healthIconClass(status: HealthItem["status"]): string {
+  if (status === "ready") return "text-emerald-700"
+  if (status === "warning") return "text-amber-700"
+  return "text-gray-500"
+}
+
 export function CalendarSettings() {
   const [settings, setSettings] = useState<CalendarSettingsState | null>(null)
   const [events, setEvents] = useState<CalendarEvent[]>([])
@@ -198,6 +216,41 @@ export function CalendarSettings() {
 
   const lastSyncAt = appleAccount?.lastSyncAt ?? syncResult?.completedAt
   const isSaving = actionLoading !== null
+  const healthItems: HealthItem[] = [
+    {
+      label: "Connection",
+      detail: appleAccount?.status === "connected"
+        ? "Apple Calendar permission is active."
+        : appleAccount?.status === "permission_needed"
+          ? "Run Sync now to request or refresh macOS Calendar permission."
+          : "Connect Apple Calendar before syncing events.",
+      status: appleAccount?.status === "connected" ? "ready" : appleAccount?.status === "permission_needed" ? "warning" : "disabled",
+    },
+    {
+      label: "Upcoming events",
+      detail: events.length > 0
+        ? `${events.length} upcoming event${events.length === 1 ? "" : "s"} cached for meeting prompts.`
+        : "No upcoming events are cached yet.",
+      status: events.length > 0 ? "ready" : "disabled",
+    },
+    {
+      label: "Event creation",
+      detail: autoCreateEvents
+        ? `Meetily can create or update events in ${targetCalendarName.trim() || "Meetily"}.`
+        : "Meetily will not create calendar events until this is enabled.",
+      status: autoCreateEvents ? "ready" : "disabled",
+    },
+    {
+      label: "Last sync",
+      detail: lastSyncAt ? `Last successful sync: ${formatDateTime(lastSyncAt)}.` : "Sync has not completed yet.",
+      status: lastSyncAt ? "ready" : "warning",
+    },
+    {
+      label: "Errors",
+      detail: appleAccount?.lastError ?? syncResult?.error ?? "No Calendar sync errors are currently reported.",
+      status: appleAccount?.lastError || syncResult?.error ? "warning" : "ready",
+    },
+  ]
 
   return (
     <div className="space-y-6">
@@ -261,6 +314,30 @@ export function CalendarSettings() {
               Disconnect
             </button>
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-2">
+          <h3 className="text-lg font-semibold text-gray-950">Automation health</h3>
+          <p className="text-sm text-gray-600">Checks that control meeting detection, prompt metadata, and event creation.</p>
+        </div>
+        <div className="mt-5 grid gap-3 lg:grid-cols-2">
+          {healthItems.map((item) => (
+            <div key={item.label} className={`rounded-lg border p-4 ${healthClass(item.status)}`}>
+              <div className="flex items-start gap-3">
+                {item.status === "ready" ? (
+                  <CheckCircle2 className={`mt-0.5 h-4 w-4 flex-shrink-0 ${healthIconClass(item.status)}`} />
+                ) : (
+                  <CircleAlert className={`mt-0.5 h-4 w-4 flex-shrink-0 ${healthIconClass(item.status)}`} />
+                )}
+                <div>
+                  <p className="text-sm font-medium">{item.label}</p>
+                  <p className="mt-1 text-xs opacity-80">{item.detail}</p>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

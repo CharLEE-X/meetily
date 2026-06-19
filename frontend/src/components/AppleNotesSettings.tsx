@@ -45,6 +45,24 @@ function exportStatusClass(status: string): string {
   return "bg-blue-100 text-blue-800"
 }
 
+interface HealthItem {
+  label: string
+  detail: string
+  status: "ready" | "warning" | "disabled"
+}
+
+function healthClass(status: HealthItem["status"]): string {
+  if (status === "ready") return "border-emerald-200 bg-emerald-50 text-emerald-900"
+  if (status === "warning") return "border-amber-200 bg-amber-50 text-amber-900"
+  return "border-gray-200 bg-gray-50 text-gray-700"
+}
+
+function healthIconClass(status: HealthItem["status"]): string {
+  if (status === "ready") return "text-emerald-700"
+  if (status === "warning") return "text-amber-700"
+  return "text-gray-500"
+}
+
 export function AppleNotesSettings() {
   const [settings, setSettings] = useState<AppleNotesSettingsState | null>(null)
   const [recentExports, setRecentExports] = useState<AppleNotesExportRecord[]>([])
@@ -134,6 +152,43 @@ export function AppleNotesSettings() {
 
   const isSaving = actionLoading !== null
   const canUseProvider = appleProvider?.available !== false
+  const healthItems: HealthItem[] = [
+    {
+      label: "macOS support",
+      detail: canUseProvider ? "Apple Notes automation is available on this device." : "Apple Notes export is only available in the macOS desktop app.",
+      status: canUseProvider ? "ready" : "disabled",
+    },
+    {
+      label: "Connection",
+      detail: appleAccount?.status === "connected"
+        ? "Automation permission has been granted."
+        : appleAccount?.status === "permission_needed"
+          ? "The first export will request macOS Automation permission."
+          : "Connect Apple Notes before exporting summaries.",
+      status: appleAccount?.status === "connected" ? "ready" : appleAccount?.status === "permission_needed" ? "warning" : "disabled",
+    },
+    {
+      label: "Destination",
+      detail: appleAccount?.confirmedDestinationHash
+        ? `Confirmed folder: ${appleAccount.rootFolderName}.`
+        : "Confirm the destination from a meeting before auto-export can run.",
+      status: appleAccount?.confirmedDestinationHash ? "ready" : "warning",
+    },
+    {
+      label: "Auto-export",
+      detail: autoExportEnabled
+        ? "Summaries can export automatically after completion once the destination is confirmed."
+        : "Automatic export is off; manual export remains available.",
+      status: autoExportEnabled ? "ready" : "disabled",
+    },
+    {
+      label: "Recent activity",
+      detail: recentExports.length > 0
+        ? `Last export: ${formatDateTime(recentExports[0].exportedAt ?? recentExports[0].updatedAt)}.`
+        : "No Apple Notes exports have run yet.",
+      status: recentExports.some((record) => record.status === "failed") ? "warning" : recentExports.length > 0 ? "ready" : "disabled",
+    },
+  ]
 
   return (
     <div className="space-y-6">
@@ -193,6 +248,30 @@ export function AppleNotesSettings() {
               Disconnect
             </button>
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-2">
+          <h3 className="text-lg font-semibold text-gray-950">Automation health</h3>
+          <p className="text-sm text-gray-600">Checks that control whether Apple Notes export can run reliably.</p>
+        </div>
+        <div className="mt-5 grid gap-3 lg:grid-cols-2">
+          {healthItems.map((item) => (
+            <div key={item.label} className={`rounded-lg border p-4 ${healthClass(item.status)}`}>
+              <div className="flex items-start gap-3">
+                {item.status === "ready" ? (
+                  <CheckCircle2 className={`mt-0.5 h-4 w-4 flex-shrink-0 ${healthIconClass(item.status)}`} />
+                ) : (
+                  <CircleAlert className={`mt-0.5 h-4 w-4 flex-shrink-0 ${healthIconClass(item.status)}`} />
+                )}
+                <div>
+                  <p className="text-sm font-medium">{item.label}</p>
+                  <p className="mt-1 text-xs opacity-80">{item.detail}</p>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
