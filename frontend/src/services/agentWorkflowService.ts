@@ -1,5 +1,12 @@
 import { Summary } from '@/types';
 import { AgentKind, AgentSetupStatus, McpStatus } from '@/services/mcpService';
+import {
+  AgentContextBudgetPreset,
+  AgentContextConsent,
+  AgentContextInputItem,
+  buildAgentContextPackage,
+  serializeAgentContextPackage,
+} from './agentContextPackage';
 
 export type AgentTarget = AgentKind | 'manual';
 export type WorkflowMode = 'off' | 'ask' | 'auto';
@@ -41,8 +48,23 @@ export interface AgentWorkflowRun {
 export interface AgentWorkflowContext {
   meetingId: string;
   meetingTitle: string;
+  meetingStartedAt?: string | null;
+  meetingEndedAt?: string | null;
   summary: Summary | { markdown?: string } | null;
   mcpUrl: string | null;
+  budgetPreset?: AgentContextBudgetPreset;
+  customBudget?: {
+    maxCharacters?: number;
+    maxTranscriptExcerpts?: number;
+  };
+  consent?: AgentContextConsent;
+  actionItems?: AgentContextInputItem[];
+  decisions?: AgentContextInputItem[];
+  risks?: AgentContextInputItem[];
+  transcriptExcerpts?: AgentContextInputItem[];
+  screenshotsOcr?: AgentContextInputItem[];
+  calendarMetadata?: AgentContextInputItem[];
+  artifacts?: AgentContextInputItem[];
 }
 
 export interface PreparedAgentWorkflow {
@@ -281,6 +303,28 @@ function summaryToText(summary: AgentWorkflowContext['summary']): string {
     .slice(0, 6000);
 }
 
+function buildSerializedContextPackage(context: AgentWorkflowContext): string {
+  const contextPackage = buildAgentContextPackage({
+    meetingId: context.meetingId,
+    meetingTitle: context.meetingTitle,
+    meetingStartedAt: context.meetingStartedAt,
+    meetingEndedAt: context.meetingEndedAt,
+    summaryText: summaryToText(context.summary),
+    actionItems: context.actionItems,
+    decisions: context.decisions,
+    risks: context.risks,
+    transcriptExcerpts: context.transcriptExcerpts,
+    screenshotsOcr: context.screenshotsOcr,
+    calendarMetadata: context.calendarMetadata,
+    artifacts: context.artifacts,
+  }, {
+    budgetPreset: context.budgetPreset ?? 'standard',
+    customBudget: context.customBudget,
+    consent: context.consent,
+  });
+  return serializeAgentContextPackage(contextPackage, context.mcpUrl ? 'mcp' : 'prompt');
+}
+
 function actionInstruction(actionId: WorkflowActionId): string {
   switch (actionId) {
     case 'review-summary':
@@ -354,8 +398,8 @@ export function buildLinearFollowUpTemplate(context: AgentWorkflowContext, actio
     '- meetily_prepare_next_meeting: preparation brief from prior related meetings',
     '- meetily_prepare_role_brief: product, engineering, sales, hiring, manager, founder, or customer-success brief',
     '',
-    'Meeting summary:',
-    summaryToText(context.summary),
+    'Source-cited context package:',
+    buildSerializedContextPackage(context),
   ].join('\n');
 }
 
