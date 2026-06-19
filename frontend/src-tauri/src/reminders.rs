@@ -1,6 +1,7 @@
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::collections::HashSet;
 use std::process::Command;
 use tauri::State;
 use uuid::Uuid;
@@ -78,6 +79,49 @@ pub struct ReminderListSyncResult {
 pub struct ReminderDefaultListRequest {
     pub provider: Option<String>,
     pub list_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderDraftRequest {
+    pub meeting_id: String,
+    pub include_low_confidence: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderSourceEvidence {
+    pub label: String,
+    pub snippet: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderDraft {
+    pub id: String,
+    pub meeting_id: String,
+    pub summary_id: Option<String>,
+    pub title: String,
+    pub notes: Option<String>,
+    pub due_at: Option<String>,
+    pub priority: Option<i64>,
+    pub list_id: Option<String>,
+    pub category: String,
+    pub confidence: f64,
+    pub source_evidence: Vec<ReminderSourceEvidence>,
+    pub dedupe_key: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderDraftGenerationResult {
+    pub meeting_id: String,
+    pub drafts: Vec<ReminderDraft>,
+    pub hidden_low_confidence_count: usize,
+    pub generated_at: String,
 }
 
 #[tauri::command]
@@ -274,6 +318,33 @@ pub async fn update_default_reminder_list(
     get_account(pool, &provider)
         .await?
         .ok_or_else(|| "Reminder provider was not found after updating default list".to_string())
+}
+
+#[tauri::command]
+pub async fn generate_reminder_drafts(
+    state: State<'_, AppState>,
+    request: ReminderDraftRequest,
+) -> Result<ReminderDraftGenerationResult, String> {
+    generate_reminder_drafts_for_meeting(
+        state.db_manager.pool(),
+        &request.meeting_id,
+        request.include_low_confidence.unwrap_or(false),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn list_reminder_drafts(
+    state: State<'_, AppState>,
+    meeting_id: String,
+    include_low_confidence: Option<bool>,
+) -> Result<Vec<ReminderDraft>, String> {
+    list_drafts(
+        state.db_manager.pool(),
+        &meeting_id,
+        include_low_confidence.unwrap_or(false),
+    )
+    .await
 }
 
 fn provider_infos() -> Vec<ReminderProviderInfo> {
@@ -704,6 +775,617 @@ async fn update_account_sync(
     Ok(())
 }
 
+async fn generate_reminder_drafts_for_meeting(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    include_low_confidence: bool,
+) -> Result<ReminderDraftGenerationResult, String> {
+    let meeting = crate::database::repositories::meeting::MeetingsRepository::get_meeting_metadata(
+        pool, meeting_id,
+    )
+    .await
+    .map_err(|err| format!("Failed to load meeting metadata: {}", err))?
+    .ok_or_else(|| "Meeting was not found.".to_string())?;
+
+    let summary =
+        crate::database::repositories::summary::SummaryProcessesRepository::get_summary_data(
+            pool, meeting_id,
+        )
+        .await
+        .map_err(|err| format!("Failed to load meeting summary: {}", err))?
+        .ok_or_else(|| "Generate a meeting summary before creating reminder drafts.".to_string())?;
+
+    let result = summary
+        .result
+        .as_deref()
+        .ok_or_else(|| "Generate a meeting summary before creating reminder drafts.".to_string())?;
+    let summary_value: serde_json::Value = serde_json::from_str(result)
+        .map_err(|err| format!("Failed to parse meeting summary: {}", err))?;
+    let summary_text = summary_value_to_text(&summary_value);
+    if summary_text.trim().is_empty() {
+        return Err(
+            "Meeting summary does not contain enough text for reminder drafts.".to_string(),
+        );
+    }
+
+    let base_time = summary.end_time.unwrap_or(meeting.updated_at.0);
+    let default_list_id = default_reminder_list_id(pool).await?;
+    let summary_id = Some(summary.meeting_id.as_str());
+    let generated = build_draft_candidates(
+        meeting_id,
+        summary_id.as_deref(),
+        &meeting.title,
+        &summary_text,
+        base_time,
+        default_list_id.as_deref(),
+    );
+
+    let mut hidden_low_confidence_count = 0usize;
+    for draft in generated {
+        if draft.confidence < 0.5 && !include_low_confidence {
+            hidden_low_confidence_count += 1;
+            continue;
+        }
+        upsert_draft(pool, &draft).await?;
+    }
+
+    let drafts = list_drafts(pool, meeting_id, include_low_confidence).await?;
+    Ok(ReminderDraftGenerationResult {
+        meeting_id: meeting_id.to_string(),
+        drafts,
+        hidden_low_confidence_count,
+        generated_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+fn summary_value_to_text(value: &serde_json::Value) -> String {
+    if let Some(markdown) = value.get("markdown").and_then(|v| v.as_str()) {
+        return markdown.to_string();
+    }
+    let mut lines = Vec::new();
+    flatten_summary_value(value, &mut lines);
+    lines.join("\n")
+}
+
+fn flatten_summary_value(value: &serde_json::Value, lines: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) => {
+            if !text.trim().is_empty() {
+                lines.push(text.trim().to_string());
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                flatten_summary_value(item, lines);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (key, item) in map {
+                if matches!(key.as_str(), "type" | "id" | "props") {
+                    continue;
+                }
+                flatten_summary_value(item, lines);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DraftCandidate {
+    title: String,
+    due_at: Option<String>,
+    priority: Option<i64>,
+    category: String,
+    confidence: f64,
+    source_evidence: Vec<ReminderSourceEvidence>,
+    dedupe_key: String,
+}
+
+fn build_draft_candidates(
+    meeting_id: &str,
+    summary_id: Option<&str>,
+    meeting_title: &str,
+    summary_text: &str,
+    base_time: chrono::DateTime<chrono::Utc>,
+    default_list_id: Option<&str>,
+) -> Vec<ReminderDraft> {
+    let mut seen = HashSet::new();
+    extract_action_candidates(summary_text)
+        .into_iter()
+        .filter_map(|candidate| {
+            let candidate = candidate_to_draft_candidate(meeting_id, &candidate, base_time)?;
+            if !seen.insert(candidate.dedupe_key.clone()) {
+                return None;
+            }
+            Some(candidate_to_reminder_draft(
+                meeting_id,
+                summary_id,
+                meeting_title,
+                default_list_id,
+                candidate,
+            ))
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+struct ActionCandidate {
+    text: String,
+    due_hint: Option<String>,
+    evidence_label: String,
+    in_action_section: bool,
+    from_table: bool,
+}
+
+fn extract_action_candidates(summary_text: &str) -> Vec<ActionCandidate> {
+    let mut candidates = Vec::new();
+    let mut in_action_section = false;
+    for raw_line in summary_text.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('#') {
+            let heading = line.trim_start_matches('#').trim().to_lowercase();
+            in_action_section = heading.contains("action")
+                || heading.contains("follow-up")
+                || heading.contains("follow up")
+                || heading.contains("next step");
+            continue;
+        }
+        if line.contains('|') {
+            if let Some((task, due)) = parse_action_table_row(line) {
+                candidates.push(ActionCandidate {
+                    text: task,
+                    due_hint: due,
+                    evidence_label: "Action item table".to_string(),
+                    in_action_section,
+                    from_table: true,
+                });
+            }
+            continue;
+        }
+        let clean = clean_action_line(line);
+        if clean.len() < 8 {
+            continue;
+        }
+        if in_action_section || looks_actionable(&clean) {
+            candidates.push(ActionCandidate {
+                text: clean,
+                due_hint: None,
+                evidence_label: if in_action_section {
+                    "Action items".to_string()
+                } else {
+                    "Summary".to_string()
+                },
+                in_action_section,
+                from_table: false,
+            });
+        }
+    }
+    candidates
+}
+
+fn parse_action_table_row(line: &str) -> Option<(String, Option<String>)> {
+    let cells: Vec<String> = line
+        .trim_matches('|')
+        .split('|')
+        .map(|cell| cell.trim().trim_matches('"').to_string())
+        .collect();
+    if cells.len() < 2
+        || cells.iter().all(|cell| {
+            cell.chars()
+                .all(|ch| ch == '-' || ch == ':' || ch.is_whitespace())
+        })
+    {
+        return None;
+    }
+    let lowered = cells
+        .iter()
+        .map(|cell| cell.to_lowercase())
+        .collect::<Vec<_>>();
+    if lowered
+        .iter()
+        .any(|cell| cell == "task" || cell == "owner" || cell == "due")
+    {
+        return None;
+    }
+    let task = cells
+        .get(1)
+        .filter(|cell| cell.len() > 6)
+        .cloned()
+        .or_else(|| cells.iter().max_by_key(|cell| cell.len()).cloned())?;
+    let due = cells
+        .get(2)
+        .map(|cell| cell.trim())
+        .filter(|cell| !cell.is_empty() && !cell.eq_ignore_ascii_case("tbd"))
+        .map(str::to_string);
+    Some((clean_action_line(&task), due))
+}
+
+fn clean_action_line(line: &str) -> String {
+    line.trim()
+        .trim_start_matches(|ch: char| {
+            ch == '-' || ch == '*' || ch == '•' || ch.is_ascii_digit() || ch == '.' || ch == ')'
+        })
+        .trim()
+        .trim_matches('"')
+        .trim()
+        .to_string()
+}
+
+fn looks_actionable(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    [
+        "need to",
+        "needs to",
+        "todo",
+        "follow up",
+        "will ",
+        "should ",
+        "review",
+        "check",
+        "update",
+        "implement",
+        "deploy",
+        "ask ",
+        "confirm",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn candidate_to_draft_candidate(
+    meeting_id: &str,
+    candidate: &ActionCandidate,
+    base_time: chrono::DateTime<chrono::Utc>,
+) -> Option<DraftCandidate> {
+    let title = normalize_title(&candidate.text);
+    if title.len() < 8 || is_noise(&title) {
+        return None;
+    }
+    let combined_due_text = candidate
+        .due_hint
+        .as_ref()
+        .map(|due| format!("{} {}", title, due))
+        .unwrap_or_else(|| title.clone());
+    let category = categorize_action(&title);
+    let due_at = infer_due_at(&combined_due_text, &category, base_time);
+    let priority = Some(priority_for_category(&category));
+    let confidence = confidence_for_candidate(candidate, &category);
+    let evidence = ReminderSourceEvidence {
+        label: candidate.evidence_label.clone(),
+        snippet: truncate_evidence(&candidate.text),
+    };
+    let due_bucket = due_at.as_deref().unwrap_or("undated");
+    let dedupe_key = build_dedupe_key(meeting_id, &title, &category, due_bucket);
+    Some(DraftCandidate {
+        title,
+        due_at,
+        priority,
+        category,
+        confidence,
+        source_evidence: vec![evidence],
+        dedupe_key,
+    })
+}
+
+fn normalize_title(text: &str) -> String {
+    let mut title = text
+        .replace("**", "")
+        .replace("__", "")
+        .trim()
+        .trim_end_matches('.')
+        .to_string();
+    if let Some((_, task)) = title.split_once(':') {
+        if task.trim().len() > 8 {
+            title = task.trim().to_string();
+        }
+    }
+    title
+}
+
+fn is_noise(title: &str) -> bool {
+    let lower = title.to_lowercase();
+    lower.contains("no action")
+        || lower.contains("no follow")
+        || lower.contains("nothing to do")
+        || lower.contains("not required")
+}
+
+fn categorize_action(title: &str) -> String {
+    let lower = title.to_lowercase();
+    if any_contains(&lower, &["pull request", " pr ", "merge", "ci"])
+        || (lower.contains("review") && any_contains(&lower, &["pr", "pull request", "ci"]))
+    {
+        "pr_review"
+    } else if any_contains(
+        &lower,
+        &["linear", "jira", "ticket", "issue", "acceptance criteria"],
+    ) {
+        "linear_follow_up"
+    } else if any_contains(
+        &lower,
+        &[
+            "deploy",
+            "production",
+            "alert",
+            "observability",
+            "log",
+            "monitor",
+        ],
+    ) {
+        "deploy_alert_check"
+    } else if any_contains(
+        &lower,
+        &["doc", "readme", "confluence", "release note", "write up"],
+    ) {
+        "docs_update"
+    } else if any_contains(
+        &lower,
+        &["experiment", "revisit", "metric", "benchmark", "spike"],
+    ) {
+        "experiment_revisit"
+    } else if any_contains(
+        &lower,
+        &["ask", "confirm", "clarify", "follow up", "message", "email"],
+    ) {
+        "clarification_follow_up"
+    } else {
+        "implementation_task"
+    }
+    .to_string()
+}
+
+fn any_contains(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn infer_due_at(
+    text: &str,
+    category: &str,
+    base_time: chrono::DateTime<chrono::Utc>,
+) -> Option<String> {
+    use chrono::{Datelike, Duration, TimeZone};
+    let lower = text.to_lowercase();
+    if lower.contains("in a few hours") || lower.contains("few hours") {
+        return Some((base_time + Duration::hours(3)).to_rfc3339());
+    }
+    if lower.contains("tomorrow") {
+        let date = (base_time + Duration::days(1)).date_naive();
+        return chrono::Utc
+            .with_ymd_and_hms(date.year(), date.month(), date.day(), 9, 0, 0)
+            .single()
+            .map(|dt| dt.to_rfc3339());
+    }
+    if lower.contains("today") || lower.contains("end of day") {
+        let date = base_time.date_naive();
+        return chrono::Utc
+            .with_ymd_and_hms(date.year(), date.month(), date.day(), 17, 0, 0)
+            .single()
+            .map(|dt| dt.to_rfc3339());
+    }
+    if lower.contains("next week") || lower.contains("one week") {
+        return Some((base_time + Duration::days(7)).to_rfc3339());
+    }
+    if lower.contains("few days") || lower.contains("2 days") || lower.contains("two days") {
+        return Some((base_time + Duration::days(2)).to_rfc3339());
+    }
+    match category {
+        "deploy_alert_check" => Some((base_time + Duration::hours(2)).to_rfc3339()),
+        "pr_review" | "linear_follow_up" | "clarification_follow_up" => {
+            let date = (base_time + Duration::days(1)).date_naive();
+            chrono::Utc
+                .with_ymd_and_hms(date.year(), date.month(), date.day(), 9, 0, 0)
+                .single()
+                .map(|dt| dt.to_rfc3339())
+        }
+        "docs_update" => Some((base_time + Duration::days(2)).to_rfc3339()),
+        "experiment_revisit" => Some((base_time + Duration::days(7)).to_rfc3339()),
+        _ => None,
+    }
+}
+
+fn priority_for_category(category: &str) -> i64 {
+    match category {
+        "deploy_alert_check" => 1,
+        "docs_update" | "experiment_revisit" => 9,
+        _ => 5,
+    }
+}
+
+fn confidence_for_candidate(candidate: &ActionCandidate, category: &str) -> f64 {
+    let mut confidence = if candidate.from_table {
+        0.82
+    } else if candidate.in_action_section {
+        0.72
+    } else {
+        0.58
+    };
+    if category == "implementation_task" && !looks_actionable(&candidate.text) {
+        confidence -= 0.18;
+    }
+    confidence
+}
+
+fn truncate_evidence(text: &str) -> String {
+    let text = text.trim();
+    if text.chars().count() <= 280 {
+        return text.to_string();
+    }
+    format!("{}...", text.chars().take(277).collect::<String>())
+}
+
+fn build_dedupe_key(meeting_id: &str, title: &str, category: &str, due_bucket: &str) -> String {
+    let normalized_title = title
+        .to_lowercase()
+        .chars()
+        .map(|ch| if ch.is_alphanumeric() { ch } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let input = format!(
+        "{}|{}|{}|{}",
+        meeting_id, category, normalized_title, due_bucket
+    );
+    format!("{:016x}", fnv1a64(&input))
+}
+
+fn fnv1a64(input: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in input.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn candidate_to_reminder_draft(
+    meeting_id: &str,
+    summary_id: Option<&str>,
+    meeting_title: &str,
+    default_list_id: Option<&str>,
+    candidate: DraftCandidate,
+) -> ReminderDraft {
+    let now = chrono::Utc::now().to_rfc3339();
+    let notes = Some(format!(
+        "From Meetily meeting: {}\nWhy: {}",
+        meeting_title,
+        candidate
+            .source_evidence
+            .first()
+            .map(|evidence| evidence.snippet.as_str())
+            .unwrap_or(candidate.title.as_str())
+    ));
+    ReminderDraft {
+        id: Uuid::new_v4().to_string(),
+        meeting_id: meeting_id.to_string(),
+        summary_id: summary_id.map(str::to_string),
+        title: candidate.title,
+        notes,
+        due_at: candidate.due_at,
+        priority: candidate.priority,
+        list_id: default_list_id.map(str::to_string),
+        category: candidate.category,
+        confidence: candidate.confidence,
+        source_evidence: candidate.source_evidence,
+        dedupe_key: candidate.dedupe_key,
+        status: if candidate.confidence < 0.5 {
+            "low_confidence".to_string()
+        } else {
+            "suggested".to_string()
+        },
+        created_at: now.clone(),
+        updated_at: now,
+    }
+}
+
+async fn default_reminder_list_id(pool: &sqlx::SqlitePool) -> Result<Option<String>, String> {
+    sqlx::query_scalar(
+        "SELECT default_list_id FROM reminder_provider_accounts
+         WHERE provider = ? AND status = 'connected'
+         LIMIT 1",
+    )
+    .bind(PROVIDER_APPLE_REMINDERS)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| format!("Failed to inspect default reminder list: {}", err))
+}
+
+async fn upsert_draft(pool: &sqlx::SqlitePool, draft: &ReminderDraft) -> Result<(), String> {
+    let evidence_json = serde_json::to_string(&draft.source_evidence)
+        .map_err(|err| format!("Failed to serialize reminder evidence: {}", err))?;
+    sqlx::query(
+        "INSERT INTO reminder_drafts
+            (id, meeting_id, summary_id, title, notes, due_at, priority, list_id, category, confidence,
+             source_evidence_json, dedupe_key, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(meeting_id, dedupe_key) DO UPDATE SET
+            summary_id = excluded.summary_id,
+            title = excluded.title,
+            notes = excluded.notes,
+            due_at = excluded.due_at,
+            priority = excluded.priority,
+            list_id = COALESCE(reminder_drafts.list_id, excluded.list_id),
+            category = excluded.category,
+            confidence = excluded.confidence,
+            source_evidence_json = excluded.source_evidence_json,
+            status = CASE
+                WHEN reminder_drafts.status IN ('created', 'dismissed') THEN reminder_drafts.status
+                ELSE excluded.status
+            END,
+            updated_at = excluded.updated_at",
+    )
+    .bind(&draft.id)
+    .bind(&draft.meeting_id)
+    .bind(&draft.summary_id)
+    .bind(&draft.title)
+    .bind(&draft.notes)
+    .bind(&draft.due_at)
+    .bind(draft.priority)
+    .bind(&draft.list_id)
+    .bind(&draft.category)
+    .bind(draft.confidence)
+    .bind(evidence_json)
+    .bind(&draft.dedupe_key)
+    .bind(&draft.status)
+    .bind(&draft.created_at)
+    .bind(&draft.updated_at)
+    .execute(pool)
+    .await
+    .map_err(|err| format!("Failed to save reminder draft: {}", err))?;
+    Ok(())
+}
+
+async fn list_drafts(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    include_low_confidence: bool,
+) -> Result<Vec<ReminderDraft>, String> {
+    let mut query = "SELECT id, meeting_id, summary_id, title, notes, due_at, priority, list_id,
+            category, confidence, source_evidence_json, dedupe_key, status, created_at, updated_at
+         FROM reminder_drafts
+         WHERE meeting_id = ?"
+        .to_string();
+    if !include_low_confidence {
+        query.push_str(" AND confidence >= 0.5 AND status != 'low_confidence'");
+    }
+    query.push_str(" ORDER BY confidence DESC, created_at ASC");
+    let rows = sqlx::query(&query)
+        .bind(meeting_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| format!("Failed to list reminder drafts: {}", err))?;
+    rows.into_iter()
+        .map(|row| reminder_draft_from_row(&row))
+        .collect()
+}
+
+fn reminder_draft_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ReminderDraft, String> {
+    let evidence_json: String = row.get("source_evidence_json");
+    let source_evidence = serde_json::from_str::<Vec<ReminderSourceEvidence>>(&evidence_json)
+        .map_err(|err| format!("Failed to parse reminder evidence: {}", err))?;
+    Ok(ReminderDraft {
+        id: row.get("id"),
+        meeting_id: row.get("meeting_id"),
+        summary_id: row.get("summary_id"),
+        title: row.get("title"),
+        notes: row.get("notes"),
+        due_at: row.get("due_at"),
+        priority: row.get("priority"),
+        list_id: row.get("list_id"),
+        category: row.get("category"),
+        confidence: row.get("confidence"),
+        source_evidence,
+        dedupe_key: row.get("dedupe_key"),
+        status: row.get("status"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    })
+}
+
 fn normalize_provider(provider: &str) -> Result<String, String> {
     match provider.trim().to_lowercase().replace('-', "_").as_str() {
         "apple" | "apple_reminders" | "reminders" => Ok(PROVIDER_APPLE_REMINDERS.to_string()),
@@ -801,5 +1483,102 @@ mod tests {
     #[test]
     fn rejects_unknown_reminder_provider() {
         assert!(normalize_provider("todoist").is_err());
+    }
+
+    #[test]
+    fn extracts_action_table_reminder_drafts() {
+        let summary = r#"
+# Summary
+Work is proceeding.
+
+## Action Items
+| Owner | Task | Due | Reference |
+| --- | --- | --- | --- |
+| Adrian | Complete observability setup and alerting for Connected Mobility repository | in a few hours | "after that" |
+| Adrian | Set up AI chat knowledge base with Confluence product information | TBD | "knowledge base" |
+"#;
+        let base = chrono::DateTime::parse_from_rfc3339("2026-06-19T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let drafts = build_draft_candidates(
+            "meeting-1",
+            Some("summary-1"),
+            "Planning",
+            summary,
+            base,
+            None,
+        );
+        assert_eq!(drafts.len(), 2);
+        assert_eq!(drafts[0].category, "deploy_alert_check");
+        assert!(drafts[0].due_at.is_some());
+        assert!(drafts[0].confidence >= 0.8);
+    }
+
+    #[test]
+    fn assigns_programmer_categories() {
+        assert_eq!(
+            categorize_action("Review the payment PR after CI passes"),
+            "pr_review"
+        );
+        assert_eq!(
+            categorize_action("Review experiment metrics next week"),
+            "experiment_revisit"
+        );
+        assert_eq!(
+            categorize_action("Update CHA-123 in Linear with acceptance criteria"),
+            "linear_follow_up"
+        );
+        assert_eq!(
+            categorize_action("Write README docs for the new setup"),
+            "docs_update"
+        );
+        assert_eq!(
+            categorize_action("Ask Kris to confirm the rollout owner"),
+            "clarification_follow_up"
+        );
+    }
+
+    #[test]
+    fn infers_due_dates_conservatively() {
+        let base = chrono::DateTime::parse_from_rfc3339("2026-06-19T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert!(infer_due_at(
+            "check production in a few hours",
+            "deploy_alert_check",
+            base
+        )
+        .unwrap()
+        .starts_with("2026-06-19T13:00:00"));
+        assert!(infer_due_at("Review PR tomorrow", "pr_review", base)
+            .unwrap()
+            .starts_with("2026-06-20T09:00:00"));
+        assert!(infer_due_at(
+            "Implement vague repository cleanup",
+            "implementation_task",
+            base
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn dedupes_repeated_action_items() {
+        let summary = r#"
+## Action Items
+- Review the auth PR tomorrow
+- Review the auth PR tomorrow.
+"#;
+        let base = chrono::DateTime::parse_from_rfc3339("2026-06-19T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let drafts = build_draft_candidates(
+            "meeting-1",
+            Some("summary-1"),
+            "Planning",
+            summary,
+            base,
+            None,
+        );
+        assert_eq!(drafts.len(), 1);
     }
 }
