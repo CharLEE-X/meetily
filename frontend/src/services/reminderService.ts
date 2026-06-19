@@ -39,6 +39,8 @@ export interface ReminderSettingsState {
   providers: ReminderProviderInfo[];
   accounts: ReminderProviderAccount[];
   lists: ReminderList[];
+  workflowSettings: ReminderWorkflowSettings;
+  workflowPresets: ReminderWorkflowPreset[];
 }
 
 export interface ReminderListSyncRequest {
@@ -57,6 +59,33 @@ export interface ReminderListSyncResult {
 export interface ReminderDefaultListRequest {
   provider?: string;
   listId: string;
+}
+
+export interface ReminderWorkflowSettings {
+  provider: string;
+  globalPriority: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReminderWorkflowPreset {
+  category: string;
+  enabled: boolean;
+  defaultListId?: string | null;
+  defaultPriority?: number | null;
+  duePreset: string;
+  updatedAt: string;
+}
+
+export interface ReminderWorkflowPresetUpdateRequest {
+  category?: string | null;
+  globalPriority?: number | null;
+  enabled?: boolean | null;
+  defaultListId?: string | null;
+  useGlobalList?: true;
+  defaultPriority?: number | null;
+  useGlobalPriority?: true;
+  duePreset?: string | null;
 }
 
 export interface ReminderSourceEvidence {
@@ -171,6 +200,11 @@ export const reminderService = {
   async updateDefaultList(request: ReminderDefaultListRequest): Promise<ReminderProviderAccount> {
     requireDesktop();
     return invoke<ReminderProviderAccount>('update_default_reminder_list', { request });
+  },
+
+  async updateWorkflowPreset(request: ReminderWorkflowPresetUpdateRequest): Promise<ReminderSettingsState> {
+    requireDesktop();
+    return invoke<ReminderSettingsState>('update_reminder_workflow_preset', { request });
   },
 
   async generateDrafts(request: ReminderDraftRequest): Promise<ReminderDraftGenerationResult> {

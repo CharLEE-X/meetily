@@ -1,8 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { CheckCircle2, CircleAlert, ListTodo, Loader2, PlugZap, RefreshCw, Trash2 } from "lucide-react"
-import { reminderService, ReminderList, ReminderProviderAccount, ReminderSettingsState, ReminderListSyncResult } from "@/services/reminderService"
+import { CheckCircle2, CircleAlert, ListTodo, Loader2, PlugZap, RefreshCw, SlidersHorizontal, Trash2 } from "lucide-react"
+import { reminderService, ReminderList, ReminderProviderAccount, ReminderSettingsState, ReminderListSyncResult, ReminderWorkflowPreset } from "@/services/reminderService"
 
 function friendlyError(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -38,11 +38,36 @@ function statusClass(account?: ReminderProviderAccount): string {
   return "bg-red-100 text-red-800"
 }
 
+const CATEGORY_LABELS: Record<string, string> = {
+  pr_review: "PR review",
+  linear_follow_up: "Linear follow-up",
+  deploy_alert_check: "Deploy or alert check",
+  docs_update: "Docs update",
+  implementation_task: "Implementation task",
+  experiment_revisit: "Experiment revisit",
+  clarification_follow_up: "Clarification follow-up",
+}
+
+const DUE_PRESET_LABELS: Record<string, string> = {
+  none: "No automatic due date",
+  in_2_hours: "In 2 hours",
+  tomorrow_morning: "Tomorrow morning",
+  in_2_days: "In 2 days",
+  next_week: "Next week",
+}
+
+function priorityLabel(priority?: number | null): string {
+  if (!priority) return "Global"
+  if (priority <= 3) return "High"
+  if (priority <= 6) return "Medium"
+  return "Low"
+}
+
 export function ReminderSettings() {
   const [settings, setSettings] = useState<ReminderSettingsState | null>(null)
   const [syncResult, setSyncResult] = useState<ReminderListSyncResult | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [actionLoading, setActionLoading] = useState<"connect" | "sync" | "disconnect" | "default" | null>(null)
+  const [actionLoading, setActionLoading] = useState<"connect" | "sync" | "disconnect" | "default" | "workflow" | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
   const appleAccount = useMemo(
@@ -138,9 +163,50 @@ export function ReminderSettings() {
     }
   }
 
+  const updateWorkflowPreset = async (preset: ReminderWorkflowPreset, patch: Partial<ReminderWorkflowPreset> & { useGlobalList?: true; useGlobalPriority?: true }) => {
+    setActionLoading("workflow")
+    setMessage(null)
+    try {
+      const nextSettings = await reminderService.updateWorkflowPreset({
+        category: preset.category,
+        enabled: patch.enabled,
+        defaultListId: patch.defaultListId,
+        useGlobalList: patch.useGlobalList,
+        defaultPriority: patch.defaultPriority,
+        useGlobalPriority: patch.useGlobalPriority,
+        duePreset: patch.duePreset,
+      })
+      setSettings(nextSettings)
+      setMessage("Reminder workflow defaults saved.")
+    } catch (error) {
+      setMessage(friendlyError(error))
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const updateGlobalPriority = async (value: number) => {
+    setActionLoading("workflow")
+    setMessage(null)
+    try {
+      setSettings(await reminderService.updateWorkflowPreset({ globalPriority: value }))
+      setMessage("Global reminder priority saved.")
+    } catch (error) {
+      setMessage(friendlyError(error))
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const lastSyncAt = appleAccount?.lastSyncAt ?? syncResult?.completedAt
   const isSaving = actionLoading !== null
   const canUseProvider = appleProvider?.available !== false
+  const workflowSettings = settings?.workflowSettings
+  const workflowPresets = settings?.workflowPresets ?? []
+  const availableListIds = useMemo(() => new Set(appleLists.map((list) => list.id)), [appleLists])
+  const presetListValue = (preset: ReminderWorkflowPreset) => (
+    preset.defaultListId && availableListIds.has(preset.defaultListId) ? preset.defaultListId : "global"
+  )
 
   return (
     <div className="space-y-6">
@@ -256,6 +322,107 @@ export function ReminderSettings() {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <div className="rounded-md bg-emerald-50 p-2 text-emerald-700">
+                <SlidersHorizontal className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-950">Developer workflow presets</h3>
+                <p className="text-sm text-gray-600">Tune which follow-ups are suggested and how new reminder drafts are prefilled.</p>
+              </div>
+            </div>
+          </div>
+          {workflowSettings && (
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              Global priority
+              <select
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+                value={workflowSettings.globalPriority}
+                disabled={isSaving}
+                onChange={(event) => updateGlobalPriority(Number(event.target.value))}
+              >
+                <option value={1}>High</option>
+                <option value={5}>Medium</option>
+                <option value={9}>Low</option>
+              </select>
+            </label>
+          )}
+        </div>
+
+        <div className="mt-5 overflow-hidden rounded-lg border border-gray-200">
+          <div className="hidden grid-cols-[1.3fr_1fr_1fr_1fr] gap-3 border-b border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase text-gray-500 lg:grid">
+            <span>Category</span>
+            <span>Due default</span>
+            <span>Priority</span>
+            <span>List</span>
+          </div>
+          <div className="divide-y divide-gray-200">
+            {workflowPresets.map((preset) => (
+              <div key={preset.category} className="grid grid-cols-1 gap-3 px-4 py-4 lg:grid-cols-[1.3fr_1fr_1fr_1fr] lg:items-center">
+                <label className="flex min-w-0 items-center gap-3">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                    checked={preset.enabled}
+                    disabled={isSaving}
+                    onChange={(event) => updateWorkflowPreset(preset, { enabled: event.target.checked })}
+                  />
+                  <div className="min-w-0">
+                    <div className="font-medium text-gray-950">{CATEGORY_LABELS[preset.category] ?? preset.category}</div>
+                    <div className="text-xs text-gray-500">{preset.enabled ? "New matching drafts can be suggested." : "Hidden from new draft generation."}</div>
+                  </div>
+                </label>
+
+                <select
+                  className="w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm disabled:opacity-50"
+                  value={preset.duePreset}
+                  disabled={isSaving || !preset.enabled}
+                  onChange={(event) => updateWorkflowPreset(preset, { duePreset: event.target.value })}
+                >
+                  {Object.entries(DUE_PRESET_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+
+                <select
+                  className="w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm disabled:opacity-50"
+                  value={preset.defaultPriority ?? "global"}
+                  disabled={isSaving || !preset.enabled}
+                  onChange={(event) => updateWorkflowPreset(preset, event.target.value === "global" ? { useGlobalPriority: true } : { defaultPriority: Number(event.target.value) })}
+                >
+                  <option value="global">Global ({priorityLabel(workflowSettings?.globalPriority)})</option>
+                  <option value={1}>High</option>
+                  <option value={5}>Medium</option>
+                  <option value={9}>Low</option>
+                </select>
+
+                <select
+                  className="w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm disabled:opacity-50"
+                  value={presetListValue(preset)}
+                  disabled={isSaving || !preset.enabled || appleLists.length === 0}
+                  onChange={(event) => updateWorkflowPreset(preset, event.target.value === "global" ? { useGlobalList: true } : { defaultListId: event.target.value })}
+                >
+                  <option value="global">Global default</option>
+                  {appleLists.map((list) => (
+                    <option key={list.id} value={list.id}>{list.name}</option>
+                  ))}
+                </select>
+              </div>
+            ))}
+            {!isLoading && workflowPresets.length === 0 && (
+              <div className="px-4 py-6 text-sm text-gray-500">Workflow presets will appear after the desktop database is initialized.</div>
+            )}
+          </div>
+        </div>
+
+        <p className="mt-3 text-xs text-gray-500">
+          Presets only affect future local reminder drafts. Created Apple Reminders stay unchanged.
+        </p>
       </div>
     </div>
   )

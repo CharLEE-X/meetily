@@ -784,6 +784,7 @@ pub fn run() {
             reminders::disconnect_reminder_provider,
             reminders::sync_reminder_lists,
             reminders::update_default_reminder_list,
+            reminders::update_reminder_workflow_preset,
             reminders::generate_reminder_drafts,
             reminders::list_reminder_drafts,
             reminders::update_reminder_draft,

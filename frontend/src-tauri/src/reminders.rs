@@ -1,13 +1,22 @@
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use tauri::State;
 use uuid::Uuid;
 
 const PROVIDER_APPLE_REMINDERS: &str = "apple_reminders";
 const APPLE_REMINDERS_LABEL: &str = "Apple Reminders";
+const REMINDER_CATEGORIES: [&str; 7] = [
+    "pr_review",
+    "linear_follow_up",
+    "deploy_alert_check",
+    "docs_update",
+    "implementation_task",
+    "experiment_revisit",
+    "clarification_follow_up",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +64,8 @@ pub struct ReminderSettingsState {
     pub providers: Vec<ReminderProviderInfo>,
     pub accounts: Vec<ReminderProviderAccount>,
     pub lists: Vec<ReminderList>,
+    pub workflow_settings: ReminderWorkflowSettings,
+    pub workflow_presets: Vec<ReminderWorkflowPreset>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +90,39 @@ pub struct ReminderListSyncResult {
 pub struct ReminderDefaultListRequest {
     pub provider: Option<String>,
     pub list_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderWorkflowSettings {
+    pub provider: String,
+    pub global_priority: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderWorkflowPreset {
+    pub category: String,
+    pub enabled: bool,
+    pub default_list_id: Option<String>,
+    pub default_priority: Option<i64>,
+    pub due_preset: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderWorkflowPresetUpdateRequest {
+    pub category: Option<String>,
+    pub global_priority: Option<i64>,
+    pub enabled: Option<bool>,
+    pub default_list_id: Option<String>,
+    pub use_global_list: Option<bool>,
+    pub default_priority: Option<i64>,
+    pub use_global_priority: Option<bool>,
+    pub due_preset: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,10 +230,13 @@ pub async fn get_reminder_settings(
     state: State<'_, AppState>,
 ) -> Result<ReminderSettingsState, String> {
     let pool = state.db_manager.pool();
+    ensure_reminder_workflow_defaults(pool).await?;
     Ok(ReminderSettingsState {
         providers: provider_infos(),
         accounts: list_accounts(pool).await?,
         lists: list_lists(pool).await?,
+        workflow_settings: get_workflow_settings(pool).await?,
+        workflow_presets: list_workflow_presets(pool).await?,
     })
 }
 
@@ -370,6 +417,23 @@ pub async fn update_default_reminder_list(
     get_account(pool, &provider)
         .await?
         .ok_or_else(|| "Reminder provider was not found after updating default list".to_string())
+}
+
+#[tauri::command]
+pub async fn update_reminder_workflow_preset(
+    state: State<'_, AppState>,
+    request: ReminderWorkflowPresetUpdateRequest,
+) -> Result<ReminderSettingsState, String> {
+    let pool = state.db_manager.pool();
+    ensure_reminder_workflow_defaults(pool).await?;
+    update_workflow_preset(pool, request).await?;
+    Ok(ReminderSettingsState {
+        providers: provider_infos(),
+        accounts: list_accounts(pool).await?,
+        lists: list_lists(pool).await?,
+        workflow_settings: get_workflow_settings(pool).await?,
+        workflow_presets: list_workflow_presets(pool).await?,
+    })
 }
 
 #[tauri::command]
@@ -660,10 +724,20 @@ async fn mark_missing_lists_unselected(
                  WHERE id = ?",
             )
             .bind(&now)
-            .bind(id)
+            .bind(&id)
             .execute(pool)
             .await
             .map_err(|err| format!("Failed to update stale reminder list: {}", err))?;
+            sqlx::query(
+                "UPDATE reminder_workflow_presets
+                 SET default_list_id = NULL, updated_at = ?
+                 WHERE default_list_id = ?",
+            )
+            .bind(&now)
+            .bind(&id)
+            .execute(pool)
+            .await
+            .map_err(|err| format!("Failed to clear stale reminder preset list: {}", err))?;
         }
     }
     Ok(())
@@ -859,6 +933,247 @@ async fn update_account_sync(
     Ok(())
 }
 
+fn default_due_preset_for_category(category: &str) -> &'static str {
+    match category {
+        "deploy_alert_check" => "in_2_hours",
+        "pr_review" | "linear_follow_up" | "clarification_follow_up" => "tomorrow_morning",
+        "docs_update" => "in_2_days",
+        "experiment_revisit" => "next_week",
+        _ => "none",
+    }
+}
+
+fn default_priority_for_category(category: &str) -> i64 {
+    match category {
+        "deploy_alert_check" => 1,
+        "docs_update" | "experiment_revisit" => 9,
+        _ => 5,
+    }
+}
+
+fn validate_reminder_category(category: &str) -> Result<(), String> {
+    if REMINDER_CATEGORIES.contains(&category) {
+        Ok(())
+    } else {
+        Err("Unknown reminder workflow category.".to_string())
+    }
+}
+
+fn validate_due_preset(due_preset: &str) -> Result<(), String> {
+    match due_preset {
+        "none" | "in_2_hours" | "tomorrow_morning" | "in_2_days" | "next_week" => Ok(()),
+        _ => Err("Unknown reminder due-date default.".to_string()),
+    }
+}
+
+fn validate_priority(priority: i64) -> Result<(), String> {
+    if matches!(priority, 1 | 5 | 9) {
+        Ok(())
+    } else {
+        Err("Reminder workflow priority must be high, medium, or low.".to_string())
+    }
+}
+
+async fn ensure_reminder_workflow_defaults(pool: &sqlx::SqlitePool) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO reminder_workflow_settings (provider, global_priority, created_at, updated_at)
+         VALUES (?, 5, ?, ?)
+         ON CONFLICT(provider) DO NOTHING",
+    )
+    .bind(PROVIDER_APPLE_REMINDERS)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await
+    .map_err(|err| format!("Failed to prepare reminder workflow settings: {}", err))?;
+
+    for category in REMINDER_CATEGORIES {
+        sqlx::query(
+            "INSERT INTO reminder_workflow_presets
+                (category, enabled, default_list_id, default_priority, due_preset, updated_at)
+             VALUES (?, 1, NULL, ?, ?, ?)
+             ON CONFLICT(category) DO NOTHING",
+        )
+        .bind(category)
+        .bind(default_priority_for_category(category))
+        .bind(default_due_preset_for_category(category))
+        .bind(&now)
+        .execute(pool)
+        .await
+        .map_err(|err| format!("Failed to prepare reminder workflow presets: {}", err))?;
+    }
+    Ok(())
+}
+
+async fn get_workflow_settings(
+    pool: &sqlx::SqlitePool,
+) -> Result<ReminderWorkflowSettings, String> {
+    ensure_reminder_workflow_defaults(pool).await?;
+    let row = sqlx::query(
+        "SELECT provider, global_priority, created_at, updated_at
+         FROM reminder_workflow_settings
+         WHERE provider = ?",
+    )
+    .bind(PROVIDER_APPLE_REMINDERS)
+    .fetch_one(pool)
+    .await
+    .map_err(|err| format!("Failed to load reminder workflow settings: {}", err))?;
+
+    Ok(ReminderWorkflowSettings {
+        provider: row.get("provider"),
+        global_priority: row.get("global_priority"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    })
+}
+
+async fn list_workflow_presets(
+    pool: &sqlx::SqlitePool,
+) -> Result<Vec<ReminderWorkflowPreset>, String> {
+    ensure_reminder_workflow_defaults(pool).await?;
+    let rows = sqlx::query(
+        "SELECT category, enabled, default_list_id, default_priority, due_preset, updated_at
+         FROM reminder_workflow_presets",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|err| format!("Failed to list reminder workflow presets: {}", err))?;
+    let mut by_category = HashMap::new();
+    for row in rows {
+        let preset = ReminderWorkflowPreset {
+            category: row.get("category"),
+            enabled: row.get::<i64, _>("enabled") != 0,
+            default_list_id: row.get("default_list_id"),
+            default_priority: row.get("default_priority"),
+            due_preset: row.get("due_preset"),
+            updated_at: row.get("updated_at"),
+        };
+        by_category.insert(preset.category.clone(), preset);
+    }
+
+    Ok(REMINDER_CATEGORIES
+        .iter()
+        .filter_map(|category| by_category.remove(*category))
+        .collect())
+}
+
+async fn update_workflow_preset(
+    pool: &sqlx::SqlitePool,
+    request: ReminderWorkflowPresetUpdateRequest,
+) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    if let Some(global_priority) = request.global_priority {
+        validate_priority(global_priority)?;
+        sqlx::query(
+            "UPDATE reminder_workflow_settings
+             SET global_priority = ?, updated_at = ?
+             WHERE provider = ?",
+        )
+        .bind(global_priority)
+        .bind(&now)
+        .bind(PROVIDER_APPLE_REMINDERS)
+        .execute(pool)
+        .await
+        .map_err(|err| format!("Failed to update global reminder priority: {}", err))?;
+    }
+
+    let has_preset_fields = request.enabled.is_some()
+        || request.default_list_id.is_some()
+        || request.use_global_list.unwrap_or(false)
+        || request.default_priority.is_some()
+        || request.use_global_priority.unwrap_or(false)
+        || request.due_preset.is_some();
+    let Some(category) = request
+        .category
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        if has_preset_fields {
+            return Err("Reminder workflow category is required.".to_string());
+        }
+        return Ok(());
+    };
+    validate_reminder_category(category)?;
+    if let Some(priority) = request.default_priority {
+        validate_priority(priority)?;
+    }
+    if let Some(due_preset) = request.due_preset.as_deref() {
+        validate_due_preset(due_preset)?;
+    }
+    let list_id = request
+        .default_list_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(list_id) = list_id.as_deref() {
+        let exists: Option<String> =
+            sqlx::query_scalar("SELECT id FROM reminder_lists WHERE id = ? AND selected = 1")
+                .bind(list_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|err| format!("Failed to inspect reminder preset list: {}", err))?;
+        if exists.is_none() {
+            return Err("Selected reminder list is not available.".to_string());
+        }
+    }
+
+    let current = get_workflow_preset(pool, category).await?;
+    let next_list_id = if request.use_global_list.unwrap_or(false) {
+        None
+    } else {
+        list_id.or(current.default_list_id)
+    };
+    let next_priority = if request.use_global_priority.unwrap_or(false) {
+        None
+    } else {
+        request.default_priority.or(current.default_priority)
+    };
+
+    sqlx::query(
+        "UPDATE reminder_workflow_presets
+         SET enabled = ?, default_list_id = ?, default_priority = ?, due_preset = ?, updated_at = ?
+         WHERE category = ?",
+    )
+    .bind(request.enabled.unwrap_or(current.enabled) as i64)
+    .bind(next_list_id)
+    .bind(next_priority)
+    .bind(request.due_preset.unwrap_or(current.due_preset))
+    .bind(now)
+    .bind(category)
+    .execute(pool)
+    .await
+    .map_err(|err| format!("Failed to update reminder workflow preset: {}", err))?;
+    Ok(())
+}
+
+async fn get_workflow_preset(
+    pool: &sqlx::SqlitePool,
+    category: &str,
+) -> Result<ReminderWorkflowPreset, String> {
+    let row = sqlx::query(
+        "SELECT category, enabled, default_list_id, default_priority, due_preset, updated_at
+         FROM reminder_workflow_presets
+         WHERE category = ?",
+    )
+    .bind(category)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| format!("Failed to load reminder workflow preset: {}", err))?
+    .ok_or_else(|| "Reminder workflow preset was not found.".to_string())?;
+
+    Ok(ReminderWorkflowPreset {
+        category: row.get("category"),
+        enabled: row.get::<i64, _>("enabled") != 0,
+        default_list_id: row.get("default_list_id"),
+        default_priority: row.get("default_priority"),
+        due_preset: row.get("due_preset"),
+        updated_at: row.get("updated_at"),
+    })
+}
+
 async fn generate_reminder_drafts_for_meeting(
     pool: &sqlx::SqlitePool,
     meeting_id: &str,
@@ -893,7 +1208,7 @@ async fn generate_reminder_drafts_for_meeting(
     }
 
     let base_time = summary.end_time.unwrap_or(meeting.updated_at.0);
-    let default_list_id = default_reminder_list_id(pool).await?;
+    let defaults = load_workflow_defaults(pool).await?;
     let summary_id = Some(summary.meeting_id.as_str());
     let generated = build_draft_candidates(
         meeting_id,
@@ -901,7 +1216,7 @@ async fn generate_reminder_drafts_for_meeting(
         &meeting.title,
         &summary_text,
         base_time,
-        default_list_id.as_deref(),
+        &defaults,
     );
 
     let mut hidden_low_confidence_count = 0usize;
@@ -960,10 +1275,19 @@ struct DraftCandidate {
     title: String,
     due_at: Option<String>,
     priority: Option<i64>,
+    list_id: Option<String>,
     category: String,
     confidence: f64,
     source_evidence: Vec<ReminderSourceEvidence>,
+    preset_reason: String,
     dedupe_key: String,
+}
+
+#[derive(Debug, Clone)]
+struct ReminderWorkflowDefaults {
+    global_priority: i64,
+    default_list_id: Option<String>,
+    presets: HashMap<String, ReminderWorkflowPreset>,
 }
 
 fn build_draft_candidates(
@@ -972,13 +1296,14 @@ fn build_draft_candidates(
     meeting_title: &str,
     summary_text: &str,
     base_time: chrono::DateTime<chrono::Utc>,
-    default_list_id: Option<&str>,
+    defaults: &ReminderWorkflowDefaults,
 ) -> Vec<ReminderDraft> {
     let mut seen = HashSet::new();
     extract_action_candidates(summary_text)
         .into_iter()
         .filter_map(|candidate| {
-            let candidate = candidate_to_draft_candidate(meeting_id, &candidate, base_time)?;
+            let candidate =
+                candidate_to_draft_candidate(meeting_id, &candidate, base_time, defaults)?;
             if !seen.insert(candidate.dedupe_key.clone()) {
                 return None;
             }
@@ -986,7 +1311,6 @@ fn build_draft_candidates(
                 meeting_id,
                 summary_id,
                 meeting_title,
-                default_list_id,
                 candidate,
             ))
         })
@@ -1124,6 +1448,7 @@ fn candidate_to_draft_candidate(
     meeting_id: &str,
     candidate: &ActionCandidate,
     base_time: chrono::DateTime<chrono::Utc>,
+    defaults: &ReminderWorkflowDefaults,
 ) -> Option<DraftCandidate> {
     let title = normalize_title(&candidate.text);
     if title.len() < 8 || is_noise(&title) {
@@ -1135,22 +1460,43 @@ fn candidate_to_draft_candidate(
         .map(|due| format!("{} {}", title, due))
         .unwrap_or_else(|| title.clone());
     let category = categorize_action(&title);
-    let due_at = infer_due_at(&combined_due_text, &category, base_time);
-    let priority = Some(priority_for_category(&category));
+    let preset = defaults.presets.get(&category);
+    if preset.is_some_and(|preset| !preset.enabled) {
+        return None;
+    }
+    let due_at = infer_due_at(&combined_due_text, base_time).or_else(|| {
+        due_at_for_preset(
+            preset
+                .map(|preset| preset.due_preset.as_str())
+                .unwrap_or_else(|| default_due_preset_for_category(&category)),
+            base_time,
+        )
+    });
+    let priority = Some(
+        preset
+            .and_then(|preset| preset.default_priority)
+            .unwrap_or(defaults.global_priority),
+    );
+    let list_id = preset
+        .and_then(|preset| preset.default_list_id.clone())
+        .or_else(|| defaults.default_list_id.clone());
     let confidence = confidence_for_candidate(candidate, &category);
-    let evidence = ReminderSourceEvidence {
+    let evidence = vec![ReminderSourceEvidence {
         label: candidate.evidence_label.clone(),
         snippet: truncate_evidence(&candidate.text),
-    };
+    }];
+    let preset_reason = preset_reason(&category, due_at.as_deref(), priority, list_id.as_deref());
     let due_bucket = due_at.as_deref().unwrap_or("undated");
     let dedupe_key = build_dedupe_key(meeting_id, &title, &category, due_bucket);
     Some(DraftCandidate {
         title,
         due_at,
         priority,
+        list_id,
         category,
         confidence,
-        source_evidence: vec![evidence],
+        source_evidence: evidence,
+        preset_reason,
         dedupe_key,
     })
 }
@@ -1226,11 +1572,7 @@ fn any_contains(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| text.contains(needle))
 }
 
-fn infer_due_at(
-    text: &str,
-    category: &str,
-    base_time: chrono::DateTime<chrono::Utc>,
-) -> Option<String> {
+fn infer_due_at(text: &str, base_time: chrono::DateTime<chrono::Utc>) -> Option<String> {
     use chrono::{Datelike, Duration, TimeZone};
     let lower = text.to_lowercase();
     if lower.contains("in a few hours") || lower.contains("few hours") {
@@ -1256,27 +1598,45 @@ fn infer_due_at(
     if lower.contains("few days") || lower.contains("2 days") || lower.contains("two days") {
         return Some((base_time + Duration::days(2)).to_rfc3339());
     }
-    match category {
-        "deploy_alert_check" => Some((base_time + Duration::hours(2)).to_rfc3339()),
-        "pr_review" | "linear_follow_up" | "clarification_follow_up" => {
+    None
+}
+
+fn due_at_for_preset(due_preset: &str, base_time: chrono::DateTime<chrono::Utc>) -> Option<String> {
+    use chrono::{Datelike, Duration, TimeZone};
+    match due_preset {
+        "in_2_hours" => Some((base_time + Duration::hours(2)).to_rfc3339()),
+        "tomorrow_morning" => {
             let date = (base_time + Duration::days(1)).date_naive();
             chrono::Utc
                 .with_ymd_and_hms(date.year(), date.month(), date.day(), 9, 0, 0)
                 .single()
                 .map(|dt| dt.to_rfc3339())
         }
-        "docs_update" => Some((base_time + Duration::days(2)).to_rfc3339()),
-        "experiment_revisit" => Some((base_time + Duration::days(7)).to_rfc3339()),
+        "in_2_days" => Some((base_time + Duration::days(2)).to_rfc3339()),
+        "next_week" => Some((base_time + Duration::days(7)).to_rfc3339()),
         _ => None,
     }
 }
 
-fn priority_for_category(category: &str) -> i64 {
-    match category {
-        "deploy_alert_check" => 1,
-        "docs_update" | "experiment_revisit" => 9,
-        _ => 5,
+fn preset_reason(
+    category: &str,
+    due_at: Option<&str>,
+    priority: Option<i64>,
+    list_id: Option<&str>,
+) -> String {
+    let mut parts = vec![format!("Category: {}", category.replace('_', " "))];
+    if let Some(due_at) = due_at {
+        parts.push(format!("Due default: {}", due_at));
     }
+    if let Some(priority) = priority {
+        parts.push(format!("Priority default: {}", priority));
+    }
+    if list_id.is_some() {
+        parts.push("List default applied".to_string());
+    } else {
+        parts.push("Uses global list default".to_string());
+    }
+    parts.join(". ")
 }
 
 fn confidence_for_candidate(candidate: &ActionCandidate, category: &str) -> f64 {
@@ -1330,18 +1690,18 @@ fn candidate_to_reminder_draft(
     meeting_id: &str,
     summary_id: Option<&str>,
     meeting_title: &str,
-    default_list_id: Option<&str>,
     candidate: DraftCandidate,
 ) -> ReminderDraft {
     let now = chrono::Utc::now().to_rfc3339();
     let notes = Some(format!(
-        "From Meetily meeting: {}\nWhy: {}",
+        "From Meetily meeting: {}\nWhy: {}\nPreset: {}",
         meeting_title,
         candidate
             .source_evidence
             .first()
             .map(|evidence| evidence.snippet.as_str())
-            .unwrap_or(candidate.title.as_str())
+            .unwrap_or(candidate.title.as_str()),
+        candidate.preset_reason
     ));
     ReminderDraft {
         id: Uuid::new_v4().to_string(),
@@ -1351,7 +1711,7 @@ fn candidate_to_reminder_draft(
         notes,
         due_at: candidate.due_at,
         priority: candidate.priority,
-        list_id: default_list_id.map(str::to_string),
+        list_id: candidate.list_id,
         category: candidate.category,
         confidence: candidate.confidence,
         source_evidence: candidate.source_evidence,
@@ -1366,8 +1726,27 @@ fn candidate_to_reminder_draft(
     }
 }
 
-async fn default_reminder_list_id(pool: &sqlx::SqlitePool) -> Result<Option<String>, String> {
-    sqlx::query_scalar(
+async fn load_workflow_defaults(
+    pool: &sqlx::SqlitePool,
+) -> Result<ReminderWorkflowDefaults, String> {
+    ensure_reminder_workflow_defaults(pool).await?;
+    let workflow_settings = get_workflow_settings(pool).await?;
+    let selected_list_ids = selected_reminder_list_ids(pool).await?;
+    let presets = list_workflow_presets(pool)
+        .await?
+        .into_iter()
+        .map(|mut preset| {
+            if preset
+                .default_list_id
+                .as_ref()
+                .is_some_and(|list_id| !selected_list_ids.contains(list_id))
+            {
+                preset.default_list_id = None;
+            }
+            (preset.category.clone(), preset)
+        })
+        .collect();
+    let default_list_id: Option<String> = sqlx::query_scalar(
         "SELECT default_list_id FROM reminder_provider_accounts
          WHERE provider = ? AND status = 'connected'
          LIMIT 1",
@@ -1375,7 +1754,21 @@ async fn default_reminder_list_id(pool: &sqlx::SqlitePool) -> Result<Option<Stri
     .bind(PROVIDER_APPLE_REMINDERS)
     .fetch_optional(pool)
     .await
-    .map_err(|err| format!("Failed to inspect default reminder list: {}", err))
+    .map_err(|err| format!("Failed to inspect default reminder list: {}", err))?;
+
+    Ok(ReminderWorkflowDefaults {
+        global_priority: workflow_settings.global_priority,
+        default_list_id,
+        presets,
+    })
+}
+
+async fn selected_reminder_list_ids(pool: &sqlx::SqlitePool) -> Result<HashSet<String>, String> {
+    let rows = sqlx::query("SELECT id FROM reminder_lists WHERE selected = 1")
+        .fetch_all(pool)
+        .await
+        .map_err(|err| format!("Failed to inspect selected reminder lists: {}", err))?;
+    Ok(rows.into_iter().map(|row| row.get("id")).collect())
 }
 
 async fn upsert_draft(pool: &sqlx::SqlitePool, draft: &ReminderDraft) -> Result<(), String> {
@@ -1948,6 +2341,31 @@ fn sanitize_reminder_error(error: &str) -> String {
 mod tests {
     use super::*;
 
+    fn test_defaults() -> ReminderWorkflowDefaults {
+        let now = "2026-06-19T10:00:00Z".to_string();
+        let presets = REMINDER_CATEGORIES
+            .iter()
+            .map(|category| {
+                (
+                    (*category).to_string(),
+                    ReminderWorkflowPreset {
+                        category: (*category).to_string(),
+                        enabled: true,
+                        default_list_id: None,
+                        default_priority: Some(default_priority_for_category(category)),
+                        due_preset: default_due_preset_for_category(category).to_string(),
+                        updated_at: now.clone(),
+                    },
+                )
+            })
+            .collect();
+        ReminderWorkflowDefaults {
+            global_priority: 5,
+            default_list_id: Some("global-list".to_string()),
+            presets,
+        }
+    }
+
     #[test]
     fn parses_apple_reminder_list_row_without_content() {
         let row = format!("{}{}{}", "x-apple-list-id", '\u{1e}', "Engineering");
@@ -2050,7 +2468,7 @@ Work is proceeding.
             "Planning",
             summary,
             base,
-            None,
+            &test_defaults(),
         );
         assert_eq!(drafts.len(), 2);
         assert_eq!(drafts[0].category, "deploy_alert_check");
@@ -2087,22 +2505,13 @@ Work is proceeding.
         let base = chrono::DateTime::parse_from_rfc3339("2026-06-19T10:00:00Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
-        assert!(infer_due_at(
-            "check production in a few hours",
-            "deploy_alert_check",
-            base
-        )
-        .unwrap()
-        .starts_with("2026-06-19T13:00:00"));
-        assert!(infer_due_at("Review PR tomorrow", "pr_review", base)
+        assert!(infer_due_at("check production in a few hours", base)
+            .unwrap()
+            .starts_with("2026-06-19T13:00:00"));
+        assert!(infer_due_at("Review PR tomorrow", base)
             .unwrap()
             .starts_with("2026-06-20T09:00:00"));
-        assert!(infer_due_at(
-            "Implement vague repository cleanup",
-            "implementation_task",
-            base
-        )
-        .is_none());
+        assert!(infer_due_at("Implement vague repository cleanup", base).is_none());
     }
 
     #[test]
@@ -2121,8 +2530,64 @@ Work is proceeding.
             "Planning",
             summary,
             base,
-            None,
+            &test_defaults(),
         );
         assert_eq!(drafts.len(), 1);
+    }
+
+    #[test]
+    fn workflow_presets_can_disable_categories() {
+        let mut defaults = test_defaults();
+        defaults.presets.get_mut("pr_review").unwrap().enabled = false;
+        let base = chrono::DateTime::parse_from_rfc3339("2026-06-19T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let drafts = build_draft_candidates(
+            "meeting-1",
+            Some("summary-1"),
+            "Planning",
+            "## Action Items\n- Review the auth PR tomorrow",
+            base,
+            &defaults,
+        );
+        assert!(drafts.is_empty());
+    }
+
+    #[test]
+    fn workflow_presets_apply_due_priority_list_and_reason() {
+        let mut defaults = test_defaults();
+        let preset = defaults.presets.get_mut("docs_update").unwrap();
+        preset.default_list_id = Some("docs-list".to_string());
+        preset.default_priority = Some(9);
+        preset.due_preset = "in_2_days".to_string();
+        let base = chrono::DateTime::parse_from_rfc3339("2026-06-19T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let drafts = build_draft_candidates(
+            "meeting-1",
+            Some("summary-1"),
+            "Planning",
+            "## Action Items\n- Update README docs for the release process",
+            base,
+            &defaults,
+        );
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].category, "docs_update");
+        assert_eq!(drafts[0].priority, Some(9));
+        assert_eq!(drafts[0].list_id.as_deref(), Some("docs-list"));
+        assert!(drafts[0]
+            .due_at
+            .as_deref()
+            .unwrap()
+            .starts_with("2026-06-21T10:00:00"));
+        assert!(drafts[0]
+            .notes
+            .as_deref()
+            .unwrap()
+            .contains("Preset: Category: docs update"));
+        assert!(!drafts[0]
+            .source_evidence
+            .iter()
+            .any(|evidence| evidence.label == "Reminder preset"));
     }
 }
