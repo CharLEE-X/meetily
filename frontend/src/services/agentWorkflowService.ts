@@ -28,9 +28,30 @@ export interface AgentWorkflowSettings {
   defaultAgent: AgentTarget;
   mode: WorkflowMode;
   enabledActions: WorkflowActionId[];
+  budgetPreset: AgentContextBudgetPreset;
+  consent: AgentContextConsent;
+  rules: AgentWorkflowRule[];
   skillPackInstalled: boolean;
   skillPackVersion: string | null;
   updatedAt: string | null;
+}
+
+export interface AgentWorkflowRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  agent: AgentTarget;
+  mode: WorkflowMode;
+  enabledActions: WorkflowActionId[];
+  budgetPreset: AgentContextBudgetPreset;
+  templateId: string;
+  match: {
+    titleKeywords: string[];
+    calendarKeywords: string[];
+    projectKeywords: string[];
+    templateIds: string[];
+  };
+  consent: AgentContextConsent;
 }
 
 export interface AgentWorkflowRun {
@@ -50,6 +71,9 @@ export interface AgentWorkflowContext {
   meetingTitle: string;
   meetingStartedAt?: string | null;
   meetingEndedAt?: string | null;
+  templateId?: string | null;
+  calendarText?: string | null;
+  projectText?: string | null;
   summary: Summary | { markdown?: string } | null;
   mcpUrl: string | null;
   budgetPreset?: AgentContextBudgetPreset;
@@ -65,6 +89,13 @@ export interface AgentWorkflowContext {
   screenshotsOcr?: AgentContextInputItem[];
   calendarMetadata?: AgentContextInputItem[];
   artifacts?: AgentContextInputItem[];
+}
+
+export interface ResolvedAgentWorkflowRule {
+  settings: AgentWorkflowSettings;
+  matchedRule: AgentWorkflowRule | null;
+  preview: string;
+  blockedReason: string | null;
 }
 
 export interface PreparedAgentWorkflow {
@@ -196,10 +227,25 @@ export const AGENT_SUPPORT_MATRIX: Array<{
 const SETTINGS_KEY = 'meetily.agentWorkflowSettings';
 const RUNS_KEY = 'meetily.agentWorkflowRuns';
 
+const defaultConsent: AgentContextConsent = {
+  includeSummary: true,
+  includeActionItems: true,
+  includeDecisions: true,
+  includeRisks: true,
+  includeTranscriptExcerpts: false,
+  includeFullTranscript: false,
+  includeScreenshotsOcr: false,
+  includeCalendarMetadata: false,
+  includeArtifacts: false,
+};
+
 const defaultSettings: AgentWorkflowSettings = {
   defaultAgent: 'manual',
   mode: 'off',
   enabledActions: ['review-summary', 'extract-follow-ups'],
+  budgetPreset: 'standard',
+  consent: defaultConsent,
+  rules: [],
   skillPackInstalled: false,
   skillPackVersion: null,
   updatedAt: null,
@@ -228,24 +274,148 @@ function writeJson<T>(key: string, value: T) {
 
 function sanitizeSettings(value: Partial<AgentWorkflowSettings> | null | undefined): AgentWorkflowSettings {
   const allowedActions = new Set(AGENT_WORKFLOW_ACTIONS.map((action) => action.id));
+  const allowedAgents = new Set<AgentTarget>(['claude', 'codex', 'cursor', 'manual']);
+  const allowedModes = new Set<WorkflowMode>(['off', 'ask', 'auto']);
+  const allowedBudgets = new Set<AgentContextBudgetPreset>(['minimal', 'standard', 'detailed', 'custom']);
   const enabledActions = Array.isArray(value?.enabledActions)
     ? value.enabledActions.filter((action): action is WorkflowActionId => allowedActions.has(action as WorkflowActionId))
     : defaultSettings.enabledActions;
 
-  const defaultAgent = value?.defaultAgent && ['claude', 'codex', 'cursor', 'manual'].includes(value.defaultAgent)
+  const defaultAgent = value?.defaultAgent && allowedAgents.has(value.defaultAgent)
     ? value.defaultAgent
     : defaultSettings.defaultAgent;
-  const mode = value?.mode && ['off', 'ask', 'auto'].includes(value.mode)
+  const mode = value?.mode && allowedModes.has(value.mode)
     ? value.mode
     : defaultSettings.mode;
+  const budgetPreset = value?.budgetPreset && allowedBudgets.has(value.budgetPreset)
+    ? value.budgetPreset
+    : defaultSettings.budgetPreset;
+
+  const consent = {
+    ...defaultConsent,
+    ...(value?.consent ?? {}),
+  };
+
+  const rules = Array.isArray(value?.rules)
+    ? value.rules.map((rule, index): AgentWorkflowRule => {
+      const ruleActions = Array.isArray(rule.enabledActions)
+        ? rule.enabledActions.filter((action): action is WorkflowActionId => allowedActions.has(action as WorkflowActionId))
+        : enabledActions;
+      return {
+        id: typeof rule.id === 'string' && rule.id ? rule.id : `rule-${index + 1}`,
+        name: typeof rule.name === 'string' && rule.name.trim() ? rule.name.trim() : `Rule ${index + 1}`,
+        enabled: rule.enabled !== false,
+        agent: rule.agent && allowedAgents.has(rule.agent) ? rule.agent : defaultAgent,
+        mode: rule.mode && allowedModes.has(rule.mode) ? rule.mode : mode,
+        enabledActions: ruleActions.length ? ruleActions : enabledActions,
+        budgetPreset: rule.budgetPreset && allowedBudgets.has(rule.budgetPreset) ? rule.budgetPreset : budgetPreset,
+        templateId: typeof rule.templateId === 'string' ? rule.templateId.trim() : '',
+        match: {
+          titleKeywords: normalizeKeywords(rule.match?.titleKeywords),
+          calendarKeywords: normalizeKeywords(rule.match?.calendarKeywords),
+          projectKeywords: normalizeKeywords(rule.match?.projectKeywords),
+          templateIds: normalizeKeywords(rule.match?.templateIds),
+        },
+        consent: {
+          ...consent,
+          ...(rule.consent ?? {}),
+        },
+      };
+    })
+    : [];
 
   return {
     defaultAgent,
     mode,
     enabledActions: enabledActions.length ? enabledActions : defaultSettings.enabledActions,
+    budgetPreset,
+    consent,
+    rules,
     skillPackInstalled: Boolean(value?.skillPackInstalled),
     skillPackVersion: value?.skillPackVersion ?? null,
     updatedAt: value?.updatedAt ?? null,
+  };
+}
+
+function normalizeKeywords(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => typeof item === 'string' ? item.trim().toLowerCase() : '')
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function containsKeyword(text: string | null | undefined, keywords: string[]): boolean {
+  if (keywords.length === 0) return true;
+  const haystack = (text ?? '').toLowerCase();
+  return keywords.some((keyword) => haystack.includes(keyword));
+}
+
+function ruleMatches(context: AgentWorkflowContext, rule: AgentWorkflowRule): boolean {
+  return (
+    containsKeyword(context.meetingTitle, rule.match.titleKeywords) &&
+    containsKeyword(context.calendarText, rule.match.calendarKeywords) &&
+    containsKeyword(context.projectText, rule.match.projectKeywords) &&
+    (rule.match.templateIds.length === 0 || (context.templateId ? rule.match.templateIds.includes(context.templateId.toLowerCase()) : false))
+  );
+}
+
+function mergeRuleSettings(settings: AgentWorkflowSettings, rule: AgentWorkflowRule | null): AgentWorkflowSettings {
+  if (!rule) return settings;
+  return {
+    ...settings,
+    defaultAgent: rule.agent,
+    mode: rule.mode,
+    enabledActions: rule.enabledActions,
+    budgetPreset: rule.budgetPreset,
+    consent: rule.consent,
+  };
+}
+
+function readinessBlockReason(
+  settings: AgentWorkflowSettings,
+  status: McpStatus | null,
+  agentStatuses: AgentSetupStatus[]
+): string | null {
+  if (settings.mode === 'off') return 'Post-meeting workflows are disabled.';
+  if (!settings.skillPackInstalled) return 'Meetily skill pack is not installed.';
+  if (settings.defaultAgent === 'manual') return null;
+
+  const selectedAgent = agentStatuses.find((agent) => agent.agent === settings.defaultAgent);
+  if (!status?.settings.enabled || !selectedAgent?.configured) {
+    return 'Enable MCP and configure the selected agent before running post-meeting workflows.';
+  }
+  if (settings.mode === 'auto' && !selectedAgent.working) {
+    return 'Auto-trigger requires the selected agent readiness check to be working.';
+  }
+  return null;
+}
+
+export function resolveAgentWorkflowRule(
+  context: AgentWorkflowContext,
+  status: McpStatus | null,
+  agentStatuses: AgentSetupStatus[],
+  settings = getAgentWorkflowSettings()
+): ResolvedAgentWorkflowRule {
+  const matchedRule = settings.rules.find((rule) => rule.enabled && ruleMatches(context, rule)) ?? null;
+  const effectiveSettings = mergeRuleSettings(settings, matchedRule);
+  const actionLabels = effectiveSettings.enabledActions
+    .map((actionId) => AGENT_WORKFLOW_ACTIONS.find((action) => action.id === actionId)?.label)
+    .filter(Boolean)
+    .join(', ');
+  const preview = [
+    matchedRule ? `Rule "${matchedRule.name}" matched.` : 'No rule matched; using global defaults.',
+    `Agent: ${effectiveSettings.defaultAgent}.`,
+    `Mode: ${effectiveSettings.mode}.`,
+    `Budget: ${effectiveSettings.budgetPreset}.`,
+    `Actions: ${actionLabels || 'Review summary'}.`,
+  ].join(' ');
+
+  return {
+    settings: effectiveSettings,
+    matchedRule,
+    preview,
+    blockedReason: readinessBlockReason(effectiveSettings, status, agentStatuses),
   };
 }
 
@@ -410,47 +580,43 @@ export function prepareAgentWorkflow(
   settings = getAgentWorkflowSettings()
 ): PreparedAgentWorkflow {
   const createdAt = new Date().toISOString();
+  const resolution = resolveAgentWorkflowRule(context, status, agentStatuses, settings);
+  const effectiveSettings = resolution.settings;
+  const effectiveContext: AgentWorkflowContext = {
+    ...context,
+    budgetPreset: context.budgetPreset ?? effectiveSettings.budgetPreset,
+    consent: {
+      ...effectiveSettings.consent,
+      ...(context.consent ?? {}),
+    },
+  };
   const baseRun = {
     id: `workflow-${Date.now()}`,
     meetingId: context.meetingId,
     meetingTitle: context.meetingTitle,
-    agent: settings.defaultAgent,
-    actions: settings.enabledActions,
-    mode: settings.mode,
+    agent: effectiveSettings.defaultAgent,
+    actions: effectiveSettings.enabledActions,
+    mode: effectiveSettings.mode,
     createdAt,
   };
 
-  if (settings.mode === 'off' || !settings.skillPackInstalled) {
+  if (resolution.blockedReason) {
     const run: AgentWorkflowRun = {
       ...baseRun,
-      status: 'skipped',
-      message: settings.skillPackInstalled
-        ? 'Post-meeting workflows are disabled.'
-        : 'Meetily skill pack is not installed.',
+      status: effectiveSettings.mode === 'off' || !effectiveSettings.skillPackInstalled ? 'skipped' : 'failed',
+      message: resolution.blockedReason,
     };
     saveRun(run);
     return { run, prompt: '', canRun: false, reason: run.message };
   }
 
-  const needsMcp = settings.defaultAgent !== 'manual';
-  const selectedAgent = agentStatuses.find((agent) => agent.agent === settings.defaultAgent);
-  if (needsMcp && (!status?.settings.enabled || !selectedAgent?.configured)) {
-    const run: AgentWorkflowRun = {
-      ...baseRun,
-      status: 'failed',
-      message: 'Enable MCP and configure the selected agent before running post-meeting workflows.',
-    };
-    saveRun(run);
-    return { run, prompt: '', canRun: false, reason: run.message };
-  }
-
-  const prompt = buildLinearFollowUpTemplate(context, settings.enabledActions);
+  const prompt = buildLinearFollowUpTemplate(effectiveContext, effectiveSettings.enabledActions);
   const run: AgentWorkflowRun = {
     ...baseRun,
-    status: settings.mode === 'ask' ? 'waitingForApproval' : 'prepared',
-    message: settings.mode === 'ask'
-      ? 'Workflow prepared and waiting for user approval.'
-      : 'Workflow handoff prepared automatically.',
+    status: effectiveSettings.mode === 'ask' ? 'waitingForApproval' : 'prepared',
+    message: effectiveSettings.mode === 'ask'
+      ? `${resolution.preview} Workflow prepared and waiting for user approval.`
+      : `${resolution.preview} Workflow handoff prepared automatically.`,
   };
   saveRun(run);
   return { run, prompt, canRun: true, reason: null };

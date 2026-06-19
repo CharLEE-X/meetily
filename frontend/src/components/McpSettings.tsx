@@ -7,6 +7,7 @@ import { mcpService, AgentKind, AgentSetupStatus, McpAuditEvent, McpClient, McpS
 import {
   AGENT_SUPPORT_MATRIX,
   AGENT_WORKFLOW_ACTIONS,
+  AgentWorkflowRule,
   AgentTarget,
   AgentWorkflowRun,
   AgentWorkflowSettings,
@@ -17,8 +18,10 @@ import {
   listAgentWorkflowRuns,
   MEETILY_SKILL_PACK_VERSION,
   removeMeetilySkillPack,
+  resolveAgentWorkflowRule,
   saveAgentWorkflowSettings,
 } from "@/services/agentWorkflowService"
+import { AgentContextBudgetPreset, AgentContextConsent } from "@/services/agentContextPackage"
 
 function statusText(status: McpStatus | null): string {
   if (!status) return "Loading"
@@ -67,6 +70,17 @@ function clientStateLabel(client: McpClient): string {
   const expiresAt = new Date(client.expiresAt)
   if (Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() < Date.now()) return "Expired"
   return "Active"
+}
+
+function keywordText(keywords: string[]): string {
+  return keywords.join(", ")
+}
+
+function parseKeywords(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 export function McpSettings() {
@@ -207,6 +221,60 @@ export function McpSettings() {
     })
   }
 
+  const handleBudgetChange = (budgetPreset: AgentContextBudgetPreset) => {
+    updateWorkflowSettings((current) => ({ ...current, budgetPreset }))
+  }
+
+  const handleConsentChange = (key: keyof AgentContextConsent, enabled: boolean) => {
+    updateWorkflowSettings((current) => ({
+      ...current,
+      consent: {
+        ...current.consent,
+        [key]: enabled,
+      },
+    }))
+  }
+
+  const handleAddRule = () => {
+    updateWorkflowSettings((current) => ({
+      ...current,
+      rules: [
+        ...current.rules,
+        {
+          id: `rule-${Date.now()}`,
+          name: "New automation rule",
+          enabled: true,
+          agent: current.defaultAgent,
+          mode: current.mode === "off" ? "ask" : current.mode,
+          enabledActions: current.enabledActions,
+          budgetPreset: current.budgetPreset,
+          templateId: "",
+          match: {
+            titleKeywords: [],
+            calendarKeywords: [],
+            projectKeywords: [],
+            templateIds: [],
+          },
+          consent: current.consent,
+        },
+      ],
+    }))
+  }
+
+  const updateRule = (ruleId: string, updater: (rule: AgentWorkflowRule) => AgentWorkflowRule) => {
+    updateWorkflowSettings((current) => ({
+      ...current,
+      rules: current.rules.map((rule) => rule.id === ruleId ? updater(rule) : rule),
+    }))
+  }
+
+  const removeRule = (ruleId: string) => {
+    updateWorkflowSettings((current) => ({
+      ...current,
+      rules: current.rules.filter((rule) => rule.id !== ruleId),
+    }))
+  }
+
   const handleRevokeClient = async (clientId: string) => {
     setIsSaving(true)
     setMessage(null)
@@ -228,6 +296,15 @@ export function McpSettings() {
   const selectedAgentNeedsSetup = workflowSettings.defaultAgent !== "manual" && !selectedAgentStatus?.configured
   const selectedAgentNotReadyForAuto = workflowSettings.mode === "auto" && workflowSettings.defaultAgent !== "manual" && !selectedAgentStatus?.working
   const selectedAgentLabel = AGENT_SUPPORT_MATRIX.find((agent) => agent.agent === workflowSettings.defaultAgent)?.label ?? workflowSettings.defaultAgent
+  const workflowPreview = resolveAgentWorkflowRule({
+    meetingId: "preview",
+    meetingTitle: "Project sync",
+    templateId: "project-status",
+    calendarText: "Engineering project sync",
+    projectText: "Connected Mobility",
+    summary: { markdown: "Preview summary" },
+    mcpUrl: status?.url ?? null,
+  }, status, agentStatuses, workflowSettings)
 
   return (
     <div className="space-y-6">
@@ -463,6 +540,183 @@ export function McpSettings() {
               </label>
             )
           })}
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <label className="text-sm font-medium text-gray-900" htmlFor="context-budget">Context budget</label>
+            <select
+              id="context-budget"
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+              value={workflowSettings.budgetPreset}
+              onChange={(event) => handleBudgetChange(event.target.value as AgentContextBudgetPreset)}
+              disabled={!workflowSettings.skillPackInstalled}
+            >
+              <option value="minimal">Minimal</option>
+              <option value="standard">Standard</option>
+              <option value="detailed">Detailed</option>
+            </select>
+            <p className="mt-2 text-xs text-gray-600">Controls how much cited meeting context is sent to the agent handoff.</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <div className="text-sm font-medium text-gray-900">Rule preview</div>
+            <p className="mt-2 text-sm text-gray-600">{workflowPreview.preview}</p>
+            {workflowPreview.blockedReason && (
+              <p className="mt-2 text-xs text-amber-800">{workflowPreview.blockedReason}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div className="text-sm font-medium text-gray-900">Allowed content sources</div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {([
+              ["includeSummary", "Summary"],
+              ["includeActionItems", "Action items"],
+              ["includeDecisions", "Decisions"],
+              ["includeRisks", "Risks"],
+              ["includeTranscriptExcerpts", "Transcript excerpts"],
+              ["includeScreenshotsOcr", "Screenshot OCR"],
+              ["includeCalendarMetadata", "Calendar metadata"],
+              ["includeArtifacts", "Artifact links"],
+            ] as Array<[keyof AgentContextConsent, string]>).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300"
+                  checked={Boolean(workflowSettings.consent[key])}
+                  disabled={!workflowSettings.skillPackInstalled}
+                  onChange={(event) => handleConsentChange(key, event.target.checked)}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-gray-900">Automation rules</div>
+              <p className="mt-1 text-xs text-gray-600">First matching enabled rule overrides the global agent, mode, actions, budget, and sources.</p>
+            </div>
+            <button
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-white disabled:opacity-50"
+              onClick={handleAddRule}
+              disabled={!workflowSettings.skillPackInstalled || isSaving}
+            >
+              Add rule
+            </button>
+          </div>
+          <div className="mt-4 space-y-3">
+            {workflowSettings.rules.length === 0 ? (
+              <p className="text-sm text-gray-600">No custom rules yet. Global settings apply to every meeting.</p>
+            ) : workflowSettings.rules.map((rule) => (
+              <div key={rule.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <label className="text-xs font-medium text-gray-700">
+                    Name
+                    <input
+                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      value={rule.name}
+                      onChange={(event) => updateRule(rule.id, (current) => ({ ...current, name: event.target.value }))}
+                    />
+                  </label>
+                  <label className="text-xs font-medium text-gray-700">
+                    Agent
+                    <select
+                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      value={rule.agent}
+                      onChange={(event) => updateRule(rule.id, (current) => ({ ...current, agent: event.target.value as AgentTarget }))}
+                    >
+                      <option value="manual">Manual</option>
+                      <option value="codex">Codex</option>
+                      <option value="claude">Claude</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-medium text-gray-700">
+                    Mode
+                    <select
+                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      value={rule.mode}
+                      onChange={(event) => updateRule(rule.id, (current) => ({ ...current, mode: event.target.value as WorkflowMode }))}
+                    >
+                      <option value="off">Off</option>
+                      <option value="ask">Ask</option>
+                      <option value="auto">Auto</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-medium text-gray-700">
+                    Budget
+                    <select
+                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      value={rule.budgetPreset}
+                      onChange={(event) => updateRule(rule.id, (current) => ({ ...current, budgetPreset: event.target.value as AgentContextBudgetPreset }))}
+                    >
+                      <option value="minimal">Minimal</option>
+                      <option value="standard">Standard</option>
+                      <option value="detailed">Detailed</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-4">
+                  <label className="text-xs font-medium text-gray-700">
+                    Title keywords
+                    <input
+                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      value={keywordText(rule.match.titleKeywords)}
+                      onChange={(event) => updateRule(rule.id, (current) => ({ ...current, match: { ...current.match, titleKeywords: parseKeywords(event.target.value) } }))}
+                      placeholder="standup, sync"
+                    />
+                  </label>
+                  <label className="text-xs font-medium text-gray-700">
+                    Calendar keywords
+                    <input
+                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      value={keywordText(rule.match.calendarKeywords)}
+                      onChange={(event) => updateRule(rule.id, (current) => ({ ...current, match: { ...current.match, calendarKeywords: parseKeywords(event.target.value) } }))}
+                      placeholder="engineering, customer"
+                    />
+                  </label>
+                  <label className="text-xs font-medium text-gray-700">
+                    Project keywords
+                    <input
+                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      value={keywordText(rule.match.projectKeywords)}
+                      onChange={(event) => updateRule(rule.id, (current) => ({ ...current, match: { ...current.match, projectKeywords: parseKeywords(event.target.value) } }))}
+                      placeholder="mobility"
+                    />
+                  </label>
+                  <label className="text-xs font-medium text-gray-700">
+                    Template ids
+                    <input
+                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      value={keywordText(rule.match.templateIds)}
+                      onChange={(event) => updateRule(rule.id, (current) => ({ ...current, match: { ...current.match, templateIds: parseKeywords(event.target.value) } }))}
+                      placeholder="project-status"
+                    />
+                  </label>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-gray-300"
+                      checked={rule.enabled}
+                      onChange={(event) => updateRule(rule.id, (current) => ({ ...current, enabled: event.target.checked }))}
+                    />
+                    Enabled
+                  </label>
+                  <button
+                    className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                    onClick={() => removeRule(rule.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         {selectedAgentNeedsSetup && (

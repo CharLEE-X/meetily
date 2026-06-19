@@ -98,6 +98,7 @@ export function useSummaryGeneration({
         {
           meetingId: meeting.id,
           meetingTitle: meetingTitle || meeting.title || 'Untitled meeting',
+          templateId: selectedTemplate,
           summary,
           mcpUrl: mcpStatus.url,
         },
@@ -143,7 +144,7 @@ export function useSummaryGeneration({
         description: error instanceof Error ? error.message : 'Review agent workflow settings.',
       });
     }
-  }, [meeting.id, meeting.title]);
+  }, [meeting.id, meeting.title, selectedTemplate]);
 
   // Helper to get status message
   const getSummaryStatusMessage = useCallback((status: SummaryStatus) => {
