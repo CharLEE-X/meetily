@@ -476,6 +476,19 @@ jobs:
           echo "$APPLE_API_KEY_FILE_B64" | base64 --decode > "$API_KEY_PATH"
           chmod 600 "$API_KEY_PATH"
           echo "APPLE_API_KEY_PATH=$API_KEY_PATH" >> "$GITHUB_ENV"
+          echo "API_PRIVATE_KEYS_DIR=$RUNNER_TEMP/apple-api-key" >> "$GITHUB_ENV"
+
+      - name: Verify Apple notarization credentials
+        if: contains(inputs.platform, 'macos') && inputs.sign-binaries
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          xcrun notarytool history \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            >/dev/null
 
       - name: Configure build acceleration
         if: contains(inputs.platform, 'macos')
@@ -594,6 +607,7 @@ jobs:
           APPLE_API_KEY: ${{ inputs.sign-binaries && secrets.APPLE_API_KEY || '' }}
           APPLE_API_ISSUER: ${{ inputs.sign-binaries && secrets.APPLE_API_ISSUER || '' }}
           APPLE_API_KEY_PATH: ${{ inputs.sign-binaries && format('{0}/apple-api-key/AuthKey_{1}.p8', runner.temp, secrets.APPLE_API_KEY) || '' }}
+          API_PRIVATE_KEYS_DIR: ${{ inputs.sign-binaries && format('{0}/apple-api-key', runner.temp) || '' }}
           APPLE_CERTIFICATE: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
