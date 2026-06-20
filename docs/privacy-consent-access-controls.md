@@ -214,12 +214,19 @@ Periodic screenshot capture is high risk because it can include unrelated apps, 
 The implementation data model, runtime state machine, storage layout, and
 speaker-label boundary rules are specified in
 [Speaker Identification and Screenshots](speaker-identification-screenshots.md).
+Call-window snapshot capture must prefer the narrower call-window-only contract
+defined there. When fresh call-window bounds are unavailable, Meetily must skip
+capture or show an explicit fallback warning; it must not silently capture the
+full screen as a substitute.
 
 Consent and startup:
 
 * Screenshot capture is off by default.
 * A global screenshot preference may only make the feature available. Every meeting still requires per-meeting confirmation before the first screenshot.
 * The confirmation must show capture interval, storage location, retention behavior, deletion path, whether screenshots may be used for speaker labeling or meeting chat context, and a warning that screenshots may include visible screen content outside the meeting app.
+* Call-window snapshot confirmation must name the detected provider/window scope
+  and explain that missing or stale bounds skip capture instead of falling back
+  to full-screen capture.
 * If OS screen-recording permission is missing, revoked, or unavailable before capture starts, screenshots must remain disabled, the meeting must continue without screenshots, and the UI must show screenshots as unavailable.
 
 Runtime controls:
@@ -237,6 +244,9 @@ Capture limits and storage:
 * The default interval must not be more frequent than every 60 seconds.
 * A user-configurable interval must enforce an absolute minimum of 30 seconds unless a future release gate approves a shorter interval. The default remains at least 60 seconds.
 * Screenshots are stored only in app-managed local storage by default and linked to meeting ID, capture timestamp, source display/window when available, and deletion status.
+* Call-window snapshots must also store provider, window title, bounds,
+  recording time, relevance confidence, source trigger, redaction state, and any
+  skip reason as metadata without storing OCR or transcript content in metadata.
 * Screenshots inherit the meeting retention policy and must be deleted when the meeting is deleted.
 * Redaction, if added, must run before screenshots are exposed to summaries, chat indexes, exports, or MCP clients.
 
