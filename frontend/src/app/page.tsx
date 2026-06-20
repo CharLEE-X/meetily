@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { RecordingControls } from '@/components/RecordingControls';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -23,8 +23,14 @@ import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
-import { Bot, CheckCircle2, Clock3, FileText, MessageCircle, Mic, Settings, Upload } from 'lucide-react';
+import { AlertTriangle, Bot, CalendarClock, Camera, CheckCircle2, Clock3, FileText, MessageCircle, Mic, Monitor, Settings, ShieldCheck, Upload, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  ApprovedCalendarEvent,
+  getSelectedCalendarEventForRecording,
+} from '@/services/meetingDetectionService';
+import { getScreenshotPreferences, ScreenshotPreferences } from '@/services/screenshotService';
+import { getSpeakerLabelingPreferences, SpeakerLabelingPreferences } from '@/services/speakerService';
 
 interface HomeDashboardProps {
   meetings: Array<{ id: string; title: string }>;
@@ -32,6 +38,11 @@ interface HomeDashboardProps {
   transcriptModelLabel: string;
   summaryModelLabel: string;
   importEnabled: boolean;
+  hasSystemAudio: boolean;
+  selectedDevices?: {
+    micDevice: string | null;
+    systemDevice: string | null;
+  };
   onStartRecording: () => void;
   onOpenMeeting: (meetingId: string) => void;
   onOpenSummaryChat: () => void;
@@ -45,6 +56,8 @@ function HomeDashboard({
   transcriptModelLabel,
   summaryModelLabel,
   importEnabled,
+  hasSystemAudio,
+  selectedDevices,
   onStartRecording,
   onOpenMeeting,
   onOpenSummaryChat,
@@ -52,6 +65,39 @@ function HomeDashboard({
   onImportAudio,
 }: HomeDashboardProps) {
   const recentMeetings = meetings.slice(0, 5);
+  const [selectedCalendarEvent, setSelectedCalendarEvent] = useState<ApprovedCalendarEvent | null>(null);
+  const [screenshotPreferences, setScreenshotPreferences] = useState<ScreenshotPreferences | null>(null);
+  const [speakerPreferences, setSpeakerPreferences] = useState<SpeakerLabelingPreferences | null>(null);
+
+  const refreshPreflightState = useCallback(() => {
+    setSelectedCalendarEvent(getSelectedCalendarEventForRecording());
+    let cancelled = false;
+    Promise.allSettled([getScreenshotPreferences(), getSpeakerLabelingPreferences()]).then((results) => {
+      if (cancelled) return;
+      const [screenshots, speakers] = results;
+      if (screenshots.status === 'fulfilled') setScreenshotPreferences(screenshots.value);
+      if (speakers.status === 'fulfilled') setSpeakerPreferences(speakers.value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cleanup = refreshPreflightState();
+    const handleRefresh = () => {
+      cleanup?.();
+      cleanup = refreshPreflightState();
+    };
+    window.addEventListener('focus', handleRefresh);
+    window.addEventListener('storage', handleRefresh);
+    return () => {
+      cleanup?.();
+      window.removeEventListener('focus', handleRefresh);
+      window.removeEventListener('storage', handleRefresh);
+    };
+  }, [refreshPreflightState]);
+
   const setupItems = [
     {
       label: 'Microphone permission',
@@ -69,6 +115,24 @@ function HomeDashboard({
       ready: Boolean(summaryModelLabel),
     },
   ];
+  const missingPermissions = [
+    !hasMicrophone ? 'Microphone access' : null,
+    !hasSystemAudio ? 'System audio device' : null,
+  ].filter(Boolean) as string[];
+  const preflightState = selectedCalendarEvent
+    ? 'Scheduled meeting'
+    : 'Manual recording';
+  const screenshotModeLabel = screenshotPreferences?.captureMode === 'speechEvent'
+    ? 'Speech event'
+    : screenshotPreferences?.captureMode === 'manualOnly'
+      ? 'Manual only'
+      : 'Interval';
+  const screenshotScope = screenshotPreferences?.enabled
+    ? `${screenshotPreferences.captureTarget === 'callWindow' ? 'Call window' : 'Full screen'} · ${screenshotModeLabel}`
+    : 'Off until enabled in Settings';
+  const speakerScope = speakerPreferences?.autoApplyVisualSuggestions
+    ? 'Auto-apply high-confidence suggestions'
+    : 'Review suggestions before applying';
 
   return (
     <div className="flex min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-background px-8 py-8">
@@ -83,10 +147,6 @@ function HomeDashboard({
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={onStartRecording} className="bg-red-600 text-white hover:bg-red-700">
-                <Mic className="h-4 w-4" />
-                Start recording
-              </Button>
               <Button type="button" variant="outline" onClick={onOpenSummaryChat}>
                 <MessageCircle className="h-4 w-4" />
                 Ask meetings
@@ -99,6 +159,78 @@ function HomeDashboard({
               )}
             </div>
           </div>
+        </section>
+
+        <section className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-emerald-900">
+                <ShieldCheck className="h-4 w-4" />
+                Recording preflight
+              </div>
+              <h2 className="mt-2 text-lg font-semibold text-slate-950">{preflightState}</h2>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
+                Start audio recording now, or review the capture scope first. Sensitive context stays local and any external Notes, Reminders, or agent automation step remains review-only after the meeting.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" onClick={onStartRecording} className="bg-red-600 text-white hover:bg-red-700">
+                <Mic className="h-4 w-4" />
+                Start recording
+              </Button>
+              <Button type="button" variant="outline" onClick={onOpenSettings}>
+                <Settings className="h-4 w-4" />
+                Review settings
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <PreflightItem
+              icon={selectedCalendarEvent ? CalendarClock : Monitor}
+              label="Meeting context"
+              value={selectedCalendarEvent?.title ?? 'Manual recording'}
+              detail={selectedCalendarEvent ? 'Calendar metadata is read-only.' : 'No calendar event selected.'}
+              ready
+            />
+            <PreflightItem
+              icon={Mic}
+              label="Audio devices"
+              value={selectedDevices?.micDevice || (hasMicrophone ? 'Default microphone' : 'Microphone missing')}
+              detail={selectedDevices?.systemDevice || (hasSystemAudio ? 'System audio available' : 'System audio unavailable')}
+              ready={hasMicrophone}
+            />
+            <PreflightItem
+              icon={Camera}
+              label="Screenshots"
+              value={screenshotScope}
+              detail={screenshotPreferences?.captureTarget === 'fullScreen'
+                ? 'Full-screen capture is broader; review before recording.'
+                : 'Call-window capture skips if the meeting window is not clear.'}
+              ready
+            />
+            <PreflightItem
+              icon={Users}
+              label="Speaker labels"
+              value={speakerScope}
+              detail="No face recognition; labels stay suggested until confirmed."
+              ready
+            />
+          </div>
+
+          {missingPermissions.length > 0 ? (
+            <div className="mt-4 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  Missing setup: {missingPermissions.join(', ')}. Recording is still available, but review settings first if you need that capture source.
+                </span>
+              </div>
+              <Button type="button" variant="outline" onClick={onOpenSettings} className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100">
+                Open settings
+              </Button>
+            </div>
+          ) : null}
         </section>
 
         <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
@@ -183,6 +315,35 @@ function HomeDashboard({
   );
 }
 
+function PreflightItem({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  ready,
+}: {
+  icon: typeof Mic;
+  label: string;
+  value: string;
+  detail: string;
+  ready: boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+      <div className="flex items-start gap-2">
+        <div className={`rounded-lg p-1.5 ${ready ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+          <div className="mt-1 break-words text-sm font-semibold text-slate-950">{value}</div>
+          <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   // Local page state (not moved to contexts)
   const [isRecording, setIsRecordingState] = useState(false);
@@ -200,7 +361,7 @@ export default function Home() {
   const { status, isStopping, isProcessing, isSaving } = recordingState;
 
   // Hooks
-  const { hasMicrophone } = usePermissionCheck();
+  const { hasMicrophone, hasSystemAudio } = usePermissionCheck();
   const { setIsMeetingActive, isCollapsed: sidebarCollapsed, refetchMeetings, meetings } = useSidebar();
   const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
   const { isRecordingDisabled, setIsRecordingDisabled } = useRecordingStateSync(isRecording, setIsRecordingState, setIsMeetingActive);
@@ -389,9 +550,11 @@ export default function Home() {
           <HomeDashboard
             meetings={meetings}
             hasMicrophone={hasMicrophone}
+            hasSystemAudio={hasSystemAudio}
             transcriptModelLabel={transcriptModelLabel}
             summaryModelLabel={summaryModelLabel}
             importEnabled={betaFeatures.importAndRetranscribe}
+            selectedDevices={selectedDevices}
             onStartRecording={handleRecordingStart}
             onOpenMeeting={(meetingId) => router.push(`/meeting-details?id=${meetingId}`)}
             onOpenSummaryChat={() => router.push('/summary-chat')}
