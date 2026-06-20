@@ -9,7 +9,7 @@ import {
 import { CalendarEvent, CalendarSyncRequest, CalendarSyncResult, calendarService } from './calendarService';
 
 export type MeetingDetectionMode = 'disabled' | 'prompt' | 'autoOpen';
-export type MeetingProvider = 'google-meet' | 'zoom' | 'teams' | 'unknown';
+export type MeetingProvider = 'google-meet' | 'zoom' | 'teams' | 'slack' | 'unknown';
 
 export interface MeetingDetectionSettings {
   mode: MeetingDetectionMode;
@@ -260,6 +260,7 @@ export function detectMeetingProvider(url: string): MeetingProvider {
   if (normalized.includes('meet.google.com')) return 'google-meet';
   if (normalized.includes('zoom.us') || normalized.includes('zoom.com')) return 'zoom';
   if (normalized.includes('teams.microsoft.com') || normalized.includes('teams.live.com')) return 'teams';
+  if (normalized.includes('slack.com/huddle') || normalized.includes('slack://huddle')) return 'slack';
   return 'unknown';
 }
 

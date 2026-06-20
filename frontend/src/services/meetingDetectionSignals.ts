@@ -2,9 +2,13 @@ import type { MeetingJoinCandidate, MeetingProvider } from './meetingDetectionSe
 
 export interface BrowserMeetingSignal {
   browser: string;
+  provider?: MeetingProvider;
   title: string | null;
   url: string | null;
   isActive: boolean;
+  permissionStatus?: SignalPermissionStatus;
+  checkedAt?: string;
+  freshnessMs?: number;
 }
 
 export interface MicActivitySignal {
@@ -13,12 +17,26 @@ export interface MicActivitySignal {
   rmsLevel: number;
 }
 
+export type SignalPermissionStatus = 'available' | 'limited' | 'denied' | 'unknown';
+
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface NativeMeetingActivitySignals {
   activeAppName: string | null;
   activeWindowTitle: string | null;
+  activeWindowBounds?: WindowBounds | null;
   runningApps: string[];
   browserTabs: BrowserMeetingSignal[];
   checkedAt: string;
+  missingPermissions?: string[];
+  permissionStatus?: Record<string, SignalPermissionStatus>;
+  signalFreshnessMs?: number;
+  degradedMode?: boolean;
   error?: string | null;
 }
 
@@ -48,13 +66,14 @@ const DEFAULT_OPTIONS: AmbientMeetingDetectionOptions = {
 const MEETING_PROCESS_HINTS = [
   { provider: 'teams' as const, terms: ['microsoft teams', 'teams'] },
   { provider: 'zoom' as const, terms: ['zoom.us', 'zoom'] },
-  { provider: 'google-meet' as const, terms: ['google chrome', 'arc', 'safari', 'microsoft edge'] },
+  { provider: 'google-meet' as const, terms: ['google chrome', 'chrome', 'arc', 'safari', 'microsoft edge', 'msedge', 'firefox'] },
 ];
 
 const MEETING_TEXT_HINTS = [
   { provider: 'google-meet' as const, terms: ['meet.google.com', 'google meet'] },
   { provider: 'teams' as const, terms: ['teams.microsoft.com', 'teams.live.com', 'microsoft teams', 'teams meeting'] },
   { provider: 'zoom' as const, terms: ['zoom.us', 'zoom.com', 'zoom meeting'] },
+  { provider: 'slack' as const, terms: ['slack.com/huddle', 'slack://huddle', 'slack huddle', 'slack call'] },
 ];
 
 const MEETING_URL_PATTERN = /https?:\/\/(?:[^\s<>"')]+)/i;
@@ -69,6 +88,9 @@ function clampScore(score: number): number {
 
 export function detectMeetingProviderFromText(text: string | null | undefined): MeetingProvider {
   const normalized = normalize(text);
+  if (normalized.includes('slack') && (normalized.includes('huddle') || normalized.includes('call'))) {
+    return 'slack';
+  }
   for (const hint of MEETING_TEXT_HINTS) {
     if (hint.terms.some((term) => normalized.includes(term))) {
       return hint.provider;
@@ -83,6 +105,15 @@ function detectProviderFromProcesses(appNames: string[]): MeetingProvider {
     if (normalizedApps.some((name) => hint.terms.some((term) => name.includes(term)))) {
       return hint.provider;
     }
+  }
+  return 'unknown';
+}
+
+function detectProviderFromBrowserSignals(tabs: BrowserMeetingSignal[]): MeetingProvider {
+  for (const tab of tabs) {
+    if (tab.provider && tab.provider !== 'unknown') return tab.provider;
+    const provider = detectMeetingProviderFromText(`${tab.title ?? ''} ${tab.url ?? ''}`);
+    if (provider !== 'unknown') return provider;
   }
   return 'unknown';
 }
@@ -110,6 +141,8 @@ function titleFromSignals(signals: MeetingActivitySignals, provider: MeetingProv
       return 'Microsoft Teams call';
     case 'zoom':
       return 'Zoom call';
+    case 'slack':
+      return 'Slack huddle';
     default:
       return 'Detected meeting';
   }
@@ -128,8 +161,10 @@ export function scoreMeetingActivitySignals(
 
   const meetingUrl = extractMeetingUrlFromSignals(signals);
   const textProvider = detectMeetingProviderFromText(textHaystack);
+  const browserProvider = detectProviderFromBrowserSignals(signals.browserTabs);
   const processProvider = detectProviderFromProcesses([signals.activeAppName ?? '', ...signals.runningApps]);
-  const provider = textProvider !== 'unknown' ? textProvider : processProvider;
+  const hasDegradedPermissions = signals.degradedMode || (signals.missingPermissions?.length ?? 0) > 0;
+  let provider = textProvider !== 'unknown' ? textProvider : browserProvider !== 'unknown' ? browserProvider : processProvider;
   const reasons: string[] = [];
   let confidence = 0;
 
@@ -139,7 +174,9 @@ export function scoreMeetingActivitySignals(
     reasons.push('Active meeting window');
   }
 
-  const activeBrowserMeeting = signals.browserTabs.some((tab) => tab.isActive && detectMeetingProviderFromText(`${tab.title ?? ''} ${tab.url ?? ''}`) !== 'unknown');
+  const activeBrowserMeeting = signals.browserTabs.some((tab) => tab.isActive && (
+    (tab.provider && tab.provider !== 'unknown') || detectMeetingProviderFromText(`${tab.title ?? ''} ${tab.url ?? ''}`) !== 'unknown'
+  ));
   if (activeBrowserMeeting) {
     confidence += meetingUrl ? 60 : 40;
     reasons.push('Active browser meeting tab');
@@ -160,6 +197,15 @@ export function scoreMeetingActivitySignals(
   if (signals.micActivity?.isActive) {
     confidence += 25;
     reasons.push('Microphone activity');
+  }
+
+  const hasStrongSignal = activeWindowProvider !== 'unknown' || activeBrowserMeeting || Boolean(meetingUrl);
+  if (hasDegradedPermissions) {
+    reasons.push(`Limited by missing permission${signals.missingPermissions?.length === 1 ? '' : 's'}`);
+    if (!hasStrongSignal) {
+      confidence = Math.min(confidence, 39);
+      if (provider === processProvider) provider = 'unknown';
+    }
   }
 
   if (meetingUrl && !activeBrowserMeeting) {
