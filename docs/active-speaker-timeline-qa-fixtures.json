@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "scope": "active-speaker-timeline",
+  "canonicalTests": [
+    "speaker::tests::qa_fixtures_cover_single_speaker_and_speaker_switch",
+    "speaker::tests::qa_fixtures_preserve_ambiguous_missing_and_manual_review_paths",
+    "screenshots::tests::visual_speaker_cues_reject_biometric_identity_claims",
+    "screenshots::tests::active_speaker_code_does_not_reference_face_identity_apis"
+  ],
+  "privacyContract": {
+    "allowedEvidence": [
+      "visible display-name text",
+      "provider active-speaker UI marker text",
+      "caption speaker labels",
+      "recording-relative timing"
+    ],
+    "prohibitedEvidence": [
+      "face recognition",
+      "face matching",
+      "identity inference from appearance",
+      "raw OCR transcript storage",
+      "screenshot image export without explicit consent"
+    ]
+  },
+  "fixtures": [
+    {
+      "id": "single-speaker",
+      "description": "One visible active speaker maps to one transcript segment.",
+      "transcripts": [
+        { "id": "t1", "start": 0.0, "end": 4.0, "legacySpeaker": null }
+      ],
+      "visualCues": [
+        {
+          "snapshotId": "shot-single",
+          "provider": "google-meet",
+          "recordingTime": 2.0,
+          "extractedName": "Adrian Witaszak",
+          "activeMarker": "caption-label",
+          "confidence": 0.96
+        }
+      ],
+      "expected": {
+        "assignment": "Adrian Witaszak",
+        "source": "screenshot_name",
+        "suggestion": true
+      }
+    },
+    {
+      "id": "speaker-switch",
+      "description": "Two visible speaker cues align to adjacent transcript segments.",
+      "transcripts": [
+        { "id": "t1", "start": 0.0, "end": 3.0, "legacySpeaker": null },
+        { "id": "t2", "start": 4.0, "end": 7.0, "legacySpeaker": null }
+      ],
+      "visualCues": [
+        {
+          "snapshotId": "shot-adrian",
+          "provider": "google-meet",
+          "recordingTime": 1.5,
+          "extractedName": "Adrian Witaszak",
+          "activeMarker": "caption-label",
+          "confidence": 0.94
+        },
+        {
+          "snapshotId": "shot-kriszi",
+          "provider": "google-meet",
+          "recordingTime": 5.0,
+          "extractedName": "Kriszi Balla",
+          "activeMarker": "caption-label",
+          "confidence": 0.94
+        }
+      ],
+      "expected": {
+        "assignments": ["Adrian Witaszak", "Kriszi Balla"]
+      }
+    },
+    {
+      "id": "overlapping-cues",
+      "description": "Near-tied speaker cues for the same segment remain ambiguous.",
+      "transcripts": [
+        { "id": "t1", "start": 10.0, "end": 13.0, "legacySpeaker": null }
+      ],
+      "visualCues": [
+        {
+          "snapshotId": "shot-overlap-a",
+          "provider": "google-meet",
+          "recordingTime": 11.0,
+          "extractedName": "Adrian Witaszak",
+          "activeMarker": "caption-label",
+          "confidence": 0.91
+        },
+        {
+          "snapshotId": "shot-overlap-b",
+          "provider": "google-meet",
+          "recordingTime": 11.1,
+          "extractedName": "Kriszi Balla",
+          "activeMarker": "caption-label",
+          "confidence": 0.91
+        }
+      ],
+      "expected": {
+        "assignment": "Speaker 1",
+        "source": "heuristic",
+        "suggestion": false
+      }
+    },
+    {
+      "id": "missing-visual-cues",
+      "description": "No screenshot evidence falls back to audio or timing labels.",
+      "transcripts": [
+        { "id": "t1", "start": 20.0, "end": 22.0, "legacySpeaker": "system" }
+      ],
+      "visualCues": [],
+      "expected": {
+        "assignment": "System Audio",
+        "source": "legacy",
+        "suggestion": false
+      }
+    },
+    {
+      "id": "ambiguous-name",
+      "description": "Frames with multiple visible names and no active marker stay review-only.",
+      "transcripts": [
+        { "id": "t1", "start": 30.0, "end": 33.0, "legacySpeaker": null }
+      ],
+      "visualCues": [
+        {
+          "snapshotId": "shot-name-a",
+          "provider": "google-meet",
+          "recordingTime": 31.0,
+          "extractedName": "Adrian Witaszak",
+          "activeMarker": "visible-name",
+          "confidence": 0.65
+        },
+        {
+          "snapshotId": "shot-name-b",
+          "provider": "google-meet",
+          "recordingTime": 31.0,
+          "extractedName": "Kriszi Balla",
+          "activeMarker": "visible-name",
+          "confidence": 0.65
+        }
+      ],
+      "expected": {
+        "assignment": "Speaker 1",
+        "source": "heuristic",
+        "suggestion": false
+      }
+    },
+    {
+      "id": "manual-correction",
+      "description": "A user correction confirms the label and records an undoable correction event.",
+      "transcripts": [
+        { "id": "t1", "start": 40.0, "end": 43.0, "legacySpeaker": null }
+      ],
+      "manualAction": {
+        "type": "assign",
+        "displayName": "Adrian Witaszak",
+        "status": "confirmed",
+        "source": "manual",
+        "undoable": true
+      },
+      "expected": {
+        "assignment": "Adrian Witaszak",
+        "source": "manual",
+        "status": "confirmed",
+        "undoable": true
+      }
+    }
+  ]
+}

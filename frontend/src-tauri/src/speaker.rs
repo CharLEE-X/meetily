@@ -1959,6 +1959,17 @@ mod tests {
         }
     }
 
+    fn visible_name_cue(name: &str, time: f64, confidence: f64) -> VisualSpeakerCue {
+        VisualSpeakerCue {
+            snapshot_id: format!("shot-visible-{time}"),
+            provider: Some("google-meet".to_string()),
+            recording_time: time,
+            extracted_name: name.to_string(),
+            active_marker: "visible-name".to_string(),
+            confidence,
+        }
+    }
+
     #[test]
     fn uses_legacy_audio_source_when_available() {
         let assignments = derive_speaker_assignments(
@@ -2051,6 +2062,86 @@ mod tests {
         assert!(assignments
             .iter()
             .all(|assignment| assignment.source == SOURCE_SCREENSHOT_NAME));
+    }
+
+    #[test]
+    fn qa_fixtures_cover_single_speaker_and_speaker_switch() {
+        let single_transcripts = vec![transcript("single", Some(0.0), Some(4.0), None)];
+        let single_cues = vec![visual_cue("Adrian Witaszak", 2.0, 0.96)];
+        let single_assignments = derive_speaker_assignments(
+            &single_transcripts,
+            None,
+            &single_cues,
+            &SpeakerLabelingPreferences::default(),
+        );
+        let single_suggestions = derive_visual_speaker_suggestions(
+            &single_transcripts,
+            &single_cues,
+            &single_assignments,
+        );
+
+        assert_eq!(single_assignments[0].display_name, "Adrian Witaszak");
+        assert_eq!(single_assignments[0].source, SOURCE_SCREENSHOT_NAME);
+        assert_eq!(single_suggestions.len(), 1);
+        assert!(single_suggestions[0].auto_applied);
+
+        let switch_transcripts = vec![
+            transcript("first", Some(0.0), Some(3.0), None),
+            transcript("second", Some(4.0), Some(7.0), None),
+        ];
+        let switch_assignments = derive_speaker_assignments(
+            &switch_transcripts,
+            None,
+            &[
+                visual_cue("Adrian Witaszak", 1.5, 0.94),
+                visual_cue("Kriszi Balla", 5.0, 0.94),
+            ],
+            &SpeakerLabelingPreferences::default(),
+        );
+
+        assert_eq!(switch_assignments[0].display_name, "Adrian Witaszak");
+        assert_eq!(switch_assignments[1].display_name, "Kriszi Balla");
+    }
+
+    #[test]
+    fn qa_fixtures_preserve_ambiguous_missing_and_manual_review_paths() {
+        let overlapping = derive_speaker_assignments(
+            &[transcript("overlap", Some(10.0), Some(13.0), None)],
+            None,
+            &[
+                visual_cue("Adrian Witaszak", 11.0, 0.91),
+                visual_cue("Kriszi Balla", 11.1, 0.91),
+            ],
+            &SpeakerLabelingPreferences::default(),
+        );
+        assert_eq!(overlapping[0].display_name, "Speaker 1");
+        assert_eq!(overlapping[0].source, SOURCE_HEURISTIC);
+
+        let missing_visual = derive_speaker_assignments(
+            &[transcript("missing", Some(20.0), Some(22.0), Some("system"))],
+            None,
+            &[],
+            &SpeakerLabelingPreferences::default(),
+        );
+        assert_eq!(missing_visual[0].display_name, "System Audio");
+        assert_eq!(missing_visual[0].source, SOURCE_LEGACY);
+
+        let review_only_confidence = VISUAL_CUE_REVIEW_CONFIDENCE - 0.01;
+        assert!(review_only_confidence < VISUAL_CUE_REVIEW_CONFIDENCE);
+        let ambiguous_name = derive_speaker_assignments(
+            &[transcript("ambiguous", Some(30.0), Some(33.0), None)],
+            None,
+            &[
+                visible_name_cue("Adrian Witaszak", 31.0, review_only_confidence),
+                visible_name_cue("Kriszi Balla", 31.0, review_only_confidence),
+            ],
+            &SpeakerLabelingPreferences::default(),
+        );
+        assert_eq!(ambiguous_name[0].display_name, "Speaker 1");
+        assert_eq!(ambiguous_name[0].source, SOURCE_HEURISTIC);
+
+        let manual_display_name = normalize_display_name(" Adrian Witaszak ").unwrap();
+        assert_eq!(manual_display_name, "Adrian Witaszak");
     }
 
     #[test]

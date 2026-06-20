@@ -1110,6 +1110,10 @@ fn normalize_visible_name_candidate(value: &str) -> Option<String> {
             "repository",
             "knowledge base",
             "certificates identifiers profiles",
+            "face recognition",
+            "face match",
+            "identity inference",
+            "matched face",
         ],
     ) {
         return None;
@@ -2160,6 +2164,47 @@ mod tests {
         assert_eq!(cues.len(), 2);
         assert!(cues.iter().all(|cue| cue.active_marker == "visible-name"));
         assert!(cues.iter().all(|cue| cue.confidence <= 0.65));
+    }
+
+    #[test]
+    fn visual_speaker_cues_reject_biometric_identity_claims() {
+        let analysis = analyze_recognized_text(&[
+            "Google Meet".to_string(),
+            "Face Recognition Matched Adrian Witaszak".to_string(),
+            "Adrian Witaszak Face Match".to_string(),
+            "Face Recognition".to_string(),
+            "Matched Face".to_string(),
+            "Identity Inference".to_string(),
+            "active speaker".to_string(),
+        ]);
+
+        assert!(analysis.visible_names.is_empty());
+        assert!(build_visual_speaker_cues(&analysis, "shot-face", Some(9.0)).is_empty());
+    }
+
+    #[test]
+    fn active_speaker_code_does_not_reference_face_identity_apis() {
+        let cargo_manifest = include_str!("../Cargo.toml");
+        let screenshots_source = include_str!("screenshots.rs");
+        let speaker_source = include_str!("speaker.rs");
+        let scanned_sources = [cargo_manifest, screenshots_source, speaker_source].join("\n");
+        let prohibited_api_terms = [
+            ["face", "_recognition"].concat(),
+            ["op", "encv"].concat(),
+            ["d", "lib"].concat(),
+            ["VNDetect", "Face"].concat(),
+            ["VN", "Face"].concat(),
+            ["CIDetectorType", "Face"].concat(),
+            ["embedding", "_model"].concat(),
+            ["face", "_embedding"].concat(),
+        ];
+
+        for term in prohibited_api_terms {
+            assert!(
+                !scanned_sources.contains(term.as_str()),
+                "active speaker labeling must not depend on face or identity API term: {term}"
+            );
+        }
     }
 
     #[test]
