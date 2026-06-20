@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarClock, ExternalLink, Mic, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, ExternalLink, Mic, Settings, X } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   MeetingDetectionSettings,
@@ -36,8 +37,40 @@ function providerLabel(provider: MeetingJoinCandidate["provider"]): string {
       return "Zoom";
     case "teams":
       return "Microsoft Teams";
+    case "slack":
+      return "Slack";
     default:
       return "Meeting";
+  }
+}
+
+function actionLabel(action: MeetingJoinCandidate["recommendedAction"]): string {
+  switch (action) {
+    case "start-recording":
+      return "Start recording";
+    case "open-meeting":
+      return "Open meeting";
+    case "review-setup":
+      return "Review setup";
+    default:
+      return "No action";
+  }
+}
+
+function permissionLabel(permission: string): string {
+  switch (permission) {
+    case "accessibility":
+      return "Accessibility";
+    case "browserAutomation":
+      return "Browser automation";
+    case "microphone":
+      return "Microphone";
+    case "systemAudio":
+      return "System audio";
+    case "screenRecording":
+      return "Screen recording";
+    default:
+      return permission.replace(/([A-Z])/g, " $1").trim();
   }
 }
 
@@ -62,6 +95,7 @@ interface AudioLevelUpdate {
 }
 
 export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isRecording }: MeetingDetectionPromptProps) {
+  const router = useRouter();
   const [settings, setSettings] = useState<MeetingDetectionSettings>(() => getMeetingDetectionSettings());
   const [candidates, setCandidates] = useState<MeetingJoinCandidate[]>([]);
   const micActivityRef = useRef<MicActivitySignal | null>(null);
@@ -136,12 +170,18 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
   const candidate = candidates[0];
 
   useEffect(() => {
-    if (!candidate || !candidate.meetingUrl || settings.mode !== "autoOpen" || wasAutoOpened(candidate)) return;
+    if (
+      !candidate ||
+      !candidate.meetingUrl ||
+      settings.mode !== "autoOpen" ||
+      candidate.recommendedAction !== "open-meeting" ||
+      wasAutoOpened(candidate)
+    ) return;
     openMeetingCandidate(candidate)
       .then(() => {
         markMeetingCandidateAutoOpened(candidate);
         toast.info("Meeting link opened", {
-          description: "Meetily opened the link because auto-open is enabled. Recording still requires your action.",
+          description: "Meetily opened only the meeting URL because auto-open is enabled.",
         });
       })
       .catch((error) => {
@@ -155,11 +195,6 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
     const visible = candidate.attendees.slice(0, 3).join(", ");
     const remaining = candidate.attendees.length - 3;
     return remaining > 0 ? `${visible} +${remaining}` : visible;
-  }, [candidate]);
-
-  const signalPreview = useMemo(() => {
-    if (!candidate?.reasons?.length) return null;
-    return candidate.reasons.slice(0, 3).join(", ");
   }, [candidate]);
 
   if (!candidate || settings.mode === "disabled" || isRecording) return null;
@@ -199,6 +234,16 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
     toast.info("Meeting detection disabled");
   };
 
+  const handleReviewSetup = () => {
+    router.push("/settings");
+  };
+
+  const recommendedAction = candidate.recommendedAction ?? "review-setup";
+  const missingPermissions = candidate.missingPermissions ?? [];
+  const isReviewOnly = recommendedAction === "review-setup" || recommendedAction === "none";
+  const canOpenMeeting = Boolean(candidate.meetingUrl) && !isReviewOnly;
+  const canStartRecording = !isReviewOnly;
+
   return (
     <div
       className="fixed left-0 right-0 top-6 z-20 flex justify-center px-6 transition-[margin] duration-300 ease-out"
@@ -218,17 +263,48 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
                 {providerLabel(candidate.provider)}
               </span>
+              {recommendedAction !== "none" ? (
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                  Recommended: {actionLabel(recommendedAction)}
+                </span>
+              ) : null}
+              {typeof candidate.confidence === "number" ? (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
+                  {candidate.confidence}% confidence
+                </span>
+              ) : null}
             </div>
             <p className="mt-1 text-sm text-gray-600">
               {candidate.source === "ambient"
-                ? `Detected from local app/window signals${candidate.confidence ? ` · ${candidate.confidence}% confidence` : ""}`
+                ? "Detected from local app, window, browser, and audio signals"
                 : candidate.calendarName ? `${candidate.calendarName} calendar` : "Approved calendar event"}
               {attendeePreview ? ` · ${attendeePreview}` : ""}
             </p>
             <p className="mt-1 text-xs text-gray-500">
-              {signalPreview ? `${signalPreview}. ` : ""}
-              Meetily can {candidate.meetingUrl ? "open the meeting link or " : ""}start recording with this title. It will not join or record silently.
+              Meetily can {candidate.meetingUrl ? "open the meeting link or " : ""}{isReviewOnly ? "help you review setup" : "start recording with this title"}. It will not join or record silently.
             </p>
+            {candidate.reasons?.length ? (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {candidate.reasons.map((reason) => (
+                  <span key={reason} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                    {reason}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {candidate.degradedMode || missingPermissions.length ? (
+              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <div className="flex items-center gap-2 font-medium">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Some detection signals are limited
+                </div>
+                <p className="mt-1">
+                  {missingPermissions.length
+                    ? `Open Settings to review ${missingPermissions.map(permissionLabel).join(", ")} permissions and improve detection confidence.`
+                    : "Meetily could not check every local signal, so this prompt is conservative. Open Settings to review detection setup."}
+                </p>
+              </div>
+            ) : null}
           </div>
           <button
             type="button"
@@ -249,12 +325,22 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
             Disable detection
           </button>
           <div className="flex flex-wrap gap-2">
+            {isReviewOnly || missingPermissions.length ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100"
+                onClick={handleReviewSetup}
+              >
+                <Settings className="h-4 w-4" />
+                Review setup
+              </button>
+            ) : null}
             <button
               type="button"
               className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
               onClick={handleOpen}
-              disabled={isOpening || !candidate.meetingUrl}
-              title={candidate.meetingUrl ? "Open meeting" : "No meeting link detected"}
+              disabled={isOpening || !canOpenMeeting}
+              title={isReviewOnly ? "Review setup before opening" : candidate.meetingUrl ? "Open meeting" : "No meeting link detected"}
             >
               <ExternalLink className="h-4 w-4" />
               Open meeting
@@ -263,7 +349,8 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
               type="button"
               className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               onClick={handleStartRecording}
-              disabled={isStarting}
+              disabled={isStarting || !canStartRecording}
+              title={canStartRecording ? "Start recording" : "Review setup before recording"}
             >
               <Mic className="h-4 w-4" />
               Start recording

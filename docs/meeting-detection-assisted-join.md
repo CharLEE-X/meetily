@@ -176,3 +176,14 @@ deletion rules.
 * `frontend/src/components/PreferenceSettings.tsx` exposes detection mode and
   quiet hours, ambient signal controls, plus a local approved-event form while
   full calendar sync is not connected.
+
+## Prompt UI QA Matrix
+
+Use these cases when validating the recording prompt manually:
+
+| Scenario | Expected prompt |
+| --- | --- |
+| High-confidence active call | Shows provider, title/window title, confidence, signal reasons, and `Recommended: Start recording`. Recording remains a button click. |
+| Calendar-only upcoming call | Shows calendar source, provider, meeting title, confidence, and `Recommended: Open meeting`. Auto-open may open only the meeting URL when enabled. |
+| Low-confidence or process-only signals | No recording prompt should appear. If surfaced in setup diagnostics, action should be `Review setup`, not `Start recording`. |
+| Permission-limited state | Shows missing permission guidance, signal reasons, and a `Review setup` action. Prompt must stay conservative until stronger signals are available. |
