@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
-import { CalendarClock, FolderOpen, Monitor, Moon, Sun, type LucideIcon } from "lucide-react"
+import { CalendarClock, FolderOpen, Loader2, Minimize2, Monitor, Moon, Power, Sun, type LucideIcon } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
@@ -17,6 +17,7 @@ import {
   getMeetingDetectionSettings,
   saveMeetingDetectionSettings,
 } from "@/services/meetingDetectionService"
+import { AppSettings, appSettingsService } from "@/services/appSettingsService"
 
 function localDateTimeValue(offsetMinutes = 0): string {
   const date = new Date(Date.now() + offsetMinutes * 60 * 1000);
@@ -44,6 +45,11 @@ export function PreferenceSettings() {
   const [localEventUrl, setLocalEventUrl] = useState("");
   const [localEventStart, setLocalEventStart] = useState(() => localDateTimeValue(5));
   const [localEventEnd, setLocalEventEnd] = useState(() => localDateTimeValue(35));
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [appSettingsLoading, setAppSettingsLoading] = useState(true);
+  const [appSettingsSaving, setAppSettingsSaving] = useState(false);
+  const [appSettingsMessage, setAppSettingsMessage] = useState<string | null>(null);
+  const [appSettingsError, setAppSettingsError] = useState<string | null>(null);
   const hasTrackedViewRef = useRef(false);
 
   // Lazy load preferences on mount (only loads if not already cached)
@@ -52,6 +58,36 @@ export function PreferenceSettings() {
     // Reset tracking ref on mount (every tab visit)
     hasTrackedViewRef.current = false;
   }, [loadPreferences]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAppSettings = async () => {
+      setAppSettingsLoading(true);
+      setAppSettingsError(null);
+      try {
+        const settings = await appSettingsService.getSettings();
+        if (!cancelled) {
+          setAppSettings(settings);
+        }
+      } catch (error) {
+        console.error("Failed to load app startup settings:", error);
+        if (!cancelled) {
+          setAppSettingsError(error instanceof Error ? error.message : String(error));
+        }
+      } finally {
+        if (!cancelled) {
+          setAppSettingsLoading(false);
+        }
+      }
+    };
+
+    loadAppSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Track preferences viewed analytics on every tab visit (once per mount)
   useEffect(() => {
@@ -199,6 +235,32 @@ export function PreferenceSettings() {
     await Analytics.track('meeting_detection_local_event_added', { provider: 'manual' });
   };
 
+  const updateAppStartupSettings = async (nextSettings: Pick<AppSettings, 'launchAtLogin' | 'startMinimized'>) => {
+    if (!appSettings) return;
+
+    const previousSettings = appSettings;
+    setAppSettings({ ...appSettings, ...nextSettings });
+    setAppSettingsSaving(true);
+    setAppSettingsError(null);
+    setAppSettingsMessage(null);
+
+    try {
+      const savedSettings = await appSettingsService.updateSettings(nextSettings);
+      setAppSettings(savedSettings);
+      setAppSettingsMessage("Startup settings saved.");
+      await Analytics.track('app_startup_settings_changed', {
+        launch_at_login: String(savedSettings.launchAtLogin),
+        start_minimized: String(savedSettings.startMinimized),
+      });
+    } catch (error) {
+      console.error("Failed to update app startup settings:", error);
+      setAppSettings(previousSettings);
+      setAppSettingsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAppSettingsSaving(false);
+    }
+  };
+
   // Show loading only if we're actually loading and don't have cached data
   if (isLoadingPreferences && !notificationSettings && !storageLocations) {
     return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>
@@ -273,6 +335,94 @@ export function PreferenceSettings() {
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* Startup Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <Power className="h-5 w-5 text-blue-600" />
+            <h3 className="text-lg font-semibold text-gray-900">Startup</h3>
+          </div>
+          <p className="max-w-3xl text-sm leading-6 text-gray-600">
+            Choose whether Meetily should be ready as soon as you sign in and whether it should stay tucked away in the menu bar until you need it. These settings are local to this Mac.
+          </p>
+        </div>
+
+        <div className="mt-5 divide-y divide-gray-200 rounded-lg border border-gray-200 bg-gray-50">
+          <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex gap-3">
+              <Power className="mt-0.5 h-4 w-4 text-gray-500" />
+              <div>
+                <div className="text-sm font-medium text-gray-900">Open Meetily when you log in</div>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-600">
+                  Adds Meetily to your macOS login startup using a local LaunchAgent. Changes take effect the next time you log in; Meetily will not start recordings, join calls, or enable microphone capture.
+                </p>
+                {appSettings?.loginItemPath && (
+                  <p className="mt-2 break-all font-mono text-xs text-gray-500">
+                    {appSettings.loginItemPath}
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch
+              checked={appSettings?.launchAtLogin ?? false}
+              disabled={appSettingsLoading || appSettingsSaving || appSettings?.startupSupported === false}
+              onCheckedChange={(checked) => {
+                void updateAppStartupSettings({
+                  launchAtLogin: checked,
+                  startMinimized: appSettings?.startMinimized ?? false,
+                });
+              }}
+            />
+          </div>
+
+          <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex gap-3">
+              <Minimize2 className="mt-0.5 h-4 w-4 text-gray-500" />
+              <div>
+                <div className="text-sm font-medium text-gray-900">Start minimized to the menu bar</div>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-600">
+                  Keeps the main window hidden at launch while the tray/menu-bar actions remain available. Use this with login startup when you want Meetily ready in the background.
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={appSettings?.startMinimized ?? false}
+              disabled={appSettingsLoading || appSettingsSaving || appSettings?.startupSupported === false}
+              onCheckedChange={(checked) => {
+                void updateAppStartupSettings({
+                  launchAtLogin: appSettings?.launchAtLogin ?? false,
+                  startMinimized: checked,
+                });
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="mt-3 min-h-5 text-sm">
+          {appSettingsLoading && (
+            <span className="inline-flex items-center gap-2 text-gray-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading startup settings...
+            </span>
+          )}
+          {!appSettingsLoading && appSettingsSaving && (
+            <span className="inline-flex items-center gap-2 text-gray-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Saving startup settings...
+            </span>
+          )}
+          {!appSettingsLoading && !appSettingsSaving && appSettingsMessage && (
+            <span className="text-emerald-700">{appSettingsMessage}</span>
+          )}
+          {!appSettingsLoading && !appSettingsSaving && appSettingsError && (
+            <span className="text-red-700">{appSettingsError}</span>
+          )}
+          {!appSettingsLoading && !appSettingsSaving && appSettings?.startupSupported === false && !appSettingsError && (
+            <span className="text-amber-700">Launch at login is currently supported in the macOS desktop app.</span>
+          )}
         </div>
       </div>
 

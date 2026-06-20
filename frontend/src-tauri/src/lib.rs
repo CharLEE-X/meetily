@@ -38,6 +38,7 @@ pub(crate) use perf_trace;
 pub mod analytics;
 pub mod anthropic;
 pub mod api;
+pub mod app_settings;
 pub mod apple_notes;
 pub mod audio;
 pub mod calendar;
@@ -428,6 +429,16 @@ pub fn run() {
                 log::error!("Failed to create system tray: {}", e);
             }
 
+            if app_settings::should_start_minimized(_app.handle()) {
+                if let Some(window) = _app.handle().get_webview_window("main") {
+                    if let Err(e) = window.hide() {
+                        log::error!("Failed to start Meetily minimized: {}", e);
+                    } else {
+                        log::info!("Meetily started minimized to the system tray");
+                    }
+                }
+            }
+
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
             let app_for_notif = _app.handle().clone();
@@ -620,6 +631,8 @@ pub fn run() {
             start_audio_level_monitoring,
             stop_audio_level_monitoring,
             is_audio_level_monitoring,
+            app_settings::get_app_settings,
+            app_settings::update_app_settings,
             // Recording pause/resume commands
             audio::recording_commands::pause_recording,
             audio::recording_commands::resume_recording,
