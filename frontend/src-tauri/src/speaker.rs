@@ -14,6 +14,10 @@ const STATUS_DETECTED: &str = "detected";
 const CONFIDENCE_LEGACY_SOURCE: f64 = 0.9;
 const CONFIDENCE_TIMING_HEURISTIC: f64 = 0.45;
 const CONFIDENCE_SCREENSHOT_NAME: f64 = 0.82;
+const VISUAL_CUE_ALIGNMENT_WINDOW_SECONDS: f64 = 2.0;
+const VISUAL_CUE_DISTANCE_PENALTY: f64 = 0.08;
+const VISUAL_CUE_MIDPOINT_PENALTY: f64 = 0.01;
+const VISUAL_CUE_DOMINANT_MARGIN: f64 = 0.05;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +68,15 @@ struct SpeakerAssignment {
     confidence: f64,
     start_time: Option<f64>,
     end_time: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct VisualSpeakerCue {
+    snapshot_id: String,
+    recording_time: f64,
+    extracted_name: String,
+    active_marker: String,
+    confidence: f64,
 }
 
 #[tauri::command]
@@ -253,7 +266,9 @@ async fn run_speaker_labeling_for_meeting(
     let pool = state.db_manager.pool();
     let transcripts = load_transcripts_for_labeling(pool, meeting_id).await?;
     let visible_name_hint = load_visible_speaker_name_hint(pool, meeting_id).await?;
-    let assignments = derive_speaker_assignments(&transcripts, visible_name_hint.as_deref());
+    let visual_cues = load_visual_speaker_cues(pool, meeting_id).await?;
+    let assignments =
+        derive_speaker_assignments(&transcripts, visible_name_hint.as_deref(), &visual_cues);
     let now = Utc::now().to_rfc3339();
 
     let mut tx = pool
@@ -468,6 +483,79 @@ async fn load_visible_speaker_name_hint(
     Ok(select_stable_visible_name(counts))
 }
 
+async fn load_visual_speaker_cues(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+) -> Result<Vec<VisualSpeakerCue>, String> {
+    let rows = sqlx::query(
+        r#"
+        SELECT metadata_json
+        FROM meeting_screenshots
+        WHERE meeting_id = ?
+          AND deleted_at IS NULL
+          AND status = 'captured'
+          AND metadata_json IS NOT NULL
+        ORDER BY COALESCE(recording_time, 0), captured_at
+        "#,
+    )
+    .bind(meeting_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|err| format!("Failed to load visual speaker cues: {}", err))?;
+
+    let mut cues = Vec::new();
+    for row in rows {
+        let raw: String = row.get("metadata_json");
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        let Some(items) = value.get("speakerCues").and_then(Value::as_array) else {
+            continue;
+        };
+        for item in items {
+            let snapshot_id = item
+                .get("snapshot_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let Some(recording_time) = item.get("recording_time").and_then(Value::as_f64) else {
+                continue;
+            };
+            let Some(extracted_name) = item
+                .get("extracted_name")
+                .and_then(Value::as_str)
+                .and_then(normalize_screenshot_speaker_name)
+            else {
+                continue;
+            };
+            let active_marker = item
+                .get("active_marker")
+                .and_then(Value::as_str)
+                .unwrap_or("visible-name")
+                .to_string();
+            let confidence = item
+                .get("confidence")
+                .and_then(Value::as_f64)
+                .unwrap_or(CONFIDENCE_SCREENSHOT_NAME)
+                .clamp(0.0, 1.0);
+            cues.push(VisualSpeakerCue {
+                snapshot_id,
+                recording_time,
+                extracted_name,
+                active_marker,
+                confidence,
+            });
+        }
+    }
+
+    cues.sort_by(|left, right| {
+        left.recording_time
+            .partial_cmp(&right.recording_time)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(cues)
+}
+
 async fn load_speaker_labeling_result(
     state: &AppState,
     meeting_id: &str,
@@ -534,11 +622,26 @@ async fn load_speaker_labeling_result(
 fn derive_speaker_assignments(
     transcripts: &[TranscriptForLabeling],
     visible_name_hint: Option<&str>,
+    visual_cues: &[VisualSpeakerCue],
 ) -> Vec<SpeakerAssignment> {
     transcripts
         .iter()
         .enumerate()
         .map(|(index, segment)| {
+            let visual_cue = best_visual_cue_for_segment(segment, visual_cues);
+            if let Some(cue) =
+                visual_cue.filter(|cue| should_apply_visual_cue(segment, cue))
+            {
+                return SpeakerAssignment {
+                    transcript_id: segment.id.clone(),
+                    display_name: cue.extracted_name.clone(),
+                    source: SOURCE_SCREENSHOT_NAME.to_string(),
+                    confidence: cue.confidence,
+                    start_time: segment.audio_start_time,
+                    end_time: segment.audio_end_time,
+                };
+            }
+
             if let Some(legacy_speaker) = segment
                 .legacy_speaker
                 .as_deref()
@@ -593,6 +696,75 @@ fn derive_speaker_assignments(
             }
         })
         .collect()
+}
+
+fn best_visual_cue_for_segment<'a>(
+    segment: &TranscriptForLabeling,
+    visual_cues: &'a [VisualSpeakerCue],
+) -> Option<&'a VisualSpeakerCue> {
+    let start = segment.audio_start_time?;
+    let end = segment.audio_end_time.unwrap_or(start).max(start);
+    let midpoint = (start + end) / 2.0;
+
+    let mut ranked = visual_cues
+        .iter()
+        .filter_map(|cue| {
+            let distance = if cue.recording_time < start {
+                start - cue.recording_time
+            } else if cue.recording_time > end {
+                cue.recording_time - end
+            } else {
+                0.0
+            };
+            if distance > VISUAL_CUE_ALIGNMENT_WINDOW_SECONDS {
+                return None;
+            }
+            // Screenshot cue recording_time and transcript audio times are both
+            // recording-relative seconds from the same session start.
+            let midpoint_distance = (cue.recording_time - midpoint).abs();
+            let score = (cue.confidence
+                - distance * VISUAL_CUE_DISTANCE_PENALTY
+                - midpoint_distance * VISUAL_CUE_MIDPOINT_PENALTY)
+                .max(0.0);
+            Some((cue, score, midpoint_distance))
+        })
+        .collect::<Vec<_>>();
+
+    ranked.sort_by(|(_, left_score, left_distance), (_, right_score, right_distance)| {
+        right_score
+            .partial_cmp(left_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                left_distance
+                    .partial_cmp(right_distance)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+
+    let (best, best_score, _) = ranked.first().copied()?;
+    let best_name = best.extracted_name.to_lowercase();
+    let has_near_tie = ranked.iter().skip(1).any(|(cue, score, _)| {
+        cue.extracted_name.to_lowercase() != best_name
+            && (best_score - score).abs() < VISUAL_CUE_DOMINANT_MARGIN
+    });
+    if has_near_tie {
+        return None;
+    }
+
+    Some(best)
+}
+
+fn should_apply_visual_cue(segment: &TranscriptForLabeling, cue: &VisualSpeakerCue) -> bool {
+    let Some(legacy_speaker) = segment
+        .legacy_speaker
+        .as_deref()
+        .and_then(normalize_legacy_speaker)
+    else {
+        return true;
+    };
+
+    is_microphone_source(&legacy_speaker)
+        || (cue.active_marker != "visible-name" && cue.confidence >= CONFIDENCE_LEGACY_SOURCE)
 }
 
 fn select_stable_visible_name(counts: HashMap<String, usize>) -> Option<String> {
@@ -730,6 +902,16 @@ mod tests {
         }
     }
 
+    fn visual_cue(name: &str, time: f64, confidence: f64) -> VisualSpeakerCue {
+        VisualSpeakerCue {
+            snapshot_id: format!("shot-{time}"),
+            recording_time: time,
+            extracted_name: name.to_string(),
+            active_marker: "caption-label".to_string(),
+            confidence,
+        }
+    }
+
     #[test]
     fn uses_legacy_audio_source_when_available() {
         let assignments = derive_speaker_assignments(
@@ -738,6 +920,7 @@ mod tests {
                 transcript("b", Some(1.2), Some(2.0), Some("system")),
             ],
             None,
+            &[],
         );
 
         assert_eq!(assignments[0].display_name, "Microphone");
@@ -754,6 +937,7 @@ mod tests {
                 transcript("c", Some(5.2), Some(6.0), None),
             ],
             None,
+            &[],
         );
 
         assert_eq!(assignments[0].display_name, "Speaker 1");
@@ -766,7 +950,7 @@ mod tests {
 
     #[test]
     fn empty_transcripts_produce_no_assignments() {
-        assert!(derive_speaker_assignments(&[], None).is_empty());
+        assert!(derive_speaker_assignments(&[], None, &[]).is_empty());
     }
 
     #[test]
@@ -783,11 +967,104 @@ mod tests {
         let assignments = derive_speaker_assignments(
             &[transcript("a", Some(0.0), Some(1.0), Some("mic"))],
             Some("Adrian Witaszak"),
+            &[],
         );
 
         assert_eq!(assignments[0].display_name, "Adrian Witaszak");
         assert_eq!(assignments[0].source, SOURCE_SCREENSHOT_NAME);
         assert_eq!(assignments[0].confidence, CONFIDENCE_SCREENSHOT_NAME);
+    }
+
+    #[test]
+    fn visual_cues_align_before_during_and_after_segments() {
+        let assignments = derive_speaker_assignments(
+            &[
+                transcript("a", Some(5.0), Some(8.0), None),
+                transcript("b", Some(10.0), Some(12.0), None),
+                transcript("c", Some(15.0), Some(17.0), None),
+            ],
+            None,
+            &[
+                visual_cue("Before Speaker", 4.0, 0.9),
+                visual_cue("During Speaker", 11.0, 0.91),
+                visual_cue("After Speaker", 18.0, 0.92),
+            ],
+        );
+
+        assert_eq!(assignments[0].display_name, "Before Speaker");
+        assert_eq!(assignments[1].display_name, "During Speaker");
+        assert_eq!(assignments[2].display_name, "After Speaker");
+        assert!(assignments
+            .iter()
+            .all(|assignment| assignment.source == SOURCE_SCREENSHOT_NAME));
+    }
+
+    #[test]
+    fn multiple_visual_cues_rank_by_confidence_and_preserve_ambiguity() {
+        let assignments = derive_speaker_assignments(
+            &[transcript("a", Some(1.0), Some(3.0), None)],
+            None,
+            &[
+                visual_cue("Lower Confidence", 2.0, 0.7),
+                visual_cue("Higher Confidence", 2.2, 0.9),
+            ],
+        );
+        assert_eq!(assignments[0].display_name, "Higher Confidence");
+
+        let ambiguous = derive_speaker_assignments(
+            &[transcript("a", Some(1.0), Some(3.0), None)],
+            None,
+            &[
+                visual_cue("First Speaker", 2.0, 0.9),
+                visual_cue("Second Speaker", 2.0, 0.91),
+            ],
+        );
+        assert_eq!(ambiguous[0].source, SOURCE_HEURISTIC);
+    }
+
+    #[test]
+    fn same_speaker_visual_cue_bursts_are_not_ambiguous() {
+        let assignments = derive_speaker_assignments(
+            &[transcript("a", Some(1.0), Some(3.0), None)],
+            None,
+            &[
+                visual_cue("Same Speaker", 1.9, 0.9),
+                visual_cue("Same Speaker", 2.1, 0.9),
+            ],
+        );
+
+        assert_eq!(assignments[0].display_name, "Same Speaker");
+        assert_eq!(assignments[0].source, SOURCE_SCREENSHOT_NAME);
+    }
+
+    #[test]
+    fn missing_visual_cues_leave_existing_label_fallback_unchanged() {
+        let assignments = derive_speaker_assignments(
+            &[transcript("a", Some(1.0), Some(3.0), Some("mic"))],
+            Some("Stable Name"),
+            &[],
+        );
+
+        assert_eq!(assignments[0].display_name, "Stable Name");
+        assert_eq!(assignments[0].source, SOURCE_SCREENSHOT_NAME);
+    }
+
+    #[test]
+    fn weak_visual_cues_do_not_override_system_audio_labels() {
+        let assignments = derive_speaker_assignments(
+            &[transcript("a", Some(1.0), Some(3.0), Some("system"))],
+            None,
+            &[VisualSpeakerCue {
+                snapshot_id: "shot-1".to_string(),
+                recording_time: 2.0,
+                extracted_name: "Visible Person".to_string(),
+                active_marker: "visible-name".to_string(),
+                confidence: 0.65,
+            }],
+        );
+
+        assert_eq!(assignments[0].display_name, "System Audio");
+        assert_eq!(assignments[0].source, SOURCE_LEGACY);
     }
 
     #[test]
