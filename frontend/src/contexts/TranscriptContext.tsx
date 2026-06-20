@@ -8,8 +8,11 @@ import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import {
   getScreenshotPreferences,
+  pauseMeetingScreenshotCapture,
+  resumeMeetingScreenshotCapture,
   startMeetingScreenshotCapture,
   stopMeetingScreenshotCapture,
+  triggerMeetingScreenshotCapture,
 } from '@/services/screenshotService';
 import { indexedDBService } from '@/services/indexedDBService';
 
@@ -33,6 +36,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
+  const screenshotCaptureModeRef = useRef<'interval' | 'speechEvent' | 'manualOnly' | null>(null);
 
   // Recording state context - provides backend-synced state
   const recordingState = useRecordingState();
@@ -90,6 +94,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let unlistenRecordingStarted: (() => void) | undefined;
     let unlistenRecordingStopped: (() => void) | undefined;
+    let unlistenRecordingPaused: (() => void) | undefined;
+    let unlistenRecordingResumed: (() => void) | undefined;
 
     const setupRecordingListeners = async () => {
       try {
@@ -139,13 +145,16 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
               const screenshotPreferences = await getScreenshotPreferences();
               if (screenshotPreferences.enabled) {
                 const isFullScreenCapture = screenshotPreferences.captureTarget === 'fullScreen';
+                const isManualOnly = screenshotPreferences.captureMode === 'manualOnly';
                 const confirmed = window.confirm(
                   isFullScreenCapture
-                    ? 'Allow Meetily to capture periodic full-screen screenshots for this meeting? Full-screen capture can include other visible apps. Screenshots are stored locally and can be deleted from the meeting timeline.'
-                    : 'Allow Meetily to capture periodic call-window screenshots for this meeting? Meetily uses the detected meeting window bounds and skips capture if the call window is unavailable. Screenshots are stored locally and can be deleted from the meeting timeline.'
+                    ? `Allow Meetily to capture ${isManualOnly ? 'manual' : 'scheduled'} full-screen screenshots for this meeting? Full-screen capture can include other visible apps. Screenshots are stored locally and can be deleted from the meeting timeline.`
+                    : `Allow Meetily to capture ${isManualOnly ? 'manual' : 'scheduled'} call-window screenshots for this meeting? Meetily uses the detected meeting window bounds and skips capture if the call window is unavailable. Screenshots are stored locally and can be deleted from the meeting timeline.`
                 );
 
                 if (confirmed) {
+                  screenshotCaptureModeRef.current = screenshotPreferences.captureMode;
+                  sessionStorage.setItem('screenshot_capture_mode', screenshotPreferences.captureMode);
                   startMeetingScreenshotCapture(
                     meetingId,
                     sessionStorage.getItem('recording_started_at')
@@ -163,6 +172,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
                         description: String(error),
                       });
                     });
+                } else {
+                  screenshotCaptureModeRef.current = null;
+                  sessionStorage.removeItem('screenshot_capture_mode');
                 }
               }
             } catch (error) {
@@ -197,6 +209,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           try {
             const meetingId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
             if (meetingId) {
+              screenshotCaptureModeRef.current = null;
+              sessionStorage.removeItem('screenshot_capture_mode');
               stopMeetingScreenshotCapture(meetingId).catch((error) => {
                 console.warn('Failed to stop screenshot capture:', error);
               });
@@ -211,6 +225,24 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             }
           } catch (error) {
             console.error('Failed to update meeting metadata on stop:', error);
+          }
+        });
+
+        unlistenRecordingPaused = await recordingService.onRecordingPaused(() => {
+          const meetingId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
+          if (meetingId) {
+            pauseMeetingScreenshotCapture(meetingId).catch((error) => {
+              console.warn('Failed to pause screenshot capture:', error);
+            });
+          }
+        });
+
+        unlistenRecordingResumed = await recordingService.onRecordingResumed(() => {
+          const meetingId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
+          if (meetingId) {
+            resumeMeetingScreenshotCapture(meetingId).catch((error) => {
+              console.warn('Failed to resume screenshot capture:', error);
+            });
           }
         });
       } catch (error) {
@@ -228,6 +260,14 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       if (unlistenRecordingStopped) {
         unlistenRecordingStopped();
         console.log('🧹 Recording stopped listener cleaned up');
+      }
+      if (unlistenRecordingPaused) {
+        unlistenRecordingPaused();
+        console.log('🧹 Recording paused listener cleaned up');
+      }
+      if (unlistenRecordingResumed) {
+        unlistenRecordingResumed();
+        console.log('🧹 Recording resumed listener cleaned up');
       }
     };
   }, [currentMeetingId]);
@@ -380,6 +420,20 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           if (currentMeetingId) {
             indexedDBService.saveTranscript(currentMeetingId, update)
               .catch(err => console.warn('IndexedDB save failed:', err));
+
+            if (
+              (sessionStorage.getItem('screenshot_capture_mode') ?? screenshotCaptureModeRef.current) === 'speechEvent' &&
+              !update.is_partial &&
+              update.text.trim().length > 0
+            ) {
+              triggerMeetingScreenshotCapture(
+                currentMeetingId,
+                sessionStorage.getItem('recording_started_at'),
+                'speechEvent'
+              ).catch((error) => {
+                console.warn('Speech-event screenshot trigger failed:', error);
+              });
+            }
           }
 
           // Clear any existing timer and set a new one

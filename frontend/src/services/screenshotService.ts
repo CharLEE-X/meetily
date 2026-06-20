@@ -4,6 +4,7 @@ export interface ScreenshotPreferences {
   enabled: boolean;
   intervalSeconds: number;
   captureTarget: 'callWindow' | 'fullScreen';
+  captureMode: 'interval' | 'speechEvent' | 'manualOnly';
   retentionDays: number;
 }
 
@@ -55,6 +56,30 @@ export async function stopMeetingScreenshotCapture(
   meetingId: string,
 ): Promise<ScreenshotCaptureStatus> {
   return invoke<ScreenshotCaptureStatus>('stop_meeting_screenshot_capture', { meetingId });
+}
+
+export async function pauseMeetingScreenshotCapture(
+  meetingId: string,
+): Promise<ScreenshotCaptureStatus> {
+  return invoke<ScreenshotCaptureStatus>('pause_meeting_screenshot_capture', { meetingId });
+}
+
+export async function resumeMeetingScreenshotCapture(
+  meetingId: string,
+): Promise<ScreenshotCaptureStatus> {
+  return invoke<ScreenshotCaptureStatus>('resume_meeting_screenshot_capture', { meetingId });
+}
+
+export async function triggerMeetingScreenshotCapture(
+  meetingId: string,
+  recordingStartedAt?: string | null,
+  triggerReason: 'speechEvent' | 'speakerChange' = 'speechEvent',
+): Promise<ScreenshotCaptureStatus> {
+  return invoke<ScreenshotCaptureStatus>('trigger_meeting_screenshot_capture', {
+    meetingId,
+    recordingStartedAt,
+    triggerReason,
+  });
 }
 
 export async function captureMeetingScreenshotNow(

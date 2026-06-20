@@ -6,6 +6,7 @@ use serde_json::json;
 use sqlx::Row;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, Runtime};
@@ -21,8 +22,13 @@ const MAX_INTERVAL_SECONDS: u64 = 900;
 const DEFAULT_INTERVAL_SECONDS: u64 = 60;
 const DEFAULT_RETENTION_DAYS: u32 = 30;
 const SCREENSHOT_RELEVANCE_THRESHOLD: f64 = 0.55;
+const DEFAULT_CAPTURE_MODE: &str = "interval";
+const EVENT_TRIGGER_MIN_GAP_SECONDS: i64 = 45;
+const MAX_SCREENSHOTS_PER_MEETING: u32 = 240;
 
 static CAPTURE_TASKS: Lazy<Mutex<HashMap<String, JoinHandle<()>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+static CAPTURE_RUNTIME: Lazy<Mutex<HashMap<String, Arc<Mutex<CaptureRuntimeState>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -31,6 +37,7 @@ pub struct ScreenshotPreferences {
     pub enabled: bool,
     pub interval_seconds: u64,
     pub capture_target: String,
+    pub capture_mode: String,
     pub retention_days: u32,
 }
 
@@ -40,9 +47,17 @@ impl Default for ScreenshotPreferences {
             enabled: false,
             interval_seconds: DEFAULT_INTERVAL_SECONDS,
             capture_target: default_capture_target(),
+            capture_mode: DEFAULT_CAPTURE_MODE.to_string(),
             retention_days: DEFAULT_RETENTION_DAYS,
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct CaptureRuntimeState {
+    paused: bool,
+    last_capture_at: Option<DateTime<Utc>>,
+    capture_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,31 +172,61 @@ pub async fn start_meeting_screenshot_capture<R: Runtime>(
 
     stop_capture_task(&meeting_id);
 
+    let runtime_state = Arc::new(Mutex::new(CaptureRuntimeState::default()));
+    CAPTURE_RUNTIME
+        .lock()
+        .map_err(|_| "Failed to access screenshot scheduler registry".to_string())?
+        .insert(meeting_id.clone(), runtime_state.clone());
+
+    if preferences.capture_mode == "manualOnly" {
+        return Ok(ScreenshotCaptureStatus {
+            meeting_id,
+            active: false,
+            enabled: true,
+            interval_seconds: preferences.interval_seconds,
+            last_error: None,
+        });
+    }
+
     let app_for_task = app.clone();
     let db_manager = state.db_manager.clone();
     let meeting_for_task = meeting_id.clone();
     let recording_started_at = parse_recording_started_at(recording_started_at.as_deref());
-    let interval_seconds = preferences.interval_seconds;
+    let fallback_preferences = preferences.clone();
 
     let handle = tokio::spawn(async move {
         loop {
-            if let Err(err) = capture_and_store_screenshot(
-                &app_for_task,
-                db_manager.pool(),
-                &meeting_for_task,
-                recording_started_at,
-                "periodic",
-            )
-            .await
+            let next_preferences = match load_screenshot_preferences(&app_for_task).await {
+                Ok(value) => value,
+                Err(err) => {
+                    log::warn!("Failed to reload screenshot preferences: {}", err);
+                    fallback_preferences.clone()
+                }
+            };
+            if next_preferences.enabled
+                && next_preferences.capture_mode != "manualOnly"
+                && reserve_capture_slot(&runtime_state, Utc::now(), 0).unwrap_or(false)
             {
-                log::warn!(
-                    "Periodic screenshot capture failed for meeting {}: {}",
-                    meeting_for_task,
-                    err
-                );
+                if let Err(err) = capture_and_store_screenshot(
+                    &app_for_task,
+                    db_manager.pool(),
+                    &meeting_for_task,
+                    recording_started_at,
+                    "interval",
+                )
+                .await
+                {
+                    log::warn!(
+                        "Periodic screenshot capture failed for meeting {}: {}",
+                        meeting_for_task,
+                        err
+                    );
+                } else if let Err(err) = mark_capture_completed(&runtime_state) {
+                    log::warn!("Failed to update screenshot scheduler count: {}", err);
+                }
             }
 
-            sleep(Duration::from_secs(interval_seconds)).await;
+            sleep(Duration::from_secs(next_preferences.interval_seconds)).await;
         }
     });
 
@@ -210,6 +255,105 @@ pub async fn stop_meeting_screenshot_capture(
         enabled: active,
         interval_seconds: DEFAULT_INTERVAL_SECONDS,
         last_error: None,
+    })
+}
+
+#[tauri::command]
+pub async fn pause_meeting_screenshot_capture(meeting_id: String) -> Result<ScreenshotCaptureStatus, String> {
+    let active = set_capture_paused(&meeting_id, true)?;
+    Ok(ScreenshotCaptureStatus {
+        meeting_id,
+        active: false,
+        enabled: active,
+        interval_seconds: DEFAULT_INTERVAL_SECONDS,
+        last_error: None,
+    })
+}
+
+#[tauri::command]
+pub async fn resume_meeting_screenshot_capture(meeting_id: String) -> Result<ScreenshotCaptureStatus, String> {
+    let active = set_capture_paused(&meeting_id, false)?;
+    Ok(ScreenshotCaptureStatus {
+        meeting_id,
+        active,
+        enabled: active,
+        interval_seconds: DEFAULT_INTERVAL_SECONDS,
+        last_error: None,
+    })
+}
+
+#[tauri::command]
+pub async fn trigger_meeting_screenshot_capture<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    recording_started_at: Option<String>,
+    trigger_reason: Option<String>,
+) -> Result<ScreenshotCaptureStatus, String> {
+    let preferences = load_screenshot_preferences(&app)
+        .await
+        .map_err(|err| format!("Failed to load screenshot preferences: {}", err))?;
+    if !preferences.enabled || preferences.capture_mode != "speechEvent" {
+        return Ok(ScreenshotCaptureStatus {
+            meeting_id,
+            active: false,
+            enabled: preferences.enabled,
+            interval_seconds: preferences.interval_seconds,
+            last_error: None,
+        });
+    }
+
+    let runtime_state = {
+        let states = CAPTURE_RUNTIME
+            .lock()
+            .map_err(|_| "Failed to access screenshot scheduler registry".to_string())?;
+        states.get(&meeting_id).cloned()
+    };
+
+    let Some(runtime_state) = runtime_state else {
+        return Ok(ScreenshotCaptureStatus {
+            meeting_id,
+            active: false,
+            enabled: true,
+            interval_seconds: preferences.interval_seconds,
+            last_error: None,
+        });
+    };
+
+    if !reserve_capture_slot(&runtime_state, Utc::now(), EVENT_TRIGGER_MIN_GAP_SECONDS)? {
+        return Ok(ScreenshotCaptureStatus {
+            meeting_id,
+            active: true,
+            enabled: true,
+            interval_seconds: preferences.interval_seconds,
+            last_error: None,
+        });
+    }
+
+    let trigger_reason = normalize_trigger_reason(trigger_reason.as_deref());
+    let recording_started_at = parse_recording_started_at(recording_started_at.as_deref());
+    let last_error = match capture_and_store_screenshot(
+        &app,
+        state.db_manager.pool(),
+        &meeting_id,
+        recording_started_at,
+        &trigger_reason,
+    )
+    .await
+    {
+        Ok(_) => {
+            mark_capture_completed(&runtime_state)?;
+            None
+        }
+        Err(err) => Some(err),
+    };
+
+    Ok(ScreenshotCaptureStatus {
+        meeting_id,
+        active: true,
+        enabled: true,
+        interval_seconds: preferences.interval_seconds,
+        last_error,
     })
 }
 
@@ -853,11 +997,71 @@ fn stop_capture_task(meeting_id: &str) -> bool {
     let Ok(mut tasks) = CAPTURE_TASKS.lock() else {
         return false;
     };
+    if let Ok(mut states) = CAPTURE_RUNTIME.lock() {
+        states.remove(meeting_id);
+    }
     if let Some(handle) = tasks.remove(meeting_id) {
         handle.abort();
         return true;
     }
     false
+}
+
+fn set_capture_paused(meeting_id: &str, paused: bool) -> Result<bool, String> {
+    let states = CAPTURE_RUNTIME
+        .lock()
+        .map_err(|_| "Failed to access screenshot scheduler registry".to_string())?;
+    let Some(runtime_state) = states.get(meeting_id) else {
+        return Ok(false);
+    };
+    let mut state = runtime_state
+        .lock()
+        .map_err(|_| "Failed to update screenshot scheduler state".to_string())?;
+    state.paused = paused;
+    Ok(true)
+}
+
+fn reserve_capture_slot(
+    runtime_state: &Arc<Mutex<CaptureRuntimeState>>,
+    now: DateTime<Utc>,
+    min_gap_seconds: i64,
+) -> Result<bool, String> {
+    let mut state = runtime_state
+        .lock()
+        .map_err(|_| "Failed to update screenshot scheduler state".to_string())?;
+    Ok(should_reserve_capture_slot(&mut state, now, min_gap_seconds))
+}
+
+fn should_reserve_capture_slot(
+    state: &mut CaptureRuntimeState,
+    now: DateTime<Utc>,
+    min_gap_seconds: i64,
+) -> bool {
+    if state.paused || state.capture_count >= MAX_SCREENSHOTS_PER_MEETING {
+        return false;
+    }
+    if let Some(last_capture_at) = state.last_capture_at {
+        if (now - last_capture_at).num_seconds() < min_gap_seconds {
+            return false;
+        }
+    }
+    state.last_capture_at = Some(now);
+    true
+}
+
+fn mark_capture_completed(runtime_state: &Arc<Mutex<CaptureRuntimeState>>) -> Result<(), String> {
+    let mut state = runtime_state
+        .lock()
+        .map_err(|_| "Failed to update screenshot scheduler state".to_string())?;
+    state.capture_count = state.capture_count.saturating_add(1);
+    Ok(())
+}
+
+fn normalize_trigger_reason(value: Option<&str>) -> String {
+    match value {
+        Some(reason @ ("speechEvent" | "speakerChange")) => reason.to_string(),
+        _ => "speechEvent".to_string(),
+    }
 }
 
 fn normalize_preferences(mut preferences: ScreenshotPreferences) -> ScreenshotPreferences {
@@ -866,6 +1070,12 @@ fn normalize_preferences(mut preferences: ScreenshotPreferences) -> ScreenshotPr
         .clamp(MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS);
     if preferences.capture_target != "fullScreen" && preferences.capture_target != "callWindow" {
         preferences.capture_target = "callWindow".to_string();
+    }
+    if !matches!(
+        preferences.capture_mode.as_str(),
+        "interval" | "speechEvent" | "manualOnly"
+    ) {
+        preferences.capture_mode = DEFAULT_CAPTURE_MODE.to_string();
     }
     if preferences.retention_days == 0 {
         preferences.retention_days = DEFAULT_RETENTION_DAYS;
@@ -1389,6 +1599,7 @@ mod tests {
         assert!(!preferences.enabled);
         assert_eq!(preferences.interval_seconds, DEFAULT_INTERVAL_SECONDS);
         assert_eq!(preferences.capture_target, "callWindow");
+        assert_eq!(preferences.capture_mode, DEFAULT_CAPTURE_MODE);
     }
 
     #[test]
@@ -1397,12 +1608,14 @@ mod tests {
             enabled: true,
             interval_seconds: 5,
             capture_target: "activeWindow".to_string(),
+            capture_mode: "unknown".to_string(),
             retention_days: 0,
         });
 
         assert!(preferences.enabled);
         assert_eq!(preferences.interval_seconds, MIN_INTERVAL_SECONDS);
         assert_eq!(preferences.capture_target, "callWindow");
+        assert_eq!(preferences.capture_mode, DEFAULT_CAPTURE_MODE);
         assert_eq!(preferences.retention_days, DEFAULT_RETENTION_DAYS);
     }
 
@@ -1482,6 +1695,42 @@ mod tests {
     fn formats_recording_time_label() {
         assert_eq!(format_time_label(0.0), "00:00");
         assert_eq!(format_time_label(65.2), "01:05");
+    }
+
+    #[test]
+    fn scheduler_respects_pause_state_and_rate_limits() {
+        let mut state = CaptureRuntimeState::default();
+        let now = Utc::now();
+
+        assert!(should_reserve_capture_slot(&mut state, now, 45));
+        assert!(!should_reserve_capture_slot(
+            &mut state,
+            now + chrono::Duration::seconds(20),
+            45
+        ));
+        assert!(should_reserve_capture_slot(
+            &mut state,
+            now + chrono::Duration::seconds(45),
+            45
+        ));
+
+        state.paused = true;
+        assert!(!should_reserve_capture_slot(
+            &mut state,
+            now + chrono::Duration::seconds(120),
+            45
+        ));
+    }
+
+    #[test]
+    fn scheduler_stops_after_max_capture_count() {
+        let mut state = CaptureRuntimeState {
+            paused: false,
+            last_capture_at: None,
+            capture_count: MAX_SCREENSHOTS_PER_MEETING,
+        };
+
+        assert!(!should_reserve_capture_slot(&mut state, Utc::now(), 0));
     }
 
     #[test]

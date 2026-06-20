@@ -38,6 +38,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     enabled: false,
     intervalSeconds: 60,
     captureTarget: 'callWindow',
+    captureMode: 'interval',
     retentionDays: 30,
   });
   const [savingScreenshotPreferences, setSavingScreenshotPreferences] = useState(false);
@@ -151,6 +152,13 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     try {
       const saved = await setScreenshotPreferences(prefs);
       setLocalScreenshotPreferences(saved);
+      if (typeof window !== 'undefined') {
+        if (saved.enabled) {
+          sessionStorage.setItem('screenshot_capture_mode', saved.captureMode);
+        } else {
+          sessionStorage.removeItem('screenshot_capture_mode');
+        }
+      }
       toast.success('Screenshot preferences saved');
     } catch (error) {
       console.error('Failed to save screenshot preferences:', error);
@@ -175,6 +183,12 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
   const handleScreenshotTargetChange = async (value: ScreenshotPreferences['captureTarget']) => {
     const next = { ...screenshotPreferences, captureTarget: value };
+    setLocalScreenshotPreferences(next);
+    await saveScreenshotPreferences(next);
+  };
+
+  const handleScreenshotModeChange = async (value: ScreenshotPreferences['captureMode']) => {
+    const next = { ...screenshotPreferences, captureMode: value };
     setLocalScreenshotPreferences(next);
     await saveScreenshotPreferences(next);
   };
@@ -313,11 +327,34 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         {screenshotPreferences.enabled && (
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <label className="block">
+              <span className="text-sm font-medium text-gray-700">Capture mode</span>
+              <select
+                value={screenshotPreferences.captureMode}
+                onChange={(event) =>
+                  handleScreenshotModeChange(
+                    event.target.value as ScreenshotPreferences['captureMode']
+                  )
+                }
+                disabled={savingScreenshotPreferences}
+                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+              >
+                <option value="interval">Interval only</option>
+                <option value="speechEvent">Speech-event assisted</option>
+                <option value="manualOnly">Manual only</option>
+              </select>
+              <span className="mt-1 block text-xs leading-5 text-gray-500">
+                Speech-event assisted keeps the interval cadence and adds rate-limited snapshots
+                around final transcript segments. Manual only keeps capture available from meeting
+                controls without background snapshots.
+              </span>
+            </label>
+
+            <label className="block">
               <span className="text-sm font-medium text-gray-700">Capture interval</span>
               <select
                 value={screenshotPreferences.intervalSeconds}
                 onChange={(event) => handleScreenshotIntervalChange(event.target.value)}
-                disabled={savingScreenshotPreferences}
+                disabled={savingScreenshotPreferences || screenshotPreferences.captureMode === 'manualOnly'}
                 className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
               >
                 <option value={30}>Every 30 seconds</option>
