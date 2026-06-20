@@ -120,11 +120,11 @@ in Settings:
 * attendees, if supplied by an approved calendar source;
 * description, location, or explicit meeting URL.
 
-Meetily extracts only Google Meet, Zoom, and Microsoft Teams URLs. Candidates are
-shown when the event starts within the configured lookahead window or is already
-active. Events older than the configured stale window are hidden. Duplicate
-event/link combinations are suppressed, and dismissed candidates remain hidden
-until the source event changes.
+The native calendar integration extracts Google Meet, Zoom, and Microsoft Teams
+URLs. Candidates are shown when the event starts within the configured lookahead
+window or is already active. Events older than the configured stale window are
+hidden. Duplicate event/link combinations are suppressed, and dismissed
+candidates remain hidden until the source event changes.
 
 ## Ambient Signal Detection
 
@@ -134,7 +134,8 @@ metadata by combining local-only signals:
 * known meeting apps or browsers running, including Teams, Zoom, Google Chrome,
   Arc, Safari, Edge, Firefox, and Slack;
 * the active app and active window title, where the OS allows access;
-* active browser tab title and URL for Google Meet, Zoom, or Microsoft Teams;
+* active browser tab title and URL for Google Meet, Zoom, Microsoft Teams, or
+  Slack huddle links;
 * optional microphone input activity from Meetily's existing audio level monitor;
 * optional system audio activity when available from the recording backend;
 * optional call-window visual confirmation when a separate visual-detection
