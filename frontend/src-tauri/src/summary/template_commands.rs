@@ -38,6 +38,14 @@ pub struct TemplateDetails {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TemplateRecord {
+    pub id: String,
+    pub source: String,
+    pub template: templates::Template,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SaveTemplateRequest {
     pub id: String,
     pub template: templates::Template,
@@ -212,6 +220,28 @@ pub async fn api_get_template_details<R: Runtime>(
     info!("Retrieved template details for '{}'", details.name);
 
     Ok(details)
+}
+
+#[tauri::command]
+pub async fn api_get_template<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<TemplateRecord, String> {
+    let template = templates::get_template(&template_id)?;
+    let source = templates::list_stored_templates()
+        .into_iter()
+        .find(|stored| stored.id == template_id)
+        .map(|stored| match stored.source {
+            storage::TemplateSource::BuiltIn => "builtIn".to_string(),
+            storage::TemplateSource::Custom => "custom".to_string(),
+        })
+        .unwrap_or_else(|| "builtIn".to_string());
+
+    Ok(TemplateRecord {
+        id: template_id,
+        source,
+        template,
+    })
 }
 
 /// Validates a custom template JSON string

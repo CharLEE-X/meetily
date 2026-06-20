@@ -62,17 +62,18 @@ pub use commands::{
 // Re-export template commands
 pub use template_commands::{
     __cmd__api_delete_custom_template, __cmd__api_duplicate_template,
-    __cmd__api_export_custom_templates, __cmd__api_get_template_details,
+    __cmd__api_export_custom_templates, __cmd__api_get_template,
+    __cmd__api_get_template_details,
     __cmd__api_import_custom_templates, __cmd__api_list_templates,
     __cmd__api_restore_default_templates, __cmd__api_save_custom_template,
     __cmd__api_validate_template, __tauri_command_name_api_delete_custom_template,
     __tauri_command_name_api_duplicate_template, __tauri_command_name_api_export_custom_templates,
-    __tauri_command_name_api_get_template_details,
+    __tauri_command_name_api_get_template, __tauri_command_name_api_get_template_details,
     __tauri_command_name_api_import_custom_templates, __tauri_command_name_api_list_templates,
     __tauri_command_name_api_restore_default_templates,
     __tauri_command_name_api_save_custom_template, __tauri_command_name_api_validate_template,
     api_delete_custom_template, api_duplicate_template, api_export_custom_templates,
-    api_get_template_details, api_import_custom_templates, api_list_templates,
+    api_get_template, api_get_template_details, api_import_custom_templates, api_list_templates,
     api_restore_default_templates, api_save_custom_template, api_validate_template,
 };
 
