@@ -37,7 +37,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   const [screenshotPreferences, setLocalScreenshotPreferences] = useState<ScreenshotPreferences>({
     enabled: false,
     intervalSeconds: 60,
-    captureTarget: 'fullScreen',
+    captureTarget: 'callWindow',
     retentionDays: 30,
   });
   const [savingScreenshotPreferences, setSavingScreenshotPreferences] = useState(false);
@@ -173,6 +173,12 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     await saveScreenshotPreferences(next);
   };
 
+  const handleScreenshotTargetChange = async (value: ScreenshotPreferences['captureTarget']) => {
+    const next = { ...screenshotPreferences, captureTarget: value };
+    setLocalScreenshotPreferences(next);
+    await saveScreenshotPreferences(next);
+  };
+
   const savePreferences = async (prefs: RecordingPreferences) => {
     setSaving(true);
     try {
@@ -294,7 +300,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
               Meeting Screenshots
             </div>
             <div className="max-w-2xl text-sm leading-6 text-gray-600 mt-1">
-              Capture periodic snapshots during recordings for timeline context, speaker identification, and summary grounding. Screenshots can include sensitive visible information, so this stays off until you enable it.
+              Capture periodic snapshots during recordings for timeline context, speaker identification, and summary grounding. Meetily captures the detected call window by default and skips capture when the meeting window is unavailable.
             </div>
           </div>
           <Switch
@@ -321,8 +327,25 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
               </select>
             </label>
 
-            <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
-              Screenshots are stored locally with each meeting, filtered for timeline usefulness, and can be deleted from the meeting timeline.
+            <label className="block">
+              <span className="text-sm font-medium text-gray-700">Capture target</span>
+              <select
+                value={screenshotPreferences.captureTarget}
+                onChange={(event) =>
+                  handleScreenshotTargetChange(
+                    event.target.value as ScreenshotPreferences['captureTarget']
+                  )
+                }
+                disabled={savingScreenshotPreferences}
+                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+              >
+                <option value="callWindow">Detected call window</option>
+                <option value="fullScreen">Full screen with warning</option>
+              </select>
+            </label>
+
+            <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 sm:col-span-2">
+              Screenshots are stored locally with each meeting, filtered for timeline usefulness, and can be deleted from the meeting timeline. Full-screen capture may include other visible apps and should only be used when you explicitly need it.
             </div>
           </div>
         )}

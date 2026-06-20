@@ -138,17 +138,31 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             try {
               const screenshotPreferences = await getScreenshotPreferences();
               if (screenshotPreferences.enabled) {
+                const isFullScreenCapture = screenshotPreferences.captureTarget === 'fullScreen';
                 const confirmed = window.confirm(
-                  'Allow Meetily to capture periodic screenshots for this meeting? Screenshots are stored locally, may include visible screen content outside the meeting, and can be deleted from the meeting timeline.'
+                  isFullScreenCapture
+                    ? 'Allow Meetily to capture periodic full-screen screenshots for this meeting? Full-screen capture can include other visible apps. Screenshots are stored locally and can be deleted from the meeting timeline.'
+                    : 'Allow Meetily to capture periodic call-window screenshots for this meeting? Meetily uses the detected meeting window bounds and skips capture if the call window is unavailable. Screenshots are stored locally and can be deleted from the meeting timeline.'
                 );
 
                 if (confirmed) {
                   startMeetingScreenshotCapture(
                     meetingId,
                     sessionStorage.getItem('recording_started_at')
-                  ).catch((error) => {
-                    console.warn('Failed to start screenshot capture:', error);
-                  });
+                  )
+                    .then((status) => {
+                      if (status.lastError) {
+                        toast.warning('Screenshots skipped', {
+                          description: status.lastError,
+                        });
+                      }
+                    })
+                    .catch((error) => {
+                      console.warn('Failed to start screenshot capture:', error);
+                      toast.warning('Screenshots skipped', {
+                        description: String(error),
+                      });
+                    });
                 }
               }
             } catch (error) {

@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 export interface ScreenshotPreferences {
   enabled: boolean;
   intervalSeconds: number;
-  captureTarget: 'fullScreen';
+  captureTarget: 'callWindow' | 'fullScreen';
   retentionDays: number;
 }
 

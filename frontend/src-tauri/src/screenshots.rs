@@ -39,7 +39,7 @@ impl Default for ScreenshotPreferences {
         Self {
             enabled: false,
             interval_seconds: DEFAULT_INTERVAL_SECONDS,
-            capture_target: "fullScreen".to_string(),
+            capture_target: default_capture_target(),
             retention_days: DEFAULT_RETENTION_DAYS,
         }
     }
@@ -78,6 +78,34 @@ struct ScreenshotAnalysis {
     provider: Option<String>,
     visible_names: Vec<String>,
     text_snippets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct ScreenshotWindowBounds {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct CallWindowCaptureTarget {
+    provider: String,
+    app_name: Option<String>,
+    window_title: Option<String>,
+    window_id: Option<u32>,
+    bounds: ScreenshotWindowBounds,
+    checked_at: String,
+    permission_status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct ScreenshotCapturePlan {
+    capture_target: String,
+    call_window: Option<CallWindowCaptureTarget>,
 }
 
 #[tauri::command]
@@ -137,6 +165,7 @@ pub async fn start_meeting_screenshot_capture<R: Runtime>(
                 db_manager.pool(),
                 &meeting_for_task,
                 recording_started_at,
+                "periodic",
             )
             .await
             {
@@ -192,6 +221,7 @@ pub async fn capture_meeting_screenshot_now<R: Runtime>(
         state.db_manager.pool(),
         &meeting_id,
         recording_started_at,
+        "manual",
     )
     .await
     .and_then(|screenshot| {
@@ -317,13 +347,18 @@ async fn capture_and_store_screenshot<R: Runtime>(
     pool: &sqlx::SqlitePool,
     meeting_id: &str,
     recording_started_at: Option<DateTime<Utc>>,
+    source_trigger: &str,
 ) -> Result<Option<MeetingScreenshot>, String> {
+    let preferences = load_screenshot_preferences(app)
+        .await
+        .map_err(|err| format!("Failed to load screenshot preferences: {}", err))?;
+    let capture_plan = build_capture_plan(&preferences).await?;
     let screenshot_id = Uuid::new_v4().to_string();
     let captured_at = Utc::now();
     let file_path = screenshot_file_path(app, meeting_id, &screenshot_id, captured_at)
         .map_err(|err| format!("Failed to prepare screenshot folder: {}", err))?;
 
-    capture_screen_to_file(&file_path).await?;
+    capture_screen_to_file(&file_path, &capture_plan).await?;
 
     let analysis = analyze_screenshot(&file_path).await;
     if !analysis.is_relevant {
@@ -349,6 +384,25 @@ async fn capture_and_store_screenshot<R: Runtime>(
 
     let metadata_json = json!({
         "analysis": analysis,
+        "captureTarget": capture_plan.capture_target,
+        "provider": capture_plan
+            .call_window
+            .as_ref()
+            .map(|target| target.provider.clone()),
+        "windowTitle": capture_plan
+            .call_window
+            .as_ref()
+            .and_then(|target| target.window_title.clone()),
+        "windowId": capture_plan
+            .call_window
+            .as_ref()
+            .and_then(|target| target.window_id),
+        "windowBounds": capture_plan
+            .call_window
+            .as_ref()
+            .map(|target| target.bounds.clone()),
+        "sourceTrigger": source_trigger,
+        "recordingTime": recording_time,
     })
     .to_string();
 
@@ -356,7 +410,7 @@ async fn capture_and_store_screenshot<R: Runtime>(
         r#"
         INSERT INTO meeting_screenshots
             (id, meeting_id, captured_at, recording_time, file_path, display_label, status, redaction_status, source, created_at, updated_at, metadata_json)
-        VALUES (?, ?, ?, ?, ?, ?, 'captured', 'not_available', 'periodic', ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 'captured', 'not_available', ?, ?, ?, ?)
         "#,
     )
     .bind(&screenshot_id)
@@ -365,6 +419,7 @@ async fn capture_and_store_screenshot<R: Runtime>(
     .bind(recording_time)
     .bind(&file_path_string)
     .bind(&display_label)
+    .bind(source_trigger)
     .bind(&now)
     .bind(&now)
     .bind(&metadata_json)
@@ -382,7 +437,7 @@ async fn capture_and_store_screenshot<R: Runtime>(
         display_label,
         status: "captured".to_string(),
         redaction_status: "not_available".to_string(),
-        source: "periodic".to_string(),
+        source: source_trigger.to_string(),
     }))
 }
 
@@ -584,13 +639,21 @@ fn normalize_preferences(mut preferences: ScreenshotPreferences) -> ScreenshotPr
     preferences.interval_seconds = preferences
         .interval_seconds
         .clamp(MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS);
-    if preferences.capture_target != "fullScreen" {
-        preferences.capture_target = "fullScreen".to_string();
+    if preferences.capture_target != "fullScreen" && preferences.capture_target != "callWindow" {
+        preferences.capture_target = "callWindow".to_string();
     }
     if preferences.retention_days == 0 {
         preferences.retention_days = DEFAULT_RETENTION_DAYS;
     }
     preferences
+}
+
+fn default_capture_target() -> String {
+    if cfg!(target_os = "macos") {
+        "callWindow".to_string()
+    } else {
+        "fullScreen".to_string()
+    }
 }
 
 fn parse_recording_started_at(value: Option<&str>) -> Option<DateTime<Utc>> {
@@ -621,18 +684,330 @@ fn screenshot_file_path<R: Runtime>(
     Ok(folder.join(filename))
 }
 
+async fn build_capture_plan(
+    preferences: &ScreenshotPreferences,
+) -> Result<ScreenshotCapturePlan, String> {
+    if preferences.capture_target == "fullScreen" {
+        return Ok(ScreenshotCapturePlan {
+            capture_target: "fullScreen".to_string(),
+            call_window: None,
+        });
+    }
+
+    let call_window = detect_call_window_capture_target().await?;
+    Ok(ScreenshotCapturePlan {
+        capture_target: "callWindow".to_string(),
+        call_window: Some(call_window),
+    })
+}
+
 #[cfg(target_os = "macos")]
-async fn capture_screen_to_file(path: &Path) -> Result<(), String> {
+async fn detect_call_window_capture_target() -> Result<CallWindowCaptureTarget, String> {
+    tokio::task::spawn_blocking(macos_detect_call_window_capture_target)
+        .await
+        .map_err(|err| format!("Call-window detection task failed: {}", err))?
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn detect_call_window_capture_target() -> Result<CallWindowCaptureTarget, String> {
+    Err("Call-window screenshots are currently available on macOS only".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_detect_call_window_capture_target() -> Result<CallWindowCaptureTarget, String> {
+    let checked_at = Utc::now().to_rfc3339();
+    let output = run_osascript(
+        r#"tell application "System Events"
+set frontProcess to first application process whose frontmost is true
+set frontWindow to front window of frontProcess
+set windowPosition to position of frontWindow
+set windowSize to size of frontWindow
+return (name of frontProcess as text) & linefeed & (name of frontWindow as text) & linefeed & (item 1 of windowPosition as text) & "," & (item 2 of windowPosition as text) & "," & (item 1 of windowSize as text) & "," & (item 2 of windowSize as text)
+end tell"#,
+    )
+    .map_err(|err| user_facing_call_window_error(&err))?
+    .ok_or_else(|| "No active window is available for call-window capture".to_string())?;
+
+    let mut lines = output.lines();
+    let app_name = lines
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let window_title = lines
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let bounds_line = lines.next().ok_or_else(|| {
+        "Active window bounds were unavailable; skipped call-window screenshot".to_string()
+    })?;
+    let bounds = parse_window_bounds(bounds_line).ok_or_else(|| {
+        "Active window bounds were invalid; skipped call-window screenshot".to_string()
+    })?;
+    if !is_usable_window_bounds(&bounds) {
+        return Err("Active meeting window bounds were too small or invalid; skipped call-window screenshot".to_string());
+    }
+
+    let app_name_string = app_name.map(str::to_string);
+    let window_title_string = window_title.map(str::to_string);
+    let provider = detect_call_window_provider(app_name, window_title).ok_or_else(|| {
+        "No active supported meeting window was detected; skipped call-window screenshot"
+            .to_string()
+    })?;
+    let window_id = resolve_cg_window_id(app_name, window_title).ok_or_else(|| {
+        "Could not resolve active meeting window id; skipped call-window screenshot".to_string()
+    })?;
+
+    Ok(CallWindowCaptureTarget {
+        provider,
+        app_name: app_name_string,
+        window_title: window_title_string,
+        window_id: Some(window_id),
+        bounds,
+        checked_at,
+        permission_status: "available".to_string(),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn run_osascript(script: &str) -> Result<Option<String>, String> {
+    let output = std::process::Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .map_err(|error| format!("osascript failed: {}", error))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            return Ok(None);
+        }
+        return Err(stderr);
+    }
+
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(if value.is_empty() || value == "missing value" {
+        None
+    } else {
+        Some(value)
+    })
+}
+
+fn parse_window_bounds(value: &str) -> Option<ScreenshotWindowBounds> {
+    let values = value
+        .split(',')
+        .filter_map(|part| part.trim().parse::<i32>().ok())
+        .collect::<Vec<_>>();
+    if values.len() != 4 {
+        return None;
+    }
+    Some(ScreenshotWindowBounds {
+        x: values[0],
+        y: values[1],
+        width: values[2],
+        height: values[3],
+    })
+}
+
+fn is_usable_window_bounds(bounds: &ScreenshotWindowBounds) -> bool {
+    bounds.width >= 320 && bounds.height >= 180
+}
+
+fn detect_call_window_provider(
+    app_name: Option<&str>,
+    window_title: Option<&str>,
+) -> Option<String> {
+    let app = app_name.unwrap_or_default().to_lowercase();
+    let title = window_title.unwrap_or_default().to_lowercase();
+    let is_browser = contains_any(
+        &app,
+        &[
+            "google chrome",
+            "chrome",
+            "arc",
+            "safari",
+            "microsoft edge",
+            "firefox",
+        ],
+    );
+
+    if is_browser && contains_any(&title, &["meet.google.com", "google meet"]) {
+        Some("googleMeet".to_string())
+    } else if equals_any(&app, &["zoom.us", "zoom workplace", "zoom"])
+        || contains_any(&title, &["zoom.us", "zoom meeting", "zoom workplace"])
+    {
+        Some("zoom".to_string())
+    } else if equals_any(
+        &app,
+        &[
+            "microsoft teams",
+            "microsoft teams (work or school)",
+            "teams",
+        ],
+    ) || contains_any(
+        &title,
+        &[
+            "teams.microsoft.com",
+            "teams.live.com",
+            "microsoft teams",
+            "teams meeting",
+        ],
+    ) {
+        Some("teams".to_string())
+    } else if equals_any(&app, &["facetime"]) {
+        Some("facetime".to_string())
+    } else if equals_any(&app, &["webex", "cisco webex"])
+        || contains_any(&title, &["webex.com", "webex meeting"])
+    {
+        Some("webex".to_string())
+    } else if equals_any(&app, &["slack"])
+        && contains_any(&title, &["huddle", "call", "slack huddle", "slack call"])
+    {
+        Some("slack".to_string())
+    } else {
+        None
+    }
+}
+
+fn equals_any(value: &str, candidates: &[&str]) -> bool {
+    candidates.iter().any(|candidate| value == *candidate)
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_cg_window_id(app_name: Option<&str>, window_title: Option<&str>) -> Option<u32> {
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::CFString;
+    use core_graphics::window::{
+        copy_window_info, kCGNullWindowID, kCGWindowListOptionOnScreenOnly,
+    };
+
+    let app_name = app_name.unwrap_or_default();
+    let window_title = window_title.unwrap_or_default();
+    let windows = copy_window_info(kCGWindowListOptionOnScreenOnly, kCGNullWindowID)?;
+
+    let number_key = CFString::from_static_string("kCGWindowNumber");
+    let owner_key = CFString::from_static_string("kCGWindowOwnerName");
+    let name_key = CFString::from_static_string("kCGWindowName");
+    let layer_key = CFString::from_static_string("kCGWindowLayer");
+    let onscreen_key = CFString::from_static_string("kCGWindowIsOnscreen");
+
+    for raw_window in windows.get_all_values() {
+        let dictionary =
+            unsafe { CFDictionary::<CFString, CFType>::wrap_under_get_rule(raw_window as _) };
+        let layer = dictionary
+            .find(&layer_key)
+            .and_then(|value| value.downcast::<CFNumber>())
+            .and_then(|number| number.to_i32())
+            .unwrap_or(0);
+        if layer != 0 {
+            continue;
+        }
+        let is_onscreen = dictionary
+            .find(&onscreen_key)
+            .and_then(|value| value.downcast::<CFBoolean>())
+            .map(|value| value.into())
+            .unwrap_or(true);
+        if !is_onscreen {
+            continue;
+        }
+        let owner = dictionary
+            .find(&owner_key)
+            .and_then(|value| value.downcast::<CFString>())
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        let name = dictionary
+            .find(&name_key)
+            .and_then(|value| value.downcast::<CFString>())
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        if !window_identity_matches(app_name, window_title, &owner, &name) {
+            continue;
+        }
+        let Some(window_id) = dictionary
+            .find(&number_key)
+            .and_then(|value| value.downcast::<CFNumber>())
+            .and_then(|number| number.to_i32())
+            .and_then(|value| u32::try_from(value).ok())
+        else {
+            continue;
+        };
+        return Some(window_id);
+    }
+
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn resolve_cg_window_id(_app_name: Option<&str>, _window_title: Option<&str>) -> Option<u32> {
+    None
+}
+
+fn window_identity_matches(
+    active_app: &str,
+    active_title: &str,
+    candidate_owner: &str,
+    candidate_title: &str,
+) -> bool {
+    if !normalized_text_matches(active_app, candidate_owner) {
+        return false;
+    }
+    if active_title.trim().is_empty() {
+        return true;
+    }
+    normalized_text_matches(active_title, candidate_title)
+}
+
+fn normalized_text_matches(left: &str, right: &str) -> bool {
+    let left = left.trim().to_lowercase();
+    let right = right.trim().to_lowercase();
+    !left.is_empty() && !right.is_empty() && left == right
+}
+
+fn user_facing_call_window_error(error: &str) -> String {
+    let normalized = error.to_lowercase();
+    if normalized.contains("not authorized")
+        || normalized.contains("not permitted")
+        || normalized.contains("privacy")
+        || normalized.contains("accessibility")
+        || normalized.contains("automation")
+        || normalized.contains("-1743")
+    {
+        "Meetily needs macOS Accessibility permission to detect meeting window bounds before capturing call-window screenshots".to_string()
+    } else {
+        format!("Could not detect active meeting window bounds: {}", error)
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn capture_screen_to_file(
+    path: &Path,
+    capture_plan: &ScreenshotCapturePlan,
+) -> Result<(), String> {
     let path = path.to_path_buf();
+    let capture_target = capture_plan.capture_target.clone();
+    let window_id = capture_plan
+        .call_window
+        .as_ref()
+        .and_then(|target| target.window_id);
     tokio::task::spawn_blocking(move || {
-        let status = std::process::Command::new("/usr/sbin/screencapture")
-            .arg("-x")
+        let mut command = std::process::Command::new("/usr/sbin/screencapture");
+        command.arg("-x");
+        if let Some(window_id) = window_id {
+            command.arg("-o").arg("-l").arg(window_id.to_string());
+        }
+        let status = command
             .arg(&path)
             .status()
             .map_err(|err| format!("Failed to start macOS screenshot capture: {}", err))?;
 
         if status.success() {
             Ok(())
+        } else if capture_target == "callWindow" {
+            Err(format!(
+                "Call-window screenshot failed with status {}. Screen Recording permission may be missing, or the meeting window may no longer be available.",
+                status
+            ))
         } else {
             Err(format!(
                 "macOS screenshot capture failed with status {}",
@@ -645,7 +1020,10 @@ async fn capture_screen_to_file(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn capture_screen_to_file(_path: &Path) -> Result<(), String> {
+async fn capture_screen_to_file(
+    _path: &Path,
+    _capture_plan: &ScreenshotCapturePlan,
+) -> Result<(), String> {
     Err("Periodic screenshots are currently available on macOS only".to_string())
 }
 
@@ -785,7 +1163,7 @@ mod tests {
         let preferences = ScreenshotPreferences::default();
         assert!(!preferences.enabled);
         assert_eq!(preferences.interval_seconds, DEFAULT_INTERVAL_SECONDS);
-        assert_eq!(preferences.capture_target, "fullScreen");
+        assert_eq!(preferences.capture_target, "callWindow");
     }
 
     #[test]
@@ -799,8 +1177,71 @@ mod tests {
 
         assert!(preferences.enabled);
         assert_eq!(preferences.interval_seconds, MIN_INTERVAL_SECONDS);
-        assert_eq!(preferences.capture_target, "fullScreen");
+        assert_eq!(preferences.capture_target, "callWindow");
         assert_eq!(preferences.retention_days, DEFAULT_RETENTION_DAYS);
+    }
+
+    #[test]
+    fn detects_supported_call_window_provider() {
+        assert_eq!(
+            detect_call_window_provider(Some("Google Chrome"), Some("Google Meet - standup")),
+            Some("googleMeet".to_string())
+        );
+        assert_eq!(
+            detect_call_window_provider(Some("Microsoft Teams"), Some("Weekly Sync")),
+            Some("teams".to_string())
+        );
+        assert_eq!(
+            detect_call_window_provider(Some("Zoom Workplace"), Some("Zoom Meeting")),
+            Some("zoom".to_string())
+        );
+        assert_eq!(
+            detect_call_window_provider(Some("Google Chrome"), Some("Zoom pricing page")),
+            None
+        );
+        assert_eq!(
+            detect_call_window_provider(Some("Finder"), Some("Downloads")),
+            None
+        );
+    }
+
+    #[test]
+    fn window_identity_requires_matching_owner_and_title_when_available() {
+        assert!(window_identity_matches(
+            "Google Chrome",
+            "Google Meet - standup",
+            "Google Chrome",
+            "Google Meet - standup"
+        ));
+        assert!(!window_identity_matches(
+            "Google Chrome",
+            "Google Meet - standup",
+            "Google Chrome",
+            "Inbox"
+        ));
+        assert!(!window_identity_matches(
+            "Google Chrome",
+            "Google Meet - standup",
+            "Google Chrome",
+            ""
+        ));
+    }
+
+    #[test]
+    fn parses_and_validates_window_bounds() {
+        let bounds = parse_window_bounds("24,48,1280,720").expect("bounds");
+        assert_eq!(bounds.x, 24);
+        assert_eq!(bounds.y, 48);
+        assert_eq!(bounds.width, 1280);
+        assert_eq!(bounds.height, 720);
+        assert!(is_usable_window_bounds(&bounds));
+        assert!(!is_usable_window_bounds(&ScreenshotWindowBounds {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+        }));
+        assert!(parse_window_bounds("not,bounds").is_none());
     }
 
     #[test]

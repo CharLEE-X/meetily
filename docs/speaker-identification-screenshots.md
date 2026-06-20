@@ -49,6 +49,20 @@ Capture scope:
   because it would increase privacy risk, storage volume, review burden, and
   participant consent complexity.
 
+Call-window capture v1 manual checklist:
+
+* Google Meet in a supported browser: focus the Meet tab, start recording with
+  screenshots enabled, confirm the snapshot is cropped to the browser meeting
+  window and metadata includes provider, title, bounds, recording time, and
+  `periodic` source trigger.
+* Zoom desktop app: focus the active meeting window, start recording with
+  screenshots enabled, confirm the snapshot is cropped to Zoom and no fullscreen
+  image is created when the meeting window is not detectable.
+* Microsoft Teams desktop or browser: focus the call window, start recording
+  with screenshots enabled, confirm missing Accessibility or Screen Recording
+  permission shows a user-facing screenshots-unavailable status while audio
+  recording continues.
+
 Required metadata for each captured or skipped snapshot:
 
 | Field | Purpose |
