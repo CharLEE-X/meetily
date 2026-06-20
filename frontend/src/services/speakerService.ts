@@ -24,7 +24,25 @@ export interface SpeakerLabelingResult {
   meetingId: string;
   labels: SpeakerLabel[];
   segments: TranscriptSpeakerSegment[];
+  visualSuggestions: SpeakerLabelSuggestion[];
   strategy: string;
+}
+
+export interface SpeakerLabelSuggestion {
+  transcriptId: string;
+  displayName: string;
+  confidence: number;
+  startTime?: number | null;
+  endTime?: number | null;
+  source: string;
+  snapshotId: string;
+  provider?: string | null;
+  activeMarker: string;
+  autoApplied: boolean;
+}
+
+export interface SpeakerLabelingPreferences {
+  autoApplyVisualSuggestions: boolean;
 }
 
 export async function runSpeakerLabeling(meetingId: string): Promise<SpeakerLabelingResult> {
@@ -47,4 +65,14 @@ export async function updateSpeakerLabel(
   displayName: string,
 ): Promise<SpeakerLabel> {
   return invoke<SpeakerLabel>('update_speaker_label', { labelId, displayName });
+}
+
+export async function getSpeakerLabelingPreferences(): Promise<SpeakerLabelingPreferences> {
+  return invoke<SpeakerLabelingPreferences>('get_speaker_labeling_preferences');
+}
+
+export async function setSpeakerLabelingPreferences(
+  preferences: SpeakerLabelingPreferences,
+): Promise<SpeakerLabelingPreferences> {
+  return invoke<SpeakerLabelingPreferences>('set_speaker_labeling_preferences', { preferences });
 }

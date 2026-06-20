@@ -10,6 +10,11 @@ import {
   setScreenshotPreferences,
   ScreenshotPreferences,
 } from '@/services/screenshotService';
+import {
+  getSpeakerLabelingPreferences,
+  setSpeakerLabelingPreferences,
+  SpeakerLabelingPreferences,
+} from '@/services/speakerService';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -42,6 +47,10 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     retentionDays: 30,
   });
   const [savingScreenshotPreferences, setSavingScreenshotPreferences] = useState(false);
+  const [speakerPreferences, setLocalSpeakerPreferences] = useState<SpeakerLabelingPreferences>({
+    autoApplyVisualSuggestions: true,
+  });
+  const [savingSpeakerPreferences, setSavingSpeakerPreferences] = useState(false);
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -77,6 +86,18 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       }
     };
     loadScreenshotPreferences();
+  }, []);
+
+  useEffect(() => {
+    const loadSpeakerPreferences = async () => {
+      try {
+        const prefs = await getSpeakerLabelingPreferences();
+        setLocalSpeakerPreferences(prefs);
+      } catch (error) {
+        console.error('Failed to load speaker labeling preferences:', error);
+      }
+    };
+    loadSpeakerPreferences();
   }, []);
 
   // Load recording notification preference
@@ -191,6 +212,26 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     const next = { ...screenshotPreferences, captureMode: value };
     setLocalScreenshotPreferences(next);
     await saveScreenshotPreferences(next);
+  };
+
+  const saveSpeakerPreferences = async (prefs: SpeakerLabelingPreferences) => {
+    setSavingSpeakerPreferences(true);
+    try {
+      const saved = await setSpeakerLabelingPreferences(prefs);
+      setLocalSpeakerPreferences(saved);
+      toast.success('Speaker identification preferences saved');
+    } catch (error) {
+      console.error('Failed to save speaker labeling preferences:', error);
+      toast.error('Failed to save speaker identification preferences');
+    } finally {
+      setSavingSpeakerPreferences(false);
+    }
+  };
+
+  const handleSpeakerAutoApplyToggle = async (enabled: boolean) => {
+    const next = { ...speakerPreferences, autoApplyVisualSuggestions: enabled };
+    setLocalSpeakerPreferences(next);
+    await saveSpeakerPreferences(next);
   };
 
   const savePreferences = async (prefs: RecordingPreferences) => {
@@ -386,6 +427,22 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="flex items-center justify-between gap-4 p-4 border rounded-lg">
+        <div className="flex-1">
+          <div className="font-medium">Auto-apply Visual Speaker Labels</div>
+          <div className="max-w-2xl text-sm leading-6 text-gray-600">
+            Let Meetily use high-confidence call-window speaker cues to label transcript segments
+            automatically. Turn this off when you want screenshots to remain review evidence only
+            and prefer assigning or confirming speaker names manually after the meeting.
+          </div>
+        </div>
+        <Switch
+          checked={speakerPreferences.autoApplyVisualSuggestions}
+          onCheckedChange={handleSpeakerAutoApplyToggle}
+          disabled={savingSpeakerPreferences}
+        />
       </div>
 
       {/* Device Preferences */}

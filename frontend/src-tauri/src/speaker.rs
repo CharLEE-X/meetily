@@ -4,9 +4,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::Row;
 use std::collections::{BTreeMap, HashMap};
-use tauri::Runtime;
+use tauri::{AppHandle, Runtime};
+use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
 
+const SPEAKER_LABELING_STORE: &str = "speaker_labeling_preferences.json";
+const SPEAKER_LABELING_STORE_KEY: &str = "preferences";
 const SOURCE_HEURISTIC: &str = "heuristic";
 const SOURCE_LEGACY: &str = "legacy";
 const SOURCE_SCREENSHOT_NAME: &str = "screenshot_name";
@@ -18,6 +21,8 @@ const VISUAL_CUE_ALIGNMENT_WINDOW_SECONDS: f64 = 2.0;
 const VISUAL_CUE_DISTANCE_PENALTY: f64 = 0.08;
 const VISUAL_CUE_MIDPOINT_PENALTY: f64 = 0.01;
 const VISUAL_CUE_DOMINANT_MARGIN: f64 = 0.05;
+const VISUAL_CUE_REVIEW_CONFIDENCE: f64 = 0.7;
+const VISUAL_CUE_AUTO_APPLY_CONFIDENCE: f64 = 0.9;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,7 +54,37 @@ pub struct SpeakerLabelingResult {
     pub meeting_id: String,
     pub labels: Vec<SpeakerLabel>,
     pub segments: Vec<TranscriptSpeakerSegment>,
+    pub visual_suggestions: Vec<SpeakerLabelSuggestion>,
     pub strategy: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerLabelSuggestion {
+    pub transcript_id: String,
+    pub display_name: String,
+    pub confidence: f64,
+    pub start_time: Option<f64>,
+    pub end_time: Option<f64>,
+    pub source: String,
+    pub snapshot_id: String,
+    pub provider: Option<String>,
+    pub active_marker: String,
+    pub auto_applied: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerLabelingPreferences {
+    pub auto_apply_visual_suggestions: bool,
+}
+
+impl Default for SpeakerLabelingPreferences {
+    fn default() -> Self {
+        Self {
+            auto_apply_visual_suggestions: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +108,7 @@ struct SpeakerAssignment {
 #[derive(Debug, Clone, PartialEq)]
 struct VisualSpeakerCue {
     snapshot_id: String,
+    provider: Option<String>,
     recording_time: f64,
     extracted_name: String,
     active_marker: String,
@@ -81,16 +117,17 @@ struct VisualSpeakerCue {
 
 #[tauri::command]
 pub async fn run_speaker_labeling<R: Runtime>(
-    _app: tauri::AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
 ) -> Result<SpeakerLabelingResult, String> {
-    run_speaker_labeling_for_meeting(state.inner(), &meeting_id).await
+    let preferences = load_speaker_labeling_preferences(&app)?;
+    run_speaker_labeling_for_meeting(state.inner(), &meeting_id, &preferences).await
 }
 
 #[tauri::command]
 pub async fn get_speaker_labels<R: Runtime>(
-    _app: tauri::AppHandle<R>,
+    _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
 ) -> Result<SpeakerLabelingResult, String> {
@@ -99,7 +136,7 @@ pub async fn get_speaker_labels<R: Runtime>(
 
 #[tauri::command]
 pub async fn clear_speaker_labels<R: Runtime>(
-    _app: tauri::AppHandle<R>,
+    _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
     include_confirmed: Option<bool>,
@@ -142,7 +179,7 @@ pub async fn clear_speaker_labels<R: Runtime>(
 
 #[tauri::command]
 pub async fn update_speaker_label<R: Runtime>(
-    _app: tauri::AppHandle<R>,
+    _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     label_id: String,
     display_name: String,
@@ -259,16 +296,77 @@ pub async fn update_speaker_label<R: Runtime>(
     Ok(row_to_speaker_label(updated))
 }
 
+fn load_speaker_labeling_preferences<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<SpeakerLabelingPreferences, String> {
+    let store = app
+        .store(SPEAKER_LABELING_STORE)
+        .map_err(|err| format!("Failed to open speaker labeling preferences: {}", err))?;
+    let Some(value) = store.get(SPEAKER_LABELING_STORE_KEY) else {
+        return Ok(SpeakerLabelingPreferences::default());
+    };
+    match serde_json::from_value(value) {
+        Ok(preferences) => Ok(preferences),
+        Err(err) => {
+            log::warn!(
+                "Failed to read speaker labeling preferences; using defaults: {}",
+                err
+            );
+            Ok(SpeakerLabelingPreferences::default())
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_speaker_labeling_preferences<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<SpeakerLabelingPreferences, String> {
+    load_speaker_labeling_preferences(&app)
+}
+
+#[tauri::command]
+pub async fn set_speaker_labeling_preferences<R: Runtime>(
+    app: AppHandle<R>,
+    preferences: SpeakerLabelingPreferences,
+) -> Result<SpeakerLabelingPreferences, String> {
+    let saved_preferences = preferences.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let store = app
+            .store(SPEAKER_LABELING_STORE)
+            .map_err(|err| format!("Failed to open speaker labeling preferences: {}", err))?;
+        store.set(
+            SPEAKER_LABELING_STORE_KEY,
+            serde_json::to_value(&saved_preferences).map_err(|err| {
+                format!("Failed to serialize speaker labeling preferences: {}", err)
+            })?,
+        );
+        store
+            .save()
+            .map_err(|err| format!("Failed to save speaker labeling preferences: {}", err))?;
+        Ok(())
+    })
+    .await
+    .map_err(|err| format!("Failed to save speaker labeling preferences: {}", err))??;
+    Ok(preferences)
+}
+
 async fn run_speaker_labeling_for_meeting(
     state: &AppState,
     meeting_id: &str,
+    preferences: &SpeakerLabelingPreferences,
 ) -> Result<SpeakerLabelingResult, String> {
     let pool = state.db_manager.pool();
     let transcripts = load_transcripts_for_labeling(pool, meeting_id).await?;
     let visible_name_hint = load_visible_speaker_name_hint(pool, meeting_id).await?;
     let visual_cues = load_visual_speaker_cues(pool, meeting_id).await?;
-    let assignments =
-        derive_speaker_assignments(&transcripts, visible_name_hint.as_deref(), &visual_cues);
+    let assignments = derive_speaker_assignments(
+        &transcripts,
+        visible_name_hint.as_deref(),
+        &visual_cues,
+        preferences,
+    );
+    let visual_suggestions =
+        derive_visual_speaker_suggestions(&transcripts, &visual_cues, &assignments);
     let now = Utc::now().to_rfc3339();
 
     let mut tx = pool
@@ -396,7 +494,10 @@ async fn run_speaker_labeling_for_meeting(
         .await
         .map_err(|err| format!("Failed to commit speaker labels: {}", err))?;
 
-    load_speaker_labeling_result(state, meeting_id, "local_timing_and_source").await
+    let mut result =
+        load_speaker_labeling_result(state, meeting_id, "local_timing_and_source").await?;
+    result.visual_suggestions = visual_suggestions;
+    Ok(result)
 }
 
 fn row_to_speaker_label(row: sqlx::sqlite::SqliteRow) -> SpeakerLabel {
@@ -533,6 +634,10 @@ async fn load_visual_speaker_cues(
                 .and_then(Value::as_str)
                 .unwrap_or("visible-name")
                 .to_string();
+            let provider = item
+                .get("provider")
+                .and_then(Value::as_str)
+                .map(str::to_string);
             let confidence = item
                 .get("confidence")
                 .and_then(Value::as_f64)
@@ -540,6 +645,7 @@ async fn load_visual_speaker_cues(
                 .clamp(0.0, 1.0);
             cues.push(VisualSpeakerCue {
                 snapshot_id,
+                provider,
                 recording_time,
                 extracted_name,
                 active_marker,
@@ -589,54 +695,96 @@ async fn load_speaker_labeling_result(
     .await
     .map_err(|err| format!("Failed to load speaker segments: {}", err))?;
 
+    let labels = label_rows
+        .into_iter()
+        .map(|row| SpeakerLabel {
+            id: row.get("id"),
+            meeting_id: row.get("meeting_id"),
+            display_name: row.get("display_name"),
+            source: row.get("source"),
+            status: row.get("status"),
+            confidence: row.try_get("confidence").ok(),
+        })
+        .collect::<Vec<_>>();
+    let segments = segment_rows
+        .into_iter()
+        .map(|row| TranscriptSpeakerSegment {
+            id: row.get("id"),
+            meeting_id: row.get("meeting_id"),
+            transcript_id: row.get("transcript_id"),
+            speaker_label_id: row.get("speaker_label_id"),
+            start_time: row.try_get("start_time").ok(),
+            end_time: row.try_get("end_time").ok(),
+            source: row.get("source"),
+            confidence: row.try_get("confidence").ok(),
+        })
+        .collect::<Vec<_>>();
+    let visual_suggestions =
+        load_visual_speaker_suggestions(pool, meeting_id, &labels, &segments).await?;
+
     Ok(SpeakerLabelingResult {
         meeting_id: meeting_id.to_string(),
-        labels: label_rows
-            .into_iter()
-            .map(|row| SpeakerLabel {
-                id: row.get("id"),
-                meeting_id: row.get("meeting_id"),
-                display_name: row.get("display_name"),
-                source: row.get("source"),
-                status: row.get("status"),
-                confidence: row.try_get("confidence").ok(),
-            })
-            .collect(),
-        segments: segment_rows
-            .into_iter()
-            .map(|row| TranscriptSpeakerSegment {
-                id: row.get("id"),
-                meeting_id: row.get("meeting_id"),
-                transcript_id: row.get("transcript_id"),
-                speaker_label_id: row.get("speaker_label_id"),
-                start_time: row.try_get("start_time").ok(),
-                end_time: row.try_get("end_time").ok(),
-                source: row.get("source"),
-                confidence: row.try_get("confidence").ok(),
-            })
-            .collect(),
+        labels,
+        segments,
+        visual_suggestions,
         strategy: strategy.to_string(),
     })
+}
+
+async fn load_visual_speaker_suggestions(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    labels: &[SpeakerLabel],
+    segments: &[TranscriptSpeakerSegment],
+) -> Result<Vec<SpeakerLabelSuggestion>, String> {
+    let transcripts = load_transcripts_for_labeling(pool, meeting_id).await?;
+    let visual_cues = load_visual_speaker_cues(pool, meeting_id).await?;
+    let labels_by_id = labels
+        .iter()
+        .map(|label| (label.id.as_str(), label))
+        .collect::<HashMap<_, _>>();
+    let assignments = segments
+        .iter()
+        .filter_map(|segment| {
+            let label = labels_by_id.get(segment.speaker_label_id.as_str())?;
+            Some(SpeakerAssignment {
+                transcript_id: segment.transcript_id.clone(),
+                display_name: label.display_name.clone(),
+                source: segment.source.clone(),
+                confidence: segment.confidence.unwrap_or(0.0),
+                start_time: segment.start_time,
+                end_time: segment.end_time,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(derive_visual_speaker_suggestions(
+        &transcripts,
+        &visual_cues,
+        &assignments,
+    ))
 }
 
 fn derive_speaker_assignments(
     transcripts: &[TranscriptForLabeling],
     visible_name_hint: Option<&str>,
     visual_cues: &[VisualSpeakerCue],
+    preferences: &SpeakerLabelingPreferences,
 ) -> Vec<SpeakerAssignment> {
     transcripts
         .iter()
         .enumerate()
         .map(|(index, segment)| {
             let visual_cue = best_visual_cue_for_segment(segment, visual_cues);
-            if let Some(cue) =
-                visual_cue.filter(|cue| should_apply_visual_cue(segment, cue))
+            if let Some(cue) = visual_cue
+                .filter(|_| preferences.auto_apply_visual_suggestions)
+                .filter(|cue| effective_visual_cue_confidence(cue) >= VISUAL_CUE_REVIEW_CONFIDENCE)
+                .filter(|cue| should_apply_visual_cue(segment, cue))
             {
                 return SpeakerAssignment {
                     transcript_id: segment.id.clone(),
                     display_name: cue.extracted_name.clone(),
                     source: SOURCE_SCREENSHOT_NAME.to_string(),
-                    confidence: cue.confidence,
+                    confidence: effective_visual_cue_confidence(cue),
                     start_time: segment.audio_start_time,
                     end_time: segment.audio_end_time,
                 };
@@ -698,6 +846,47 @@ fn derive_speaker_assignments(
         .collect()
 }
 
+fn derive_visual_speaker_suggestions(
+    transcripts: &[TranscriptForLabeling],
+    visual_cues: &[VisualSpeakerCue],
+    assignments: &[SpeakerAssignment],
+) -> Vec<SpeakerLabelSuggestion> {
+    let assignments_by_transcript_id = assignments
+        .iter()
+        .map(|assignment| (assignment.transcript_id.as_str(), assignment))
+        .collect::<HashMap<_, _>>();
+
+    transcripts
+        .iter()
+        .filter_map(|segment| {
+            let cue = best_visual_cue_for_segment(segment, visual_cues)?;
+            let confidence = effective_visual_cue_confidence(cue);
+            if confidence < VISUAL_CUE_REVIEW_CONFIDENCE {
+                return None;
+            }
+            let auto_applied = assignments_by_transcript_id
+                .get(segment.id.as_str())
+                .map(|assignment| {
+                    assignment.source == SOURCE_SCREENSHOT_NAME
+                        && assignment.display_name == cue.extracted_name
+                })
+                .unwrap_or(false);
+            Some(SpeakerLabelSuggestion {
+                transcript_id: segment.id.clone(),
+                display_name: cue.extracted_name.clone(),
+                confidence,
+                start_time: segment.audio_start_time,
+                end_time: segment.audio_end_time,
+                source: SOURCE_SCREENSHOT_NAME.to_string(),
+                snapshot_id: cue.snapshot_id.clone(),
+                provider: cue.provider.clone(),
+                active_marker: cue.active_marker.clone(),
+                auto_applied,
+            })
+        })
+        .collect()
+}
+
 fn best_visual_cue_for_segment<'a>(
     segment: &TranscriptForLabeling,
     visual_cues: &'a [VisualSpeakerCue],
@@ -722,7 +911,7 @@ fn best_visual_cue_for_segment<'a>(
             // Screenshot cue recording_time and transcript audio times are both
             // recording-relative seconds from the same session start.
             let midpoint_distance = (cue.recording_time - midpoint).abs();
-            let score = (cue.confidence
+            let score = (effective_visual_cue_confidence(cue)
                 - distance * VISUAL_CUE_DISTANCE_PENALTY
                 - midpoint_distance * VISUAL_CUE_MIDPOINT_PENALTY)
                 .max(0.0);
@@ -730,16 +919,18 @@ fn best_visual_cue_for_segment<'a>(
         })
         .collect::<Vec<_>>();
 
-    ranked.sort_by(|(_, left_score, left_distance), (_, right_score, right_distance)| {
-        right_score
-            .partial_cmp(left_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                left_distance
-                    .partial_cmp(right_distance)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-    });
+    ranked.sort_by(
+        |(_, left_score, left_distance), (_, right_score, right_distance)| {
+            right_score
+                .partial_cmp(left_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    left_distance
+                        .partial_cmp(right_distance)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        },
+    );
 
     let (best, best_score, _) = ranked.first().copied()?;
     let best_name = best.extracted_name.to_lowercase();
@@ -764,7 +955,27 @@ fn should_apply_visual_cue(segment: &TranscriptForLabeling, cue: &VisualSpeakerC
     };
 
     is_microphone_source(&legacy_speaker)
-        || (cue.active_marker != "visible-name" && cue.confidence >= CONFIDENCE_LEGACY_SOURCE)
+        || (cue.active_marker != "visible-name"
+            && effective_visual_cue_confidence(cue) >= VISUAL_CUE_AUTO_APPLY_CONFIDENCE)
+}
+
+fn effective_visual_cue_confidence(cue: &VisualSpeakerCue) -> f64 {
+    (cue.confidence * visual_provider_reliability(cue.provider.as_deref())).clamp(0.0, 1.0)
+}
+
+fn visual_provider_reliability(provider: Option<&str>) -> f64 {
+    match provider
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase)
+        .as_deref()
+    {
+        Some(
+            "google-meet" | "zoom" | "microsoft-teams" | "teams" | "facetime" | "webex" | "slack",
+        ) => 1.0,
+        Some(_) => 0.9,
+        None => 0.85,
+    }
 }
 
 fn select_stable_visible_name(counts: HashMap<String, usize>) -> Option<String> {
@@ -905,6 +1116,7 @@ mod tests {
     fn visual_cue(name: &str, time: f64, confidence: f64) -> VisualSpeakerCue {
         VisualSpeakerCue {
             snapshot_id: format!("shot-{time}"),
+            provider: Some("google-meet".to_string()),
             recording_time: time,
             extracted_name: name.to_string(),
             active_marker: "caption-label".to_string(),
@@ -921,6 +1133,7 @@ mod tests {
             ],
             None,
             &[],
+            &SpeakerLabelingPreferences::default(),
         );
 
         assert_eq!(assignments[0].display_name, "Microphone");
@@ -938,6 +1151,7 @@ mod tests {
             ],
             None,
             &[],
+            &SpeakerLabelingPreferences::default(),
         );
 
         assert_eq!(assignments[0].display_name, "Speaker 1");
@@ -950,7 +1164,10 @@ mod tests {
 
     #[test]
     fn empty_transcripts_produce_no_assignments() {
-        assert!(derive_speaker_assignments(&[], None, &[]).is_empty());
+        assert!(
+            derive_speaker_assignments(&[], None, &[], &SpeakerLabelingPreferences::default())
+                .is_empty()
+        );
     }
 
     #[test]
@@ -968,6 +1185,7 @@ mod tests {
             &[transcript("a", Some(0.0), Some(1.0), Some("mic"))],
             Some("Adrian Witaszak"),
             &[],
+            &SpeakerLabelingPreferences::default(),
         );
 
         assert_eq!(assignments[0].display_name, "Adrian Witaszak");
@@ -989,6 +1207,7 @@ mod tests {
                 visual_cue("During Speaker", 11.0, 0.91),
                 visual_cue("After Speaker", 18.0, 0.92),
             ],
+            &SpeakerLabelingPreferences::default(),
         );
 
         assert_eq!(assignments[0].display_name, "Before Speaker");
@@ -1008,6 +1227,7 @@ mod tests {
                 visual_cue("Lower Confidence", 2.0, 0.7),
                 visual_cue("Higher Confidence", 2.2, 0.9),
             ],
+            &SpeakerLabelingPreferences::default(),
         );
         assert_eq!(assignments[0].display_name, "Higher Confidence");
 
@@ -1018,6 +1238,7 @@ mod tests {
                 visual_cue("First Speaker", 2.0, 0.9),
                 visual_cue("Second Speaker", 2.0, 0.91),
             ],
+            &SpeakerLabelingPreferences::default(),
         );
         assert_eq!(ambiguous[0].source, SOURCE_HEURISTIC);
     }
@@ -1031,6 +1252,7 @@ mod tests {
                 visual_cue("Same Speaker", 1.9, 0.9),
                 visual_cue("Same Speaker", 2.1, 0.9),
             ],
+            &SpeakerLabelingPreferences::default(),
         );
 
         assert_eq!(assignments[0].display_name, "Same Speaker");
@@ -1043,6 +1265,7 @@ mod tests {
             &[transcript("a", Some(1.0), Some(3.0), Some("mic"))],
             Some("Stable Name"),
             &[],
+            &SpeakerLabelingPreferences::default(),
         );
 
         assert_eq!(assignments[0].display_name, "Stable Name");
@@ -1056,15 +1279,86 @@ mod tests {
             None,
             &[VisualSpeakerCue {
                 snapshot_id: "shot-1".to_string(),
+                provider: Some("google-meet".to_string()),
                 recording_time: 2.0,
                 extracted_name: "Visible Person".to_string(),
                 active_marker: "visible-name".to_string(),
                 confidence: 0.65,
             }],
+            &SpeakerLabelingPreferences::default(),
         );
 
         assert_eq!(assignments[0].display_name, "System Audio");
         assert_eq!(assignments[0].source, SOURCE_LEGACY);
+    }
+
+    #[test]
+    fn review_only_preferences_do_not_apply_visual_suggestions() {
+        let assignments = derive_speaker_assignments(
+            &[transcript("a", Some(1.0), Some(3.0), None)],
+            None,
+            &[visual_cue("Visible Person", 2.0, 0.96)],
+            &SpeakerLabelingPreferences {
+                auto_apply_visual_suggestions: false,
+            },
+        );
+
+        assert_eq!(assignments[0].display_name, "Speaker 1");
+        assert_eq!(assignments[0].source, SOURCE_HEURISTIC);
+    }
+
+    #[test]
+    fn visual_suggestions_survive_review_only_mode() {
+        let transcripts = vec![transcript("a", Some(1.0), Some(3.0), None)];
+        let cues = vec![visual_cue("Visible Person", 2.0, 0.96)];
+        let assignments = derive_speaker_assignments(
+            &transcripts,
+            None,
+            &cues,
+            &SpeakerLabelingPreferences {
+                auto_apply_visual_suggestions: false,
+            },
+        );
+        let suggestions = derive_visual_speaker_suggestions(&transcripts, &cues, &assignments);
+
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].display_name, "Visible Person");
+        assert!(!suggestions[0].auto_applied);
+        assert_eq!(suggestions[0].transcript_id, "a");
+    }
+
+    #[test]
+    fn provider_reliability_can_demote_low_quality_visual_cues() {
+        let assignments = derive_speaker_assignments(
+            &[transcript("a", Some(1.0), Some(3.0), None)],
+            None,
+            &[VisualSpeakerCue {
+                snapshot_id: "shot-1".to_string(),
+                provider: Some("unknown-window".to_string()),
+                recording_time: 2.0,
+                extracted_name: "Visible Person".to_string(),
+                active_marker: "caption-label".to_string(),
+                confidence: 0.74,
+            }],
+            &SpeakerLabelingPreferences::default(),
+        );
+
+        assert_eq!(assignments[0].display_name, "Speaker 1");
+        assert_eq!(assignments[0].source, SOURCE_HEURISTIC);
+    }
+
+    #[test]
+    fn high_confidence_visual_cues_override_generic_legacy_labels() {
+        let assignments = derive_speaker_assignments(
+            &[transcript("a", Some(1.0), Some(3.0), Some("system"))],
+            None,
+            &[visual_cue("Visible Person", 2.0, 0.95)],
+            &SpeakerLabelingPreferences::default(),
+        );
+
+        assert_eq!(assignments[0].display_name, "Visible Person");
+        assert_eq!(assignments[0].source, SOURCE_SCREENSHOT_NAME);
+        assert!(assignments[0].confidence >= VISUAL_CUE_AUTO_APPLY_CONFIDENCE);
     }
 
     #[test]

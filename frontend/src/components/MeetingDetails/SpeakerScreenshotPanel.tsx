@@ -8,6 +8,7 @@ import {
   getSpeakerLabels,
   runSpeakerLabeling,
   SpeakerLabel,
+  SpeakerLabelSuggestion,
   TranscriptSpeakerSegment,
   updateSpeakerLabel,
 } from '@/services/speakerService';
@@ -28,6 +29,7 @@ export function SpeakerScreenshotPanel({
 }: SpeakerScreenshotPanelProps) {
   const [labels, setLabels] = useState<SpeakerLabel[]>([]);
   const [segments, setSegments] = useState<TranscriptSpeakerSegment[]>([]);
+  const [visualSuggestions, setVisualSuggestions] = useState<SpeakerLabelSuggestion[]>([]);
   const [screenshots, setScreenshots] = useState<MeetingScreenshot[]>([]);
   const [loadingSpeakers, setLoadingSpeakers] = useState(false);
   const [savingLabelId, setSavingLabelId] = useState<string | null>(null);
@@ -58,6 +60,7 @@ export function SpeakerScreenshotPanel({
       const result = await getSpeakerLabels(meetingId);
       setLabels(result.labels);
       setSegments(result.segments);
+      setVisualSuggestions(result.visualSuggestions ?? []);
       setDraftNames(
         result.labels.reduce<Record<string, string>>((acc, label) => {
           acc[label.id] = label.displayName;
@@ -91,6 +94,7 @@ export function SpeakerScreenshotPanel({
       const result = await runSpeakerLabeling(meetingId);
       setLabels(result.labels);
       setSegments(result.segments);
+      setVisualSuggestions(result.visualSuggestions ?? []);
       setDraftNames(
         result.labels.reduce<Record<string, string>>((acc, label) => {
           acc[label.id] = label.displayName;
@@ -202,6 +206,42 @@ export function SpeakerScreenshotPanel({
             ))}
           </div>
         )}
+
+        {visualSuggestions.length > 0 ? (
+          <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2">
+            <div className="text-xs font-semibold text-emerald-900">Visual speaker suggestions</div>
+            <p className="mt-1 text-[11px] leading-5 text-emerald-800">
+              These call-window cues can guide manual review when auto-apply is off or when you want
+              to verify labels before confirming them.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {visualSuggestions.slice(0, 6).map((suggestion) => (
+                <span
+                  key={`${suggestion.transcriptId}-${suggestion.snapshotId}`}
+                  className="inline-flex max-w-full items-center gap-1 rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[11px] font-medium text-emerald-900"
+                  title={[
+                    suggestion.provider,
+                    suggestion.activeMarker,
+                    `${Math.round(suggestion.confidence * 100)}% confidence`,
+                    suggestion.autoApplied ? 'auto-applied' : 'review-only',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                >
+                  <span className="truncate">{suggestion.displayName}</span>
+                  <span className="text-emerald-600">
+                    {Math.round(suggestion.confidence * 100)}%
+                  </span>
+                </span>
+              ))}
+              {visualSuggestions.length > 6 ? (
+                <span className="text-[11px] font-medium text-emerald-700">
+                  +{visualSuggestions.length - 6} more
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section>
