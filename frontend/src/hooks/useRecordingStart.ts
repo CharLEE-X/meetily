@@ -14,6 +14,7 @@ import {
   clearSelectedCalendarEventForRecording,
   getSelectedCalendarEventForRecording,
 } from '@/services/meetingDetectionService';
+import { recordRecordingAuditEvent } from '@/services/recordingAuditService';
 
 interface UseRecordingStartReturn {
   handleRecordingStart: (candidate?: MeetingJoinCandidate) => Promise<void>;
@@ -147,6 +148,26 @@ export function useRecordingStart(
         meetingName
       );
       console.log('Backend recording started successfully');
+      recordRecordingAuditEvent({
+        type: 'recording_started_with_scope',
+        actor: 'user',
+        metadata: {
+          meetingSource: recordingCandidate?.source ?? 'manual',
+          provider: recordingCandidate?.provider ?? 'manual',
+          reviewRequired: true,
+        },
+      });
+      if (recordingCandidate) {
+        recordRecordingAuditEvent({
+          type: 'calendar_context_attached',
+          actor: 'recording-assistant',
+          metadata: {
+            source: recordingCandidate.source,
+            provider: recordingCandidate.provider,
+            reviewRequired: true,
+          },
+        });
+      }
 
       // Update state after successful backend start
       // Note: RECORDING status will be set by RecordingStateContext event listener
@@ -220,6 +241,15 @@ export function useRecordingStart(
               generatedMeetingTitle
             );
             console.log('Auto-start backend recording result:', result);
+            recordRecordingAuditEvent({
+              type: 'recording_started_with_scope',
+              actor: 'recording-assistant',
+              metadata: {
+                meetingSource: 'sidebar_auto',
+                provider: 'manual',
+                reviewRequired: true,
+              },
+            });
 
             // Update UI state after successful backend start
             // Note: RECORDING status will be set by RecordingStateContext event listener

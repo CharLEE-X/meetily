@@ -15,6 +15,7 @@ import { CalendarSettings } from '@/components/CalendarSettings';
 import { ReminderSettings } from '@/components/ReminderSettings';
 import { AppleNotesSettings } from '@/components/AppleNotesSettings';
 import { SummaryTemplateSettings } from '@/components/SummaryTemplateSettings';
+import { RecordingAuditTrail } from '@/components/RecordingAuditTrail';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
@@ -195,6 +196,9 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="recording">
               <RecordingSettings />
+              <div className="mt-6">
+                <RecordingAuditTrail limit={10} />
+              </div>
             </TabsContent>
             <TabsContent value="Transcriptionmodels">
               <TranscriptSettings

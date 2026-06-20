@@ -31,6 +31,7 @@ import {
 } from '@/services/meetingDetectionService';
 import { getScreenshotPreferences, ScreenshotPreferences } from '@/services/screenshotService';
 import { getSpeakerLabelingPreferences, SpeakerLabelingPreferences } from '@/services/speakerService';
+import { recordRecordingAuditEvent } from '@/services/recordingAuditService';
 
 interface HomeDashboardProps {
   meetings: Array<{ id: string; title: string }>;
@@ -68,6 +69,7 @@ function HomeDashboard({
   const [selectedCalendarEvent, setSelectedCalendarEvent] = useState<ApprovedCalendarEvent | null>(null);
   const [screenshotPreferences, setScreenshotPreferences] = useState<ScreenshotPreferences | null>(null);
   const [speakerPreferences, setSpeakerPreferences] = useState<SpeakerLabelingPreferences | null>(null);
+  const [preflightAudited, setPreflightAudited] = useState(false);
 
   const refreshPreflightState = useCallback(() => {
     setSelectedCalendarEvent(getSelectedCalendarEventForRecording());
@@ -97,6 +99,24 @@ function HomeDashboard({
       window.removeEventListener('storage', handleRefresh);
     };
   }, [refreshPreflightState]);
+
+  useEffect(() => {
+    if (preflightAudited || !screenshotPreferences || !speakerPreferences) {
+      return;
+    }
+
+    recordRecordingAuditEvent({
+      type: 'recording_preflight_shown',
+      actor: 'recording-assistant',
+      metadata: {
+        source: selectedCalendarEvent ? 'calendar' : 'manual',
+        captureTarget: screenshotPreferences?.captureTarget ?? 'callWindow',
+        captureMode: screenshotPreferences?.enabled ? screenshotPreferences.captureMode : 'manualOnly',
+        autoApplyVisualSuggestions: speakerPreferences?.autoApplyVisualSuggestions ?? false,
+      },
+    });
+    setPreflightAudited(true);
+  }, [preflightAudited, selectedCalendarEvent, screenshotPreferences, speakerPreferences]);
 
   const setupItems = [
     {

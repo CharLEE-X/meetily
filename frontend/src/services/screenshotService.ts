@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { recordRecordingAuditEvent } from './recordingAuditService';
 
 export interface ScreenshotPreferences {
   enabled: boolean;
@@ -42,35 +43,79 @@ export async function getScreenshotPreferences(): Promise<ScreenshotPreferences>
 export async function setScreenshotPreferences(
   preferences: ScreenshotPreferences,
 ): Promise<ScreenshotPreferences> {
-  return invoke<ScreenshotPreferences>('set_screenshot_preferences', { preferences });
+  const saved = await invoke<ScreenshotPreferences>('set_screenshot_preferences', { preferences });
+  recordRecordingAuditEvent({
+    type: saved.enabled ? 'screenshot_capture_enabled' : 'screenshot_capture_disabled',
+    actor: 'settings',
+    metadata: {
+      enabled: saved.enabled,
+      captureTarget: saved.captureTarget,
+      captureMode: saved.captureMode,
+    },
+  });
+  return saved;
 }
 
 export async function startMeetingScreenshotCapture(
   meetingId: string,
   recordingStartedAt?: string | null,
 ): Promise<ScreenshotCaptureStatus> {
-  return invoke<ScreenshotCaptureStatus>('start_meeting_screenshot_capture', {
+  const status = await invoke<ScreenshotCaptureStatus>('start_meeting_screenshot_capture', {
     meetingId,
     recordingStartedAt,
   });
+  recordRecordingAuditEvent({
+    type: 'screenshot_capture_started',
+    meetingId,
+    actor: 'recording-assistant',
+    metadata: {
+      enabled: status.enabled,
+      status: status.active ? 'active' : 'inactive',
+    },
+  });
+  return status;
 }
 
 export async function stopMeetingScreenshotCapture(
   meetingId: string,
 ): Promise<ScreenshotCaptureStatus> {
-  return invoke<ScreenshotCaptureStatus>('stop_meeting_screenshot_capture', { meetingId });
+  const status = await invoke<ScreenshotCaptureStatus>('stop_meeting_screenshot_capture', { meetingId });
+  recordRecordingAuditEvent({
+    type: 'screenshot_capture_stopped',
+    meetingId,
+    actor: 'recording-assistant',
+    metadata: {
+      enabled: status.enabled,
+      status: status.active ? 'active' : 'inactive',
+    },
+  });
+  return status;
 }
 
 export async function pauseMeetingScreenshotCapture(
   meetingId: string,
 ): Promise<ScreenshotCaptureStatus> {
-  return invoke<ScreenshotCaptureStatus>('pause_meeting_screenshot_capture', { meetingId });
+  const status = await invoke<ScreenshotCaptureStatus>('pause_meeting_screenshot_capture', { meetingId });
+  recordRecordingAuditEvent({
+    type: 'screenshot_capture_paused',
+    meetingId,
+    actor: 'user',
+    metadata: { status: status.active ? 'active' : 'inactive' },
+  });
+  return status;
 }
 
 export async function resumeMeetingScreenshotCapture(
   meetingId: string,
 ): Promise<ScreenshotCaptureStatus> {
-  return invoke<ScreenshotCaptureStatus>('resume_meeting_screenshot_capture', { meetingId });
+  const status = await invoke<ScreenshotCaptureStatus>('resume_meeting_screenshot_capture', { meetingId });
+  recordRecordingAuditEvent({
+    type: 'screenshot_capture_resumed',
+    meetingId,
+    actor: 'user',
+    metadata: { status: status.active ? 'active' : 'inactive' },
+  });
+  return status;
 }
 
 export async function triggerMeetingScreenshotCapture(
@@ -78,11 +123,18 @@ export async function triggerMeetingScreenshotCapture(
   recordingStartedAt?: string | null,
   triggerReason: 'speechEvent' | 'speakerChange' = 'speechEvent',
 ): Promise<ScreenshotCaptureStatus> {
-  return invoke<ScreenshotCaptureStatus>('trigger_meeting_screenshot_capture', {
+  const status = await invoke<ScreenshotCaptureStatus>('trigger_meeting_screenshot_capture', {
     meetingId,
     recordingStartedAt,
     triggerReason,
   });
+  recordRecordingAuditEvent({
+    type: 'screenshot_capture_triggered',
+    meetingId,
+    actor: 'recording-assistant',
+    metadata: { triggerReason, status: status.active ? 'active' : 'inactive' },
+  });
+  return status;
 }
 
 export async function captureMeetingScreenshotNow(
@@ -104,7 +156,20 @@ export async function deleteMeetingScreenshot(
   deleteFile = true,
   removeMetadata = true,
 ): Promise<void> {
-  return invoke<void>('delete_meeting_screenshot', { screenshotId, deleteFile, removeMetadata });
+  await invoke<void>('delete_meeting_screenshot', { screenshotId, deleteFile, removeMetadata });
+  recordRecordingAuditEvent({
+    type: 'screenshot_images_deleted',
+    actor: 'user',
+    metadata: {
+      action: removeMetadata && deleteFile
+        ? 'delete-metadata-and-image'
+        : removeMetadata
+          ? 'delete-metadata'
+          : deleteFile
+            ? 'delete-image'
+            : 'delete-record',
+    },
+  });
 }
 
 export async function attachMeetingScreenshots(

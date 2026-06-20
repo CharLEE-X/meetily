@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { recordRecordingAuditEvent } from './recordingAuditService';
 
 export interface SpeakerLabel {
   id: string;
@@ -64,7 +65,13 @@ export async function clearSpeakerLabels(
   meetingId: string,
   includeConfirmed = false,
 ): Promise<void> {
-  return invoke<void>('clear_speaker_labels', { meetingId, includeConfirmed });
+  await invoke<void>('clear_speaker_labels', { meetingId, includeConfirmed });
+  recordRecordingAuditEvent({
+    type: 'speaker_labels_cleared',
+    meetingId,
+    actor: 'user',
+    metadata: { includeConfirmed },
+  });
 }
 
 export async function updateSpeakerLabel(
@@ -108,5 +115,14 @@ export async function getSpeakerLabelingPreferences(): Promise<SpeakerLabelingPr
 export async function setSpeakerLabelingPreferences(
   preferences: SpeakerLabelingPreferences,
 ): Promise<SpeakerLabelingPreferences> {
-  return invoke<SpeakerLabelingPreferences>('set_speaker_labeling_preferences', { preferences });
+  const saved = await invoke<SpeakerLabelingPreferences>('set_speaker_labeling_preferences', { preferences });
+  recordRecordingAuditEvent({
+    type: saved.autoApplyVisualSuggestions ? 'speaker_labeling_enabled' : 'speaker_labeling_disabled',
+    actor: 'settings',
+    metadata: {
+      autoApplyVisualSuggestions: saved.autoApplyVisualSuggestions,
+      reviewRequired: !saved.autoApplyVisualSuggestions,
+    },
+  });
+  return saved;
 }

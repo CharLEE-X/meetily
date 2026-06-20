@@ -12,6 +12,7 @@ import { ReminderDraftReview } from './ReminderDraftReview';
 import { AppleNotesExportPanel } from './AppleNotesExportPanel';
 import { CalendarEventPanel } from './CalendarEventPanel';
 import { AgentWorkflowRunsPanel } from '@/components/AgentWorkflowRunsPanel';
+import { RecordingAuditTrail } from '@/components/RecordingAuditTrail';
 import { MeetingChatPanel } from './MeetingChatPanel';
 import { MeetingChatCitation } from '@/services/meetingChatService';
 import Analytics from '@/lib/analytics';
@@ -551,6 +552,9 @@ export function SummaryPanel({
             <div className="mt-3">
               <AgentWorkflowRunsPanel meetingId={meeting.id} limit={4} />
             </div>
+          </div>
+          <div className="mx-6 mb-6 mt-2">
+            <RecordingAuditTrail meetingId={meeting.id} limit={6} compact />
           </div>
           {summaryStatus !== 'idle' && (
             <div className={`mx-6 mb-6 mt-2 rounded-2xl border p-4 ${summaryStatus === 'error' ? 'border-red-200 bg-red-50 text-red-700' :
