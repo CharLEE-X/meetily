@@ -10,6 +10,7 @@ import { CalendarEvent, CalendarSyncRequest, CalendarSyncResult, calendarService
 
 export type MeetingDetectionMode = 'disabled' | 'prompt' | 'autoOpen';
 export type MeetingProvider = 'google-meet' | 'zoom' | 'teams' | 'slack' | 'unknown';
+export type MeetingDetectionRecommendedAction = 'none' | 'open-meeting' | 'start-recording' | 'review-setup';
 
 export interface MeetingDetectionSettings {
   mode: MeetingDetectionMode;
@@ -56,6 +57,9 @@ export interface MeetingJoinCandidate {
   isActive: boolean;
   confidence?: number;
   reasons?: string[];
+  recommendedAction?: MeetingDetectionRecommendedAction;
+  missingPermissions?: string[];
+  degradedMode?: boolean;
 }
 
 const SETTINGS_KEY = 'meetily.meetingDetectionSettings';
@@ -274,6 +278,11 @@ export function buildMeetingCandidateFromEvent(event: ApprovedCalendarEvent, now
   const endMs = Date.parse(event.endAt);
   const safeStartMs = Number.isFinite(startMs) ? startMs : now.getTime();
   const safeEndMs = Number.isFinite(endMs) ? endMs : safeStartMs;
+  const confidence = meetingUrl ? (safeStartMs <= now.getTime() && now.getTime() <= safeEndMs ? 80 : 70) : 40;
+  const reasons = [
+    'Approved calendar event',
+    ...(meetingUrl ? ['Meeting link available'] : ['No meeting link detected']),
+  ];
 
   return {
     id: meetingUrl ? candidateId(event, meetingUrl) : `${event.calendarId}:${event.id}:selected`,
@@ -289,6 +298,11 @@ export function buildMeetingCandidateFromEvent(event: ApprovedCalendarEvent, now
     source: event.source,
     minutesUntilStart: Math.round((safeStartMs - now.getTime()) / 60000),
     isActive: safeStartMs <= now.getTime() && now.getTime() <= safeEndMs,
+    confidence,
+    reasons,
+    recommendedAction: meetingUrl ? 'open-meeting' : 'review-setup',
+    missingPermissions: [],
+    degradedMode: false,
   };
 }
 

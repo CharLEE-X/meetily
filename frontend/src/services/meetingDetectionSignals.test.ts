@@ -32,6 +32,7 @@ test('scores active Teams window plus active mic as high confidence', () => {
   assert.equal(result.isLikelyMeeting, true);
   assert.equal(result.provider, 'teams');
   assert.ok(result.confidence >= 80);
+  assert.equal(result.recommendedAction, 'start-recording');
   assert.ok(result.reasons.includes('Active meeting window'));
   assert.ok(result.reasons.includes('Microphone activity'));
 });
@@ -59,6 +60,31 @@ test('builds openable ambient candidate from active browser meeting URL', () => 
   assert.equal(candidate.provider, 'google-meet');
   assert.equal(candidate.meetingUrl, 'https://meet.google.com/abc-defg-hij');
   assert.equal(candidate.source, 'ambient');
+  assert.equal(candidate.recommendedAction, 'open-meeting');
+});
+
+test('scores calendar-only upcoming call as open-meeting candidate', () => {
+  const result = scoreMeetingActivitySignals({
+    activeAppName: null,
+    activeWindowTitle: null,
+    runningApps: [],
+    browserTabs: [],
+    micActivity: { isActive: false, peakLevel: 0, rmsLevel: 0 },
+    checkedAt: now.toISOString(),
+    calendarContext: {
+      isActive: false,
+      minutesUntilStart: 10,
+      hasMeetingUrl: true,
+      provider: 'google-meet',
+    },
+  });
+
+  assert.equal(result.isLikelyMeeting, true);
+  assert.equal(result.provider, 'google-meet');
+  assert.equal(result.confidence, 65);
+  assert.equal(result.recommendedAction, 'open-meeting');
+  assert.ok(result.reasons.includes('Approved calendar event'));
+  assert.ok(result.reasons.includes('Calendar meeting link'));
 });
 
 test('scores Slack huddle from active window metadata and exposes window bounds', () => {
@@ -75,6 +101,7 @@ test('scores Slack huddle from active window metadata and exposes window bounds'
 
   assert.equal(result.isLikelyMeeting, true);
   assert.equal(result.provider, 'slack');
+  assert.equal(result.recommendedAction, 'start-recording');
   assert.ok(result.reasons.includes('Active meeting window'));
 });
 
@@ -97,6 +124,9 @@ test('reports degraded permission state without making process-only signals elig
   assert.equal(result.isLikelyMeeting, false);
   assert.equal(result.provider, 'unknown');
   assert.ok(result.confidence < 65);
+  assert.equal(result.recommendedAction, 'none');
+  assert.deepEqual(result.missingPermissions, ['accessibility', 'browserAutomation']);
+  assert.equal(result.degradedMode, true);
   assert.ok(result.reasons.includes('Limited by missing permissions'));
 });
 

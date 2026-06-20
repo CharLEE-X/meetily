@@ -1,4 +1,8 @@
-import type { MeetingJoinCandidate, MeetingProvider } from './meetingDetectionService';
+import type {
+  MeetingDetectionRecommendedAction,
+  MeetingJoinCandidate,
+  MeetingProvider,
+} from './meetingDetectionService';
 
 export interface BrowserMeetingSignal {
   browser: string;
@@ -15,6 +19,19 @@ export interface MicActivitySignal {
   isActive: boolean;
   peakLevel: number;
   rmsLevel: number;
+}
+
+export interface SystemAudioActivitySignal {
+  isActive: boolean;
+  peakLevel: number;
+  rmsLevel: number;
+}
+
+export interface CalendarMeetingSignal {
+  isActive: boolean;
+  minutesUntilStart: number;
+  hasMeetingUrl: boolean;
+  provider: MeetingProvider;
 }
 
 export type SignalPermissionStatus = 'available' | 'limited' | 'denied' | 'unknown';
@@ -42,6 +59,8 @@ export interface NativeMeetingActivitySignals {
 
 export interface MeetingActivitySignals extends NativeMeetingActivitySignals {
   micActivity?: MicActivitySignal | null;
+  systemAudioActivity?: SystemAudioActivitySignal | null;
+  calendarContext?: CalendarMeetingSignal | null;
 }
 
 export interface MeetingActivityScore {
@@ -51,6 +70,9 @@ export interface MeetingActivityScore {
   title: string;
   meetingUrl: string | null;
   reasons: string[];
+  missingPermissions: string[];
+  degradedMode: boolean;
+  recommendedAction: MeetingDetectionRecommendedAction;
 }
 
 export interface AmbientMeetingDetectionOptions {
@@ -86,6 +108,21 @@ function clampScore(score: number): number {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
+function recommendedActionForScore(
+  confidence: number,
+  hasOpenableMeetingLink: boolean,
+  hasStrongSignal: boolean,
+  hasAudioActivity: boolean,
+  degradedMode: boolean
+): MeetingDetectionRecommendedAction {
+  if (confidence < 40) return 'none';
+  if (confidence < 65) return 'review-setup';
+  if (degradedMode && !hasStrongSignal) return 'review-setup';
+  if (confidence >= 80 && hasStrongSignal && hasAudioActivity) return 'start-recording';
+  if (hasOpenableMeetingLink) return 'open-meeting';
+  return 'review-setup';
+}
+
 export function detectMeetingProviderFromText(text: string | null | undefined): MeetingProvider {
   const normalized = normalize(text);
   if (normalized.includes('slack') && (normalized.includes('huddle') || normalized.includes('call'))) {
@@ -116,6 +153,19 @@ function detectProviderFromBrowserSignals(tabs: BrowserMeetingSignal[]): Meeting
     if (provider !== 'unknown') return provider;
   }
   return 'unknown';
+}
+
+function appNameMatchesProvider(appName: string | null | undefined, provider: MeetingProvider): boolean {
+  const normalized = normalize(appName);
+  if (!normalized || provider === 'unknown') return false;
+  if (provider === 'google-meet') {
+    return ['google chrome', 'chrome', 'arc', 'safari', 'microsoft edge', 'msedge', 'firefox']
+      .some((term) => normalized.includes(term));
+  }
+  if (provider === 'teams') return normalized.includes('teams');
+  if (provider === 'zoom') return normalized.includes('zoom');
+  if (provider === 'slack') return normalized.includes('slack');
+  return false;
 }
 
 function extractMeetingUrlFromSignals(signals: MeetingActivitySignals): string | null {
@@ -163,8 +213,15 @@ export function scoreMeetingActivitySignals(
   const textProvider = detectMeetingProviderFromText(textHaystack);
   const browserProvider = detectProviderFromBrowserSignals(signals.browserTabs);
   const processProvider = detectProviderFromProcesses([signals.activeAppName ?? '', ...signals.runningApps]);
+  const calendarProvider = signals.calendarContext?.provider ?? 'unknown';
   const hasDegradedPermissions = signals.degradedMode || (signals.missingPermissions?.length ?? 0) > 0;
-  let provider = textProvider !== 'unknown' ? textProvider : browserProvider !== 'unknown' ? browserProvider : processProvider;
+  let provider = textProvider !== 'unknown'
+    ? textProvider
+    : browserProvider !== 'unknown'
+      ? browserProvider
+      : calendarProvider !== 'unknown'
+        ? calendarProvider
+        : processProvider;
   const reasons: string[] = [];
   let confidence = 0;
 
@@ -172,6 +229,10 @@ export function scoreMeetingActivitySignals(
   if (activeWindowProvider !== 'unknown') {
     confidence += 45;
     reasons.push('Active meeting window');
+    if (appNameMatchesProvider(signals.activeAppName, activeWindowProvider)) {
+      confidence += 10;
+      reasons.push('Focused provider app matches window');
+    }
   }
 
   const activeBrowserMeeting = signals.browserTabs.some((tab) => tab.isActive && (
@@ -199,7 +260,26 @@ export function scoreMeetingActivitySignals(
     reasons.push('Microphone activity');
   }
 
-  const hasStrongSignal = activeWindowProvider !== 'unknown' || activeBrowserMeeting || Boolean(meetingUrl);
+  if (signals.systemAudioActivity?.isActive) {
+    confidence += 20;
+    reasons.push('System audio activity');
+  }
+
+  if (signals.calendarContext) {
+    confidence += signals.calendarContext.isActive ? 35 : 30;
+    reasons.push('Approved calendar event');
+    if (signals.calendarContext.hasMeetingUrl) {
+      confidence += 35;
+      reasons.push('Calendar meeting link');
+    }
+  }
+
+  const hasCalendarContext = Boolean(signals.calendarContext);
+  const hasStrongSignal = activeWindowProvider !== 'unknown' || activeBrowserMeeting || Boolean(meetingUrl) || hasCalendarContext;
+  if (!hasStrongSignal) {
+    confidence = Math.min(confidence, 64);
+  }
+
   if (hasDegradedPermissions) {
     reasons.push(`Limited by missing permission${signals.missingPermissions?.length === 1 ? '' : 's'}`);
     if (!hasStrongSignal) {
@@ -214,13 +294,25 @@ export function scoreMeetingActivitySignals(
   }
 
   const finalConfidence = clampScore(confidence);
+  const degradedMode = Boolean(hasDegradedPermissions);
+  const hasOpenableMeetingLink = Boolean(meetingUrl || signals.calendarContext?.hasMeetingUrl);
+  const recommendedAction = recommendedActionForScore(
+    finalConfidence,
+    hasOpenableMeetingLink,
+    hasStrongSignal,
+    Boolean(signals.micActivity?.isActive || signals.systemAudioActivity?.isActive),
+    degradedMode
+  );
   return {
-    isLikelyMeeting: provider !== 'unknown' && finalConfidence >= settings.minimumConfidence,
+    isLikelyMeeting: provider !== 'unknown' && finalConfidence >= settings.minimumConfidence && recommendedAction !== 'none',
     confidence: finalConfidence,
     provider,
     title: titleFromSignals(signals, provider),
     meetingUrl,
     reasons,
+    missingPermissions: signals.missingPermissions ?? [],
+    degradedMode,
+    recommendedAction,
   };
 }
 
@@ -257,5 +349,8 @@ export function buildAmbientMeetingCandidate(
     isActive: true,
     confidence: score.confidence,
     reasons: score.reasons,
+    recommendedAction: score.recommendedAction,
+    missingPermissions: score.missingPermissions,
+    degradedMode: score.degradedMode,
   };
 }
