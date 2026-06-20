@@ -1,50 +1,40 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Bot, Clock3, FileText, Loader2, MessageCircle, RefreshCw, Send, Square, User, Workflow } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { AlertCircle, Bot, FileText, Loader2, MessageCircle, RefreshCw, Send, Square, User } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { ModelConfig } from '@/components/ModelSettingsModal';
+import { useConfig } from '@/contexts/ConfigContext';
 import {
+  globalSummaryChatService,
   listenToMeetingChatStream,
   MeetingChatCitation,
   MeetingChatMessage,
-  meetingChatService,
 } from '@/services/meetingChatService';
 
 const SUGGESTED_QUESTIONS = [
-  'What follow-up actions came out of this meeting?',
-  'What decisions did we make?',
-  'What risks or blockers were mentioned?',
-  'What did we say about the timeline?',
+  'What are my open follow-ups across recent meetings?',
+  'Which risks or blockers came up most often?',
+  'What did we discuss about Linear or GitHub work?',
+  'Summarize decisions from the latest customer calls.',
 ];
-
-interface MeetingChatPanelProps {
-  meetingId: string;
-  meetingTitle: string;
-  modelConfig: ModelConfig;
-  transcriptCount: number;
-  onTranscriptCitationSelect?: (citation: MeetingChatCitation) => void | Promise<void>;
-  onRunAutomation?: () => void | Promise<void>;
-  isRunningAutomation?: boolean;
-}
 
 type ChatDisplayMessage = MeetingChatMessage & {
   retryQuestion?: string;
 };
 
 function makeTempMessage(
-  meetingId: string,
   role: 'user' | 'assistant',
   content: string,
   status: MeetingChatMessage['status'] = 'completed',
 ): ChatDisplayMessage {
   return {
     id: `temp-${role}-${crypto.randomUUID()}`,
-    meetingId,
+    meetingId: 'all-summaries',
     role,
     content,
     status,
@@ -75,25 +65,6 @@ function withRetryQuestions(messages: MeetingChatMessage[]): ChatDisplayMessage[
   });
 }
 
-function sourceLabel(citation: MeetingChatCitation) {
-  switch (citation.sourceType) {
-    case 'transcript':
-      return citation.timestamp || citation.sourceLabel || 'Transcript';
-    case 'summary':
-      return citation.title || 'Summary';
-    case 'action_item':
-      return 'Action item';
-    case 'key_point':
-      return 'Key point';
-    case 'note':
-      return 'Note';
-    case 'screenshot':
-      return citation.sourceLabel || 'Screenshot';
-    default:
-      return citation.sourceLabel || citation.sourceType;
-  }
-}
-
 function CitationChip({
   citation,
   selected,
@@ -113,9 +84,9 @@ function CitationChip({
         }`}
       title={citation.excerpt}
     >
-      {citation.sourceType === 'screenshot' ? <FileText size={13} /> : <Clock3 size={13} />}
+      <FileText size={13} />
       <span className="font-semibold">[{citation.id}]</span>
-      <span className="truncate">{sourceLabel(citation)}</span>
+      <span className="truncate">{citation.title || citation.sourceLabel || 'Meeting summary'}</span>
     </button>
   );
 }
@@ -172,7 +143,7 @@ function MessageBubble({
         {message.status === 'pending' && (
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
             <Loader2 size={14} className="animate-spin" />
-            Thinking through the meeting context
+            Searching across meeting summaries
           </div>
         )}
         {message.error && (
@@ -199,12 +170,9 @@ function MessageBubble({
         {selectedCitation && (
           <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
             <div className="mb-1 font-semibold text-slate-900">
-              [{selectedCitation.id}] {sourceLabel(selectedCitation)}
+              [{selectedCitation.id}] {selectedCitation.title || selectedCitation.sourceLabel || 'Meeting summary'}
             </div>
             <p className="whitespace-pre-wrap break-words leading-5">{selectedCitation.excerpt}</p>
-            {selectedCitation.filePath && (
-              <p className="mt-2 truncate text-slate-500">{selectedCitation.filePath}</p>
-            )}
           </div>
         )}
         {message.status === 'failed' && onRetry && (
@@ -229,15 +197,9 @@ function MessageBubble({
   );
 }
 
-export function MeetingChatPanel({
-  meetingId,
-  meetingTitle,
-  modelConfig,
-  transcriptCount,
-  onTranscriptCitationSelect,
-  onRunAutomation,
-  isRunningAutomation = false,
-}: MeetingChatPanelProps) {
+export default function SummaryChatPage() {
+  const router = useRouter();
+  const { modelConfig } = useConfig();
   const [messages, setMessages] = useState<ChatDisplayMessage[]>([]);
   const [question, setQuestion] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -248,10 +210,9 @@ export function MeetingChatPanel({
   const mountedRef = useRef(true);
   const activeRequestRef = useRef<string | null>(null);
   const pendingAssistantIdRef = useRef<string | null>(null);
-  const activeLoadRef = useRef<string | null>(null);
 
   const modelReady = Boolean(modelConfig.provider && modelConfig.model);
-  const canAsk = modelReady && transcriptCount > 0 && question.trim().length > 0 && !isAsking;
+  const canAsk = modelReady && question.trim().length > 0 && !isAsking;
 
   const modelLabel = useMemo(() => {
     if (!modelReady) return 'No AI model selected';
@@ -259,21 +220,19 @@ export function MeetingChatPanel({
   }, [modelConfig.model, modelConfig.provider, modelReady]);
 
   const loadMessages = async () => {
-    const loadId = crypto.randomUUID();
-    activeLoadRef.current = loadId;
     setIsLoading(true);
     try {
-      const history = await meetingChatService.listMessages(meetingId);
-      if (mountedRef.current && activeLoadRef.current === loadId) {
+      const history = await globalSummaryChatService.listMessages();
+      if (mountedRef.current) {
         setMessages(withRetryQuestions(history));
       }
     } catch (error) {
-      console.error('Failed to load meeting chat:', error);
-      if (mountedRef.current && activeLoadRef.current === loadId) {
-        toast.error('Could not load meeting chat');
+      console.error('Failed to load summary chat:', error);
+      if (mountedRef.current) {
+        toast.error('Could not load summary chat');
       }
     } finally {
-      if (mountedRef.current && activeLoadRef.current === loadId) {
+      if (mountedRef.current) {
         setIsLoading(false);
       }
     }
@@ -281,27 +240,19 @@ export function MeetingChatPanel({
 
   useEffect(() => {
     mountedRef.current = true;
-    activeRequestRef.current = null;
-    pendingAssistantIdRef.current = null;
-    activeLoadRef.current = null;
-    setMessages([]);
-    setQuestion('');
-    setIsAsking(false);
-    setSelectedCitationKey(null);
     void loadMessages();
 
     return () => {
       mountedRef.current = false;
       activeRequestRef.current = null;
       pendingAssistantIdRef.current = null;
-      activeLoadRef.current = null;
     };
-  }, [meetingId]);
+  }, []);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     void listenToMeetingChatStream((event) => {
-      if (!mountedRef.current || event.scope !== 'meeting' || event.meetingId !== meetingId) {
+      if (!mountedRef.current || event.scope !== 'summary' || event.meetingId !== 'all-summaries') {
         return;
       }
 
@@ -356,7 +307,7 @@ export function MeetingChatPanel({
     return () => {
       unlisten?.();
     };
-  }, [meetingId]);
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -369,16 +320,12 @@ export function MeetingChatPanel({
     const trimmed = value.trim();
     if (!trimmed || isAsking) return;
     if (!modelReady) {
-      toast.error('Choose an AI model before using meeting chat');
-      return;
-    }
-    if (transcriptCount === 0) {
-      toast.error('This meeting needs transcript text before chat can answer');
+      toast.error('Choose an AI model before using summary chat');
       return;
     }
 
-    const optimisticUser = makeTempMessage(meetingId, 'user', trimmed);
-    const optimisticAssistant = makeTempMessage(meetingId, 'assistant', '', 'pending');
+    const optimisticUser = makeTempMessage('user', trimmed);
+    const optimisticAssistant = makeTempMessage('assistant', '', 'pending');
     optimisticAssistant.retryQuestion = trimmed;
     const requestId = crypto.randomUUID();
     activeRequestRef.current = requestId;
@@ -389,7 +336,7 @@ export function MeetingChatPanel({
     setIsAsking(true);
 
     try {
-      const response = await meetingChatService.ask(meetingId, trimmed);
+      const response = await globalSummaryChatService.ask(trimmed);
       if (!mountedRef.current || activeRequestRef.current !== requestId) {
         return;
       }
@@ -409,7 +356,7 @@ export function MeetingChatPanel({
       if (!mountedRef.current || activeRequestRef.current !== requestId) {
         return;
       }
-      console.error('Meeting chat failed:', error);
+      console.error('Summary chat failed:', error);
       const message = error instanceof Error ? error.message : String(error);
       setMessages((current) => [
         ...current.filter((item) => item.id !== optimisticAssistant.id && item.id !== pendingAssistantIdRef.current),
@@ -421,7 +368,7 @@ export function MeetingChatPanel({
           retryQuestion: trimmed,
         },
       ]);
-      toast.error('Meeting chat failed', { description: message });
+      toast.error('Summary chat failed', { description: message });
     } finally {
       if (mountedRef.current && activeRequestRef.current === requestId) {
         activeRequestRef.current = null;
@@ -433,7 +380,7 @@ export function MeetingChatPanel({
 
   const handleCancel = async () => {
     try {
-      await meetingChatService.cancel(meetingId);
+      await globalSummaryChatService.cancel();
       activeRequestRef.current = null;
       pendingAssistantIdRef.current = null;
       setIsAsking(false);
@@ -441,47 +388,34 @@ export function MeetingChatPanel({
         message.status === 'pending'
           ? {
             ...message,
-            content: 'Meeting chat answer was canceled.',
+            content: 'Summary chat answer was canceled.',
             status: 'canceled',
             error: 'Canceled by user.',
           }
           : message
       )));
-      toast.info('Stopping meeting chat answer');
+      toast.info('Stopping summary chat answer');
     } catch (error) {
-      console.error('Failed to cancel meeting chat:', error);
-      toast.error('Could not cancel meeting chat');
+      console.error('Failed to cancel summary chat:', error);
+      toast.error('Could not cancel summary chat');
     }
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-slate-50/70">
-      <div className="border-b border-slate-200 bg-white px-6 py-4">
+    <div className="flex h-screen min-w-0 flex-col bg-slate-50/70">
+      <div className="border-b border-slate-200 bg-white px-6 py-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-950">
-              <MessageCircle size={18} className="text-emerald-700" />
-              Meeting chat
-            </h2>
-            <p className="mt-1 truncate text-sm text-slate-500">{meetingTitle}</p>
+            <h1 className="flex items-center gap-2 text-xl font-semibold text-slate-950">
+              <MessageCircle size={22} className="text-emerald-700" />
+              Summary chat
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Ask across all generated meeting summaries.
+            </p>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {onRunAutomation && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void onRunAutomation()}
-                disabled={isRunningAutomation}
-                title="Run the configured post-meeting agent automation for this meeting"
-              >
-                {isRunningAutomation ? <Loader2 size={14} className="animate-spin" /> : <Workflow size={14} />}
-                Run automation
-              </Button>
-            )}
-            <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-              {modelLabel}
-            </div>
+          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+            {modelLabel}
           </div>
         </div>
       </div>
@@ -490,7 +424,7 @@ export function MeetingChatPanel({
         {isLoading ? (
           <div className="flex h-full items-center justify-center text-sm text-slate-500">
             <Loader2 size={18} className="mr-2 animate-spin" />
-            Loading chat history
+            Loading summary chat history
           </div>
         ) : messages.length === 0 ? (
           <div className="mx-auto flex h-full max-w-2xl flex-col justify-center">
@@ -500,9 +434,9 @@ export function MeetingChatPanel({
                   <Bot size={20} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-950">Ask about this meeting</h3>
+                  <h2 className="text-sm font-semibold text-slate-950">Ask across meetings</h2>
                   <p className="mt-1 text-sm leading-6 text-slate-600">
-                    Chat uses this meeting&apos;s transcript, summary, actions, notes, and screenshots with source citations.
+                    Summary chat uses generated summaries only, so it is fast and focused on meeting outcomes.
                   </p>
                 </div>
               </div>
@@ -531,8 +465,8 @@ export function MeetingChatPanel({
               selectedCitationKey={selectedCitationKey}
               onCitationSelect={(citationKey, citation) => {
                 setSelectedCitationKey((current) => current === citationKey ? null : citationKey);
-                if (citation.sourceType === 'transcript') {
-                  void onTranscriptCitationSelect?.(citation);
+                if (citation.sourceId) {
+                  router.push(`/meeting-details?id=${citation.sourceId}`);
                 }
               }}
               onRetry={message.status === 'failed' && message.retryQuestion ? () => askQuestion(message.retryQuestion!) : undefined}
@@ -544,12 +478,7 @@ export function MeetingChatPanel({
       <div className="border-t border-slate-200 bg-white p-4">
         {!modelReady && (
           <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Choose and save an AI model before asking meeting questions.
-          </div>
-        )}
-        {transcriptCount === 0 && (
-          <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            This meeting does not have transcript text yet.
+            Choose and save an AI model before asking summary questions.
           </div>
         )}
         <div className="flex items-end gap-2">
@@ -563,8 +492,8 @@ export function MeetingChatPanel({
                 void askQuestion(question);
               }
             }}
-            placeholder="Ask a follow-up question about this meeting..."
-            aria-label="Ask a question about this meeting"
+            placeholder="Ask a question across all meeting summaries..."
+            aria-label="Ask a question across all meeting summaries"
             className="min-h-[52px] max-h-40 resize-none rounded-lg border-slate-200 bg-white text-sm"
             disabled={isAsking}
           />
@@ -574,7 +503,7 @@ export function MeetingChatPanel({
               variant="outline"
               onClick={handleCancel}
               className="h-[52px] shrink-0"
-              aria-label="Cancel meeting chat answer"
+              aria-label="Cancel summary chat answer"
             >
               <Square size={16} />
             </Button>
@@ -584,7 +513,7 @@ export function MeetingChatPanel({
               onClick={() => void askQuestion(question)}
               disabled={!canAsk}
               className="h-[52px] shrink-0 bg-emerald-700 hover:bg-emerald-800"
-              aria-label="Send meeting chat question"
+              aria-label="Send summary chat question"
             >
               <Send size={16} />
             </Button>

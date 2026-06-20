@@ -208,8 +208,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-semibold mb-4">Recording Settings</h3>
-        <p className="text-sm text-gray-600 mb-6">
-          Configure how your audio recordings are saved during meetings.
+        <p className="max-w-3xl text-sm leading-6 text-gray-600 mb-6">
+          Configure what Meetily keeps from a recording session. These choices affect local audio retention, screenshot timeline context, participant recording reminders, and the default audio devices selected when a new meeting starts.
         </p>
       </div>
 
@@ -217,8 +217,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       <div className="flex items-center justify-between p-4 border rounded-lg">
         <div className="flex-1">
           <div className="font-medium">Save Audio Recordings</div>
-          <div className="text-sm text-gray-600">
-            Automatically save audio files when recording stops
+          <div className="max-w-2xl text-sm leading-6 text-gray-600">
+            Automatically save the meeting audio file when recording stops. Keep this on when you want playback, retranscription, or auditability later; turn it off when you only need transcript and summary outputs.
           </div>
         </div>
         <Switch
@@ -233,6 +233,9 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <div className="space-y-4">
           <div className="p-4 border rounded-lg bg-gray-50">
             <div className="font-medium mb-2">Save Location</div>
+            <p className="mb-3 text-sm leading-6 text-gray-600">
+              Meetily writes saved audio files to this local folder. Moving or deleting files here can affect playback and later export workflows for existing meetings.
+            </p>
             <div className="text-sm text-gray-600 mb-3 break-all">
               {preferences.save_folder || 'Default folder'}
             </div>
@@ -252,6 +255,9 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
             <div className="text-xs text-blue-600 mt-1">
               Recordings are saved with timestamp: recording_YYYYMMDD_HHMMSS.{preferences.file_format}
             </div>
+            <div className="mt-2 text-xs leading-5 text-blue-700">
+              The timestamped filename makes it easier to match a local audio file with the meeting timeline shown in Meetily.
+            </div>
           </div>
         </div>
       )}
@@ -259,8 +265,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {/* Info when auto_save is disabled */}
       {!preferences.auto_save && (
         <div className="p-4 border rounded-lg bg-yellow-50">
-          <div className="text-sm text-yellow-800">
-            Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.
+          <div className="text-sm leading-6 text-yellow-800">
+            Audio files will not be retained after recording stops. Enable "Save Audio Recordings" if you need playback, retranscription, or a local source file for sharing later.
           </div>
         </div>
       )}
@@ -269,8 +275,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       <div className="flex items-center justify-between p-4 border rounded-lg">
         <div className="flex-1">
           <div className="font-medium">Recording Start Notification</div>
-          <div className="text-sm text-gray-600">
-            Show reminder to inform participants when recording starts
+          <div className="max-w-2xl text-sm leading-6 text-gray-600">
+            Show a reminder when recording begins so you can tell participants that the meeting is being captured. This is a local reminder and does not notify other meeting attendees automatically.
           </div>
         </div>
         <Switch
@@ -287,8 +293,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
               <Camera className="w-4 h-4 text-gray-600" />
               Meeting Screenshots
             </div>
-            <div className="text-sm text-gray-600 mt-1">
-              Capture full-screen snapshots during recordings for timeline context. This is off until you enable it.
+            <div className="max-w-2xl text-sm leading-6 text-gray-600 mt-1">
+              Capture periodic snapshots during recordings for timeline context, speaker identification, and summary grounding. Screenshots can include sensitive visible information, so this stays off until you enable it.
             </div>
           </div>
           <Switch
@@ -316,7 +322,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
             </label>
 
             <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
-              Screenshots are stored locally with each meeting and can be deleted from the meeting timeline.
+              Screenshots are stored locally with each meeting, filtered for timeline usefulness, and can be deleted from the meeting timeline.
             </div>
           </div>
         )}
@@ -326,8 +332,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       <div className="space-y-4">
         <div className="border-t pt-6">
           <h4 className="text-base font-medium text-gray-900 mb-4">Default Audio Devices</h4>
-          <p className="text-sm text-gray-600 mb-4">
-            Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.
+          <p className="max-w-3xl text-sm leading-6 text-gray-600 mb-4">
+            Set the microphone and system audio devices Meetily should prefer for new recordings. If a saved device is unplugged or unavailable, Meetily falls back to the current system default so recording can still start.
           </p>
 
           <div className="border rounded-lg p-4 bg-gray-50">

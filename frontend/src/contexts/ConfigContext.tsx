@@ -42,6 +42,8 @@ export interface NotificationSettings {
   };
 }
 
+export type ThemePreference = 'light' | 'dark' | 'system';
+
 interface ConfigContextType {
   // Model configuration
   modelConfig: ModelConfig;
@@ -62,6 +64,8 @@ interface ConfigContextType {
   // UI preferences
   showConfidenceIndicator: boolean;
   toggleConfidenceIndicator: (checked: boolean) => void;
+  themePreference: ThemePreference;
+  setThemePreference: (theme: ThemePreference) => void;
 
   // Beta features
   betaFeatures: BetaFeatures;
@@ -154,6 +158,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     return true;
   });
 
+  const [themePreference, setThemePreferenceState] = useState<ThemePreference>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('themePreference');
+      if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
+    }
+    return 'system';
+  });
+
   // Summary configs
   const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -174,6 +186,28 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [isLoadingPreferences, setIsLoadingPreferences] = useState(false);
   const preferencesLoadedRef = useRef(false);
   const isLoadingRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      const resolvedTheme = themePreference === 'system'
+        ? (mediaQuery.matches ? 'dark' : 'light')
+        : themePreference;
+
+      document.documentElement.classList.toggle('dark', resolvedTheme === 'dark');
+      document.documentElement.classList.toggle('light', resolvedTheme === 'light');
+      document.documentElement.style.colorScheme = resolvedTheme;
+      document.documentElement.dataset.theme = themePreference;
+    };
+
+    applyTheme();
+    if (themePreference !== 'system') return;
+
+    mediaQuery.addEventListener('change', applyTheme);
+    return () => mediaQuery.removeEventListener('change', applyTheme);
+  }, [themePreference]);
 
   // Load Ollama models (uses saved endpoint, re-runs when endpoint changes after config load)
   useEffect(() => {
@@ -482,6 +516,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const setThemePreference = useCallback((theme: ThemePreference) => {
+    setThemePreferenceState(theme);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('themePreference', theme);
+    }
+  }, []);
+
   const value: ConfigContextType = useMemo(() => ({
     modelConfig,
     setModelConfig,
@@ -497,6 +538,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setSelectedLanguage: handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
+    themePreference,
+    setThemePreference,
     betaFeatures,
     toggleBetaFeature,
     models,
@@ -519,6 +562,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
+    themePreference,
+    setThemePreference,
     betaFeatures,
     toggleBetaFeature,
     models,

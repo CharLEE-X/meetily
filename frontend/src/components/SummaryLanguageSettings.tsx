@@ -21,9 +21,8 @@ export function SummaryLanguageSettings() {
         <Globe size={18} className="text-gray-500" />
         <h3 className="text-lg font-semibold text-gray-900">Summary Language</h3>
       </div>
-      <p className="text-sm text-gray-600 mb-4">
-        Pin one language as the default for new meetings. Unpinned languages remain as
-        quick-switch options in the summary generator. Auto uses the dominant transcript language.
+      <p className="max-w-3xl text-sm leading-6 text-gray-600 mb-4">
+        Pin one language as the default for new summaries and summary regenerations. Unpinned languages remain as quick-switch options in the summary generator, and Auto uses the dominant transcript language. This setting changes generated summaries only; it does not translate or rewrite the saved transcript.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">

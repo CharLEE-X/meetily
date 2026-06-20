@@ -1,14 +1,15 @@
 "use client";
-import { useState, useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useState, useCallback, useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { motion } from 'framer-motion';
 import { Summary, SummaryResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
+import { TranscriptPanel, TranscriptPanelHandle } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { ModelConfig } from '@/components/ModelSettingsModal';
+import { MeetingChatCitation } from '@/services/meetingChatService';
 
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
@@ -84,6 +85,7 @@ export default function PageContent({
   totalCount,
   loadedCount,
   onLoadMore,
+  loadUntilTranscript,
 }: {
   meeting: any;
   summaryData: Summary | null;
@@ -98,6 +100,7 @@ export default function PageContent({
   totalCount?: number;
   loadedCount?: number;
   onLoadMore?: () => void;
+  loadUntilTranscript?: (target: { transcriptId?: string | null; audioStartTime?: number | null }) => Promise<boolean>;
 }) {
   console.log('📄 PAGE CONTENT: Initializing with data:', {
     meetingId: meeting.id,
@@ -115,6 +118,8 @@ export default function PageContent({
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
   const autoExportedMeetingRef = useRef<string | null>(null);
+  const transcriptPanelRef = useRef<TranscriptPanelHandle | null>(null);
+  const pendingTranscriptJumpRef = useRef<{ transcriptId?: string | null; audioStartTime?: number | null } | null>(null);
 
   // Sidebar context
   const { serverAddress } = useSidebar();
@@ -273,6 +278,48 @@ export default function PageContent({
     await summaryGeneration.handleRegenerateSummary(customPrompt);
   };
 
+  const scrollToTranscriptCitation = useCallback((target: { transcriptId?: string | null; audioStartTime?: number | null }) => {
+    const didScroll = transcriptPanelRef.current?.scrollToTranscript(target) ?? false;
+    if (didScroll) {
+      pendingTranscriptJumpRef.current = null;
+    }
+    return didScroll;
+  }, []);
+
+  const handleTranscriptCitationSelect = useCallback(async (citation: MeetingChatCitation) => {
+    if (citation.sourceType !== 'transcript') {
+      return;
+    }
+
+    const target = {
+      transcriptId: citation.transcriptId,
+      audioStartTime: citation.audioStartTime,
+    };
+
+    if (scrollToTranscriptCitation(target)) {
+      return;
+    }
+
+    if (!loadUntilTranscript) {
+      toast.info('That transcript segment is not loaded yet.');
+      return;
+    }
+
+    pendingTranscriptJumpRef.current = target;
+    const loaded = await loadUntilTranscript(target);
+    if (!loaded) {
+      pendingTranscriptJumpRef.current = null;
+      toast.info('Could not find that transcript segment in the loaded meeting.');
+    }
+  }, [loadUntilTranscript, scrollToTranscriptCitation]);
+
+  useEffect(() => {
+    const pendingJump = pendingTranscriptJumpRef.current;
+    if (pendingJump) {
+      scrollToTranscriptCitation(pendingJump);
+    }
+  }, [segments, meetingData.transcripts, scrollToTranscriptCitation]);
+
   // Track page view
   useEffect(() => {
     Analytics.trackPageView('meeting_details');
@@ -357,6 +404,7 @@ export default function PageContent({
     >
       <div className="flex flex-1 overflow-hidden">
         <TranscriptPanel
+          ref={transcriptPanelRef}
           transcripts={meetingData.transcripts}
           customPrompt={customPrompt}
           customPromptHistory={customPromptHistory}
@@ -431,6 +479,7 @@ export default function PageContent({
           onTemplateSelect={templates.handleTemplateSelection}
           isModelConfigLoading={false}
           onOpenModelSettings={handleRegisterModalOpen}
+          onTranscriptCitationSelect={handleTranscriptCitationSelect}
         />
       </div>
     </motion.div>

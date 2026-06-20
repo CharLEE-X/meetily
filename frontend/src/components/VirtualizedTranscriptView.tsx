@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useReducer, startTransition, useEffect, useState, memo } from "react";
+import { useCallback, useRef, useReducer, startTransition, useEffect, useState, memo, forwardRef, useImperativeHandle } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useTranscriptStreaming } from "@/hooks/useTranscriptStreaming";
@@ -35,6 +35,11 @@ export interface VirtualizedTranscriptViewProps {
     loadedCount?: number;
     onLoadMore?: () => void;
     speakerLabelsBySegmentId?: Record<string, string>;
+    highlightedSegmentId?: string | null;
+}
+
+export interface VirtualizedTranscriptViewHandle {
+    scrollToSegment: (target: { segmentId?: string | null; timestamp?: number | null }) => boolean;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -73,6 +78,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isStreaming,
     showConfidence,
     speakerLabel,
+    highlighted,
 }: {
     id: string;
     timestamp: number;
@@ -81,11 +87,15 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isStreaming: boolean;
     showConfidence: boolean;
     speakerLabel?: string;
+    highlighted?: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
     return (
-        <div id={`segment-${id}`} className="mb-3">
+        <div
+            id={`segment-${id}`}
+            className={`mb-3 scroll-mt-4 rounded-lg transition-colors duration-500 ${highlighted ? 'bg-emerald-50 ring-1 ring-emerald-200' : ''}`}
+        >
             <div className="flex items-start gap-2">
                 <Tooltip>
                     <TooltipTrigger>
@@ -118,7 +128,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     );
 });
 
-export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps> = ({
+export const VirtualizedTranscriptView = forwardRef<VirtualizedTranscriptViewHandle, VirtualizedTranscriptViewProps>(function VirtualizedTranscriptView({
     segments,
     isRecording = false,
     isPaused = false,
@@ -133,7 +143,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     loadedCount = 0,
     onLoadMore,
     speakerLabelsBySegmentId = {},
-}) => {
+    highlightedSegmentId = null,
+}, ref) {
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
     // Ref for infinite scroll trigger element
@@ -172,6 +183,50 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         isRecording,
         enableStreaming
     );
+
+    // Use simple rendering for small lists, virtualization for large lists
+    const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
+
+    const findSegmentIndex = useCallback((target: { segmentId?: string | null; timestamp?: number | null }) => {
+        if (target.segmentId) {
+            const index = segments.findIndex((segment) => segment.id === target.segmentId);
+            if (index >= 0) return index;
+        }
+
+        if (typeof target.timestamp === 'number' && Number.isFinite(target.timestamp)) {
+            let closestIndex = -1;
+            let closestDistance = Number.POSITIVE_INFINITY;
+            segments.forEach((segment, index) => {
+                const distance = Math.abs(segment.timestamp - target.timestamp!);
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestIndex = index;
+                }
+            });
+            return closestDistance <= 0.75 ? closestIndex : -1;
+        }
+
+        return -1;
+    }, [segments]);
+
+    useImperativeHandle(ref, () => ({
+        scrollToSegment: (target) => {
+            const index = findSegmentIndex(target);
+            if (index < 0) return false;
+
+            if (useVirtualization) {
+                virtualizer.scrollToIndex(index, { align: 'center' });
+                return true;
+            }
+
+            const segment = segments[index];
+            document.getElementById(`segment-${segment.id}`)?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            });
+            return true;
+        },
+    }), [findSegmentIndex, segments, useVirtualization, virtualizer]);
 
     // Infinite scroll: IntersectionObserver to trigger loading more
     useEffect(() => {
@@ -228,9 +283,6 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         scrollElement.addEventListener('scroll', handleScroll, { passive: true });
         return () => scrollElement.removeEventListener('scroll', handleScroll);
     }, [onLoadMore, hasMore, isLoadingMore, isRecording]);
-
-    // Use simple rendering for small lists, virtualization for large lists
-    const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
 
     return (
         <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">
@@ -306,6 +358,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         speakerLabel={speakerLabelsBySegmentId[segment.id]}
+                                        highlighted={highlightedSegmentId === segment.id}
                                     />
                                 </div>
                             );
@@ -363,6 +416,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         speakerLabel={speakerLabelsBySegmentId[segment.id]}
+                                        highlighted={highlightedSegmentId === segment.id}
                                     />
                                 </motion.div>
                             );
@@ -402,4 +456,4 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
             </div>
         </div>
     );
-};
+});

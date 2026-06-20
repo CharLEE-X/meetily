@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
-import { CalendarClock, FolderOpen } from "lucide-react"
+import { CalendarClock, FolderOpen, Monitor, Moon, Sun, type LucideIcon } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
-import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
+import { ThemePreference, useConfig, NotificationSettings } from "@/contexts/ConfigContext"
 import {
   ApprovedCalendarEvent,
   MEETING_DETECTION_SETTINGS_EVENT,
@@ -30,7 +30,9 @@ export function PreferenceSettings() {
     storageLocations,
     isLoadingPreferences,
     loadPreferences,
-    updateNotificationSettings
+    updateNotificationSettings,
+    themePreference,
+    setThemePreference
   } = useConfig();
 
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
@@ -209,15 +211,79 @@ export function PreferenceSettings() {
 
   // Ensure we have a boolean value for the Switch component
   const notificationsEnabledValue = notificationsEnabled ?? false;
+  const themeOptions: Array<{
+    value: ThemePreference;
+    label: string;
+    description: string;
+    icon: LucideIcon;
+  }> = [
+    {
+      value: 'system',
+      label: 'System',
+      description: 'Follow the current macOS appearance and update automatically when it changes.',
+      icon: Monitor,
+    },
+    {
+      value: 'light',
+      label: 'Light',
+      description: 'Use the bright interface regardless of the system appearance.',
+      icon: Sun,
+    },
+    {
+      value: 'dark',
+      label: 'Dark',
+      description: 'Use the darker interface for low-light work and reduced glare.',
+      icon: Moon,
+    },
+  ];
 
   return (
     <div className="space-y-6">
+      {/* Theme Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">Appearance</h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
+            Choose how Meetily should look across the desktop app. System follows your macOS Light or Dark appearance, while Light and Dark keep the app pinned to that mode.
+          </p>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          {themeOptions.map((option) => {
+            const Icon = option.icon;
+            const selected = themePreference === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setThemePreference(option.value)}
+                className={`rounded-lg border p-4 text-left transition-colors ${
+                  selected
+                    ? 'border-blue-300 bg-blue-50 text-blue-950 ring-1 ring-blue-200'
+                    : 'border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-300 hover:bg-white'
+                }`}
+                aria-pressed={selected}
+              >
+                <div className="flex items-center gap-2">
+                  <Icon className={`h-4 w-4 ${selected ? 'text-blue-700' : 'text-gray-500'}`} />
+                  <span className="text-sm font-semibold">{option.label}</span>
+                </div>
+                <p className={`mt-2 text-xs leading-5 ${selected ? 'text-blue-800' : 'text-gray-600'}`}>
+                  {option.description}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Notifications Section */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Notifications</h3>
-            <p className="text-sm text-gray-600">Enable or disable notifications of start and end of meeting</p>
+            <p className="max-w-2xl text-sm leading-6 text-gray-600">
+              Controls the local macOS notifications shown when Meetily starts and stops recording. These reminders help you confirm recording state and prompt consent conversations, but they do not start or stop recording by themselves.
+            </p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
         </div>
@@ -232,7 +298,7 @@ export function PreferenceSettings() {
               <h3 className="text-lg font-semibold text-gray-900">Meeting detection</h3>
             </div>
             <p className="mt-2 max-w-2xl text-sm text-gray-600">
-              Detect upcoming meetings from approved calendar metadata, meeting apps, active call windows, browser meeting tabs, and optional mic activity. Meetily never joins or records silently.
+              Detect upcoming meetings from approved calendar metadata, meeting apps, active call windows, browser meeting tabs, and optional mic activity. Meetily uses this to suggest titles, prompts, and join actions; it never joins or records silently.
             </p>
           </div>
           <div className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700">
@@ -243,6 +309,7 @@ export function PreferenceSettings() {
         <div className="mt-5 grid gap-4 md:grid-cols-3">
           <div>
             <label className="text-sm font-medium text-gray-900" htmlFor="meeting-detection-mode">Mode</label>
+            <p className="mt-1 text-xs leading-5 text-gray-500">Disabled hides prompts, Prompt only asks before action, and Auto-open can open the approved meeting link without starting a recording.</p>
             <select
               id="meeting-detection-mode"
               className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
@@ -256,6 +323,7 @@ export function PreferenceSettings() {
           </div>
           <div>
             <label className="text-sm font-medium text-gray-900" htmlFor="meeting-detection-lookahead">Lookahead minutes</label>
+            <p className="mt-1 text-xs leading-5 text-gray-500">How early Meetily should start considering an approved meeting relevant for prompts and metadata.</p>
             <input
               id="meeting-detection-lookahead"
               type="number"
@@ -271,6 +339,7 @@ export function PreferenceSettings() {
           </div>
           <div>
             <label className="text-sm font-medium text-gray-900" htmlFor="meeting-detection-stale">Hide after minutes</label>
+            <p className="mt-1 text-xs leading-5 text-gray-500">How long after a meeting starts the prompt should stay visible before being dismissed as stale.</p>
             <input
               id="meeting-detection-stale"
               type="number"
@@ -291,7 +360,7 @@ export function PreferenceSettings() {
             <div>
               <div className="text-sm font-medium text-gray-900">Ambient meeting signals</div>
               <p className="mt-1 text-sm text-gray-600">
-                Look for Teams, Zoom, Google Meet, active call windows, and browser tabs when calendar metadata is missing.
+                Look for Teams, Zoom, Google Meet, active call windows, and browser tabs when calendar metadata is missing. These checks run locally and are used only to decide whether a prompt should appear.
               </p>
             </div>
             <Switch
@@ -345,7 +414,7 @@ export function PreferenceSettings() {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="text-sm font-medium text-gray-900">Quiet hours</div>
-              <p className="mt-1 text-sm text-gray-600">Hide meeting prompts during focus or non-working hours.</p>
+              <p className="mt-1 text-sm text-gray-600">Hide meeting prompts during focus or non-working hours. Quiet hours can cross midnight, so a 22:00 to 07:00 window covers overnight focus time.</p>
             </div>
             <Switch
               checked={meetingDetectionSettings.quietHoursEnabled}
@@ -395,7 +464,7 @@ export function PreferenceSettings() {
           <div className="flex flex-col gap-1">
             <div className="text-sm font-medium text-gray-900">Approved local event</div>
             <p className="text-sm text-gray-600">
-              Add a local event while calendar sync is not connected. Supported links: Google Meet, Zoom, and Microsoft Teams.
+              Add a local event while calendar sync is not connected. This stores only the title, time, and meeting link needed for a prompt. Supported links: Google Meet, Zoom, and Microsoft Teams.
             </p>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -453,8 +522,8 @@ export function PreferenceSettings() {
       {/* Data Storage Locations Section */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Data Storage Locations</h3>
-        <p className="text-sm text-gray-600 mb-6">
-          View and access where Meetily stores your data
+        <p className="max-w-3xl text-sm leading-6 text-gray-600 mb-6">
+          View and open the local folders Meetily uses for recordings and app-managed data. Audio files, screenshots, transcripts, and summaries are stored on this Mac unless you explicitly export them or use a cloud AI provider.
         </p>
 
         <div className="space-y-4">
@@ -491,6 +560,9 @@ export function PreferenceSettings() {
           {/* Recordings Location */}
           <div className="p-4 border rounded-lg bg-gray-50">
             <div className="font-medium mb-2">Meeting Recordings</div>
+            <p className="mb-3 text-sm leading-6 text-gray-600">
+              This folder contains saved meeting audio and related recording artifacts. Deleting files here can remove playback or export sources for existing meetings.
+            </p>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
               {storageLocations?.recordings || 'Loading...'}
             </div>
@@ -513,6 +585,12 @@ export function PreferenceSettings() {
 
       {/* Analytics Section */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Analytics privacy</h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
+            Decide whether Meetily can send product usage events that help prioritize fixes and features. Meeting audio, transcripts, summaries, screenshots, and note contents are not analytics payloads.
+          </p>
+        </div>
         <AnalyticsConsentSwitch />
       </div>
     </div>

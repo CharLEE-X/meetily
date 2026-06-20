@@ -1,5 +1,7 @@
+use futures_util::StreamExt;
 use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -192,7 +194,10 @@ pub async fn generate_summary(
                     .parse()
                     .map_err(|_| "Invalid anthropic version".to_string())?,
             );
-            ("https://api.anthropic.com/v1/messages".to_string(), header_map)
+            (
+                "https://api.anthropic.com/v1/messages".to_string(),
+                header_map,
+            )
         }
         LLMProvider::BuiltInAI => {
             // This case is handled earlier with early returns
@@ -219,7 +224,8 @@ pub async fn generate_summary(
     // Build request body based on provider
     let request_body = if provider != &LLMProvider::Claude {
         // For CustomOpenAI, apply optional parameters if provided
-        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
+        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI
+        {
             (max_tokens, temperature, top_p)
         } else {
             (None, None, None)
@@ -253,7 +259,11 @@ pub async fn generate_summary(
         })
     };
 
-    info!("🐞 LLM Request to {}: model={}", provider_name(provider), model_name);
+    info!(
+        "🐞 LLM Request to {}: model={}",
+        provider_name(provider),
+        model_name
+    );
 
     // Send request with timeout and cancellation support
     let request_future = client
@@ -330,6 +340,285 @@ pub async fn generate_summary(
             .trim();
         Ok(content.to_string())
     }
+}
+
+pub async fn generate_summary_streaming(
+    client: &Client,
+    provider: &LLMProvider,
+    model_name: &str,
+    api_key: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    ollama_endpoint: Option<&str>,
+    custom_openai_endpoint: Option<&str>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    app_data_dir: Option<&PathBuf>,
+    cancellation_token: Option<&CancellationToken>,
+    mut on_delta: impl FnMut(&str) + Send,
+) -> Result<String, String> {
+    if let Some(token) = cancellation_token {
+        if token.is_cancelled() {
+            return Err("Summary generation was cancelled".to_string());
+        }
+    }
+
+    if provider == &LLMProvider::BuiltInAI {
+        let text = generate_summary(
+            client,
+            provider,
+            model_name,
+            api_key,
+            system_prompt,
+            user_prompt,
+            ollama_endpoint,
+            custom_openai_endpoint,
+            max_tokens,
+            temperature,
+            top_p,
+            app_data_dir,
+            cancellation_token,
+        )
+        .await?;
+        for chunk in chunk_for_display_stream(&text) {
+            if let Some(token) = cancellation_token {
+                if token.is_cancelled() {
+                    return Err("Summary generation was cancelled".to_string());
+                }
+            }
+            on_delta(chunk);
+            tokio::time::sleep(Duration::from_millis(18)).await;
+        }
+        return Ok(text);
+    }
+
+    let (api_url, mut headers) = match provider {
+        LLMProvider::OpenAI => (
+            "https://api.openai.com/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::Groq => (
+            "https://api.groq.com/openai/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::OpenRouter => (
+            "https://openrouter.ai/api/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::Ollama => {
+            let host = ollama_endpoint
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            (
+                format!("{}/v1/chat/completions", host),
+                header::HeaderMap::new(),
+            )
+        }
+        LLMProvider::CustomOpenAI => {
+            let endpoint = custom_openai_endpoint
+                .ok_or_else(|| "Custom OpenAI endpoint not configured".to_string())?;
+            (
+                format!("{}/chat/completions", endpoint.trim_end_matches('/')),
+                header::HeaderMap::new(),
+            )
+        }
+        LLMProvider::Claude => {
+            let mut header_map = header::HeaderMap::new();
+            header_map.insert(
+                "x-api-key",
+                api_key
+                    .parse()
+                    .map_err(|_| "Invalid API key format".to_string())?,
+            );
+            header_map.insert(
+                "anthropic-version",
+                "2023-06-01"
+                    .parse()
+                    .map_err(|_| "Invalid anthropic version".to_string())?,
+            );
+            (
+                "https://api.anthropic.com/v1/messages".to_string(),
+                header_map,
+            )
+        }
+        LLMProvider::BuiltInAI => unreachable!("BuiltInAI is handled before this match statement"),
+    };
+
+    if provider != &LLMProvider::Claude {
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {}", api_key)
+                .parse()
+                .map_err(|_| "Invalid authorization header".to_string())?,
+        );
+    }
+    headers.insert(
+        header::CONTENT_TYPE,
+        "application/json"
+            .parse()
+            .map_err(|_| "Invalid content type".to_string())?,
+    );
+
+    let request_body = if provider != &LLMProvider::Claude {
+        let mut body = serde_json::json!({
+            "model": model_name,
+            "messages": [
+                { "role": "system", "content": system_prompt },
+                { "role": "user", "content": user_prompt }
+            ],
+            "stream": true
+        });
+        if provider == &LLMProvider::CustomOpenAI {
+            if let Some(value) = max_tokens {
+                body["max_tokens"] = serde_json::json!(value);
+            }
+            if let Some(value) = temperature {
+                body["temperature"] = serde_json::json!(value);
+            }
+            if let Some(value) = top_p {
+                body["top_p"] = serde_json::json!(value);
+            }
+        }
+        body
+    } else {
+        serde_json::json!({
+            "system": system_prompt,
+            "model": model_name,
+            "max_tokens": 2048,
+            "messages": [{ "role": "user", "content": user_prompt }],
+            "stream": true
+        })
+    };
+
+    info!(
+        "🐞 Streaming LLM request to {}: model={}",
+        provider_name(provider),
+        model_name
+    );
+    let request_future = client
+        .post(api_url)
+        .headers(headers)
+        .json(&request_body)
+        .timeout(REQUEST_TIMEOUT_DURATION)
+        .send();
+
+    let response = if let Some(token) = cancellation_token {
+        tokio::select! {
+            result = request_future => result.map_err(|e| {
+                if e.is_timeout() {
+                    "LLM request timed out after 300 seconds".to_string()
+                } else {
+                    format!("Failed to send request to LLM: {}", e)
+                }
+            })?,
+            _ = token.cancelled() => return Err("Summary generation was cancelled".to_string()),
+        }
+    } else {
+        request_future.await.map_err(|e| {
+            if e.is_timeout() {
+                "LLM request timed out after 300 seconds".to_string()
+            } else {
+                format!("Failed to send request to LLM: {}", e)
+            }
+        })?
+    };
+
+    if !response.status().is_success() {
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("LLM API request failed: {}", error_body));
+    }
+
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut output = String::new();
+    loop {
+        let next_chunk = if let Some(token) = cancellation_token {
+            tokio::select! {
+                result = stream.next() => result,
+                _ = token.cancelled() => return Err("Summary generation was cancelled".to_string()),
+            }
+        } else {
+            stream.next().await
+        };
+
+        let Some(chunk_result) = next_chunk else {
+            break;
+        };
+        let chunk =
+            chunk_result.map_err(|error| format!("Failed to read LLM stream: {}", error))?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(newline_index) = buffer.find('\n') {
+            let line = buffer[..newline_index].trim().to_string();
+            buffer = buffer[newline_index + 1..].to_string();
+            if let Some(delta) = parse_stream_delta(provider, &line)? {
+                output.push_str(&delta);
+                on_delta(&delta);
+            }
+        }
+    }
+
+    if !buffer.trim().is_empty() {
+        if let Some(delta) = parse_stream_delta(provider, buffer.trim())? {
+            output.push_str(&delta);
+            on_delta(&delta);
+        }
+    }
+
+    Ok(output.trim().to_string())
+}
+
+fn parse_stream_delta(provider: &LLMProvider, line: &str) -> Result<Option<String>, String> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with("event:") {
+        return Ok(None);
+    }
+    let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+        return Ok(None);
+    };
+    if data == "[DONE]" {
+        return Ok(None);
+    }
+
+    let value: Value = serde_json::from_str(data)
+        .map_err(|error| format!("Failed to parse LLM stream event: {}", error))?;
+    if provider == &LLMProvider::Claude {
+        return Ok(value
+            .get("delta")
+            .and_then(|delta| delta.get("text"))
+            .and_then(Value::as_str)
+            .map(str::to_string));
+    }
+
+    Ok(value
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("delta"))
+        .and_then(|delta| delta.get("content"))
+        .and_then(Value::as_str)
+        .map(str::to_string))
+}
+
+fn chunk_for_display_stream(text: &str) -> Vec<&str> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let mut char_count = 0;
+    for (index, _) in text.char_indices() {
+        if char_count >= 24 {
+            chunks.push(&text[start..index]);
+            start = index;
+            char_count = 0;
+        }
+        char_count += 1;
+    }
+    if start < text.len() {
+        chunks.push(&text[start..]);
+    }
+    chunks
 }
 
 /// Helper function to get provider name for logging

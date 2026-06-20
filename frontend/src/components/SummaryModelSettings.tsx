@@ -128,7 +128,9 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Auto Summary</h3>
-            <p className="text-sm text-gray-600">Auto Generating summary after meeting completion(Stopping)</p>
+            <p className="max-w-3xl text-sm leading-6 text-gray-600">
+              Automatically generate a meeting summary after recording stops. The generated summary uses the selected summary model below and can include transcript context, action items, decisions, and any additional context you added before regeneration.
+            </p>
           </div>
           <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />
         </div>
@@ -138,8 +140,8 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
 
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
         <h3 className="text-lg font-semibold mb-4">Summary Model Configuration</h3>
-        <p className="text-sm text-gray-600 mb-6">
-          Configure the AI model used for generating meeting summaries.
+        <p className="max-w-3xl text-sm leading-6 text-gray-600 mb-6">
+          Configure the AI model used for meeting summaries, meeting chat, and post-meeting automation prompts. Local providers keep content on this Mac; remote providers can receive the selected meeting context and require their own API credentials.
         </p>
 
         <ModelSettingsModal

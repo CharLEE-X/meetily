@@ -244,7 +244,9 @@ export function ReminderSettings() {
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-950">Apple Reminders</h3>
-                <p className="text-sm text-gray-600">Prepare local follow-up destinations for action items after meetings.</p>
+                <p className="max-w-3xl text-sm leading-6 text-gray-600">
+                  Prepare Apple Reminders destinations for action items discovered after meetings. Meetily uses this to offer reviewable follow-up drafts, so implementation tasks, PR reviews, Linear follow-ups, and clarification loops can become reminders without copying them manually.
+                </p>
               </div>
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
@@ -307,7 +309,9 @@ export function ReminderSettings() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-lg font-semibold text-gray-950">Default follow-up list</h3>
-            <p className="text-sm text-gray-600">Choose where meeting action reminders will be offered in the next workflow slice.</p>
+            <p className="max-w-3xl text-sm leading-6 text-gray-600">
+              Choose the default Apple Reminders list used for new meeting follow-up drafts. This is only a default; workflow presets below can route specific categories to another list when needed.
+            </p>
           </div>
           {isLoading && <Loader2 className="h-5 w-5 animate-spin text-gray-400" />}
         </div>
@@ -358,7 +362,9 @@ export function ReminderSettings() {
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-950">Developer workflow presets</h3>
-                <p className="text-sm text-gray-600">Tune which follow-ups are suggested and how new reminder drafts are prefilled.</p>
+                <p className="max-w-3xl text-sm leading-6 text-gray-600">
+                  Tune which developer-focused follow-ups are suggested and how reminder drafts are prefilled. Presets let you set default due dates, priority, and destination by category without changing existing reminders.
+                </p>
               </div>
             </div>
           </div>
@@ -446,7 +452,7 @@ export function ReminderSettings() {
         </div>
 
         <p className="mt-3 text-xs text-gray-500">
-          Presets only affect future local reminder drafts. Created Apple Reminders stay unchanged.
+          Presets only affect future local reminder drafts. Created Apple Reminders stay unchanged, and Meetily will still show drafts for review before creating new follow-ups.
         </p>
       </div>
 
@@ -454,7 +460,9 @@ export function ReminderSettings() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-lg font-semibold text-gray-950">Follow-up history</h3>
-            <p className="text-sm text-gray-600">Recent Apple Reminders created from Meetily meetings.</p>
+            <p className="max-w-3xl text-sm leading-6 text-gray-600">
+              Recent Apple Reminders created from Meetily meetings. Use this history to confirm what was created, where it was placed, and whether any creation attempt failed.
+            </p>
           </div>
           {isLoading && <Loader2 className="h-5 w-5 animate-spin text-gray-400" />}
         </div>

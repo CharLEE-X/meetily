@@ -371,7 +371,7 @@ fn provider_infos() -> Vec<AppleNotesProviderInfo> {
         supports_write: cfg!(target_os = "macos"),
         notes: Some(
             if cfg!(target_os = "macos") {
-                "Writes app-managed meeting summary notes through local macOS Automation after explicit opt-in."
+                "Writes app-managed meeting summary notes through local macOS Automation after Connect verifies permission."
             } else {
                 "Apple Notes export is available only on macOS."
             }
@@ -388,16 +388,16 @@ async fn connect_provider_account(
     let account_id = existing_account_id(pool, provider)
         .await?
         .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let status = if cfg!(target_os = "macos") {
-        "permission_needed"
-    } else {
-        "error"
-    };
-    let error = if status == "error" {
-        Some("Apple Notes export is available only on macOS.".to_string())
-    } else {
-        None
-    };
+    let (status, account_label, error) = probe_apple_notes_access()
+        .map(|label| ("connected", label, None))
+        .unwrap_or_else(|error| {
+            let status = notes_error_status(&error);
+            (
+                status,
+                APPLE_NOTES_LABEL.to_string(),
+                Some(sanitize_notes_error(&error)),
+            )
+        });
 
     sqlx::query(
         "INSERT INTO apple_notes_provider_accounts
@@ -412,7 +412,7 @@ async fn connect_provider_account(
     )
     .bind(&account_id)
     .bind(provider)
-    .bind(APPLE_NOTES_LABEL)
+    .bind(account_label)
     .bind(status)
     .bind(DEFAULT_ROOT_FOLDER)
     .bind(error)
@@ -425,6 +425,60 @@ async fn connect_provider_account(
     get_account(pool, provider)
         .await?
         .ok_or_else(|| "Apple Notes account was not saved.".to_string())
+}
+
+fn probe_apple_notes_access() -> Result<String, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("Apple Notes export is available only on macOS.".to_string());
+    }
+
+    let output = Command::new("osascript")
+        .args(["-e", &apple_notes_access_probe_script()])
+        .output()
+        .map_err(|err| format!("Failed to verify Apple Notes access: {}", err))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Apple Notes permission is required before exporting summaries.".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    let label = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(if label.is_empty() || label == "missing value" {
+        APPLE_NOTES_LABEL.to_string()
+    } else {
+        label
+    })
+}
+
+fn apple_notes_access_probe_script() -> String {
+    r#"tell application id "com.apple.Notes"
+    set accountName to "Apple Notes"
+    try
+        if (count of accounts) > 0 then set accountName to (name of first account as text)
+    end try
+    return accountName
+end tell
+"#
+    .to_string()
+}
+
+fn notes_error_status(error: &str) -> &'static str {
+    let lower = error.to_lowercase();
+    if lower.contains("permission")
+        || lower.contains("not authorized")
+        || lower.contains("not authorised")
+        || lower.contains("not permitted")
+        || lower.contains("automation")
+        || lower.contains("-1743")
+    {
+        "permission_needed"
+    } else {
+        "error"
+    }
 }
 
 async fn build_export_payload(
@@ -1074,13 +1128,13 @@ fn clean_optional(value: &str) -> Option<String> {
 
 fn sanitize_notes_error(error: &str) -> String {
     let lower = error.to_ascii_lowercase();
-    if lower.contains("-1743")
-        || lower.contains("not authorized")
-        || lower.contains("not permitted")
-    {
+    if notes_error_status(error) == "permission_needed" {
         return "Apple Notes permission is required. Allow Meetily to control Notes in System Settings > Privacy & Security > Automation, then retry.".to_string();
     }
-    if lower.contains("can’t get application") || lower.contains("can't get application") {
+    if lower.contains("can’t get application")
+        || lower.contains("can't get application")
+        || lower.contains("not available")
+    {
         return "Apple Notes is not available on this Mac.".to_string();
     }
     let trimmed = error.trim();

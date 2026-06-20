@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   addAgentWorkflowOutcomeLink,
+  AGENT_WORKFLOW_RUNS_EVENT,
   AgentWorkflowOutcomeLink,
   AgentWorkflowRun,
   listAgentWorkflowRuns,
@@ -36,6 +37,12 @@ export function AgentWorkflowRunsPanel({ meetingId, limit = 8 }: AgentWorkflowRu
   const visibleRuns = runs
     .filter((run) => !meetingId || run.meetingId === meetingId)
     .slice(0, limit)
+
+  useEffect(() => {
+    const refreshRuns = () => setRuns(listAgentWorkflowRuns())
+    window.addEventListener(AGENT_WORKFLOW_RUNS_EVENT, refreshRuns)
+    return () => window.removeEventListener(AGENT_WORKFLOW_RUNS_EVENT, refreshRuns)
+  }, [])
 
   const updateLinkInput = (runId: string, patch: Partial<{ type: AgentWorkflowOutcomeLink["type"]; label: string; url: string }>) => {
     setLinkInputs((current) => ({

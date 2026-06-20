@@ -259,6 +259,7 @@ export const AGENT_SUPPORT_MATRIX: Array<{
 
 const SETTINGS_KEY = 'meetily.agentWorkflowSettings';
 const RUNS_KEY = 'meetily.agentWorkflowRuns';
+export const AGENT_WORKFLOW_RUNS_EVENT = 'meetily-agent-workflow-runs-updated';
 
 const defaultConsent: AgentContextConsent = {
   includeSummary: true,
@@ -534,6 +535,9 @@ function saveRun(run: AgentWorkflowRun) {
   const previousRuns = listAgentWorkflowRuns().filter((existing) => existing.id !== run.id);
   const next = [run, ...previousRuns].slice(0, 25);
   writeJson(RUNS_KEY, next);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(AGENT_WORKFLOW_RUNS_EVENT));
+  }
 }
 
 export function updateAgentWorkflowRun(

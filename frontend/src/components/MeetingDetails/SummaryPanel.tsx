@@ -13,10 +13,11 @@ import { AppleNotesExportPanel } from './AppleNotesExportPanel';
 import { CalendarEventPanel } from './CalendarEventPanel';
 import { AgentWorkflowRunsPanel } from '@/components/AgentWorkflowRunsPanel';
 import { MeetingChatPanel } from './MeetingChatPanel';
+import { MeetingChatCitation } from '@/services/meetingChatService';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
-import { Languages, ChevronDown, FileText, MessageCircle } from 'lucide-react';
+import { Languages, ChevronDown, FileText, MessageCircle, Bot, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
@@ -27,6 +28,7 @@ import {
   saveMeetingSummaryLanguage,
   SummaryLanguageStorage,
 } from '@/lib/summary-language-preferences';
+import { triggerMeetingAgentWorkflow } from '@/services/agentWorkflowTriggerService';
 
 interface SummaryPanelProps {
   meeting: {
@@ -66,6 +68,7 @@ interface SummaryPanelProps {
   onTemplateSelect: (templateId: string, templateName: string) => void;
   isModelConfigLoading?: boolean;
   onOpenModelSettings?: (openFn: () => void) => void;
+  onTranscriptCitationSelect?: (citation: MeetingChatCitation) => void | Promise<void>;
 }
 
 export function SummaryPanel({
@@ -101,13 +104,15 @@ export function SummaryPanel({
   selectedTemplate,
   onTemplateSelect,
   isModelConfigLoading = false,
-  onOpenModelSettings
+  onOpenModelSettings,
+  onTranscriptCitationSelect
 }: SummaryPanelProps) {
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [activeView, setActiveView] = useState<'summary' | 'chat'>('summary');
+  const [isTriggeringAutomation, setIsTriggeringAutomation] = useState(false);
   const languageLoadVersionRef = useRef(0);
   const activeMeetingIdRef = useRef(meeting.id);
   const languageSaveVersionRef = useRef(0);
@@ -236,6 +241,22 @@ export function SummaryPanel({
     setActiveView('summary');
   }, [meeting.id]);
 
+  const handleTriggerAutomation = async (source: 'manual-summary' | 'manual-chat') => {
+    if (isTriggeringAutomation) return;
+    setIsTriggeringAutomation(true);
+    try {
+      await triggerMeetingAgentWorkflow({
+        meetingId: meeting.id,
+        meetingTitle,
+        templateId: selectedTemplate,
+        summary: aiSummary,
+        source,
+      });
+    } finally {
+      setIsTriggeringAutomation(false);
+    }
+  };
+
   const languageSlot = (
     <Popover open={langPickerOpen} onOpenChange={setLangPickerOpen}>
       <PopoverTrigger asChild>
@@ -336,6 +357,18 @@ export function SummaryPanel({
 
               {/* Right-aligned: Summary Updater Button Group */}
               <div className="min-w-0 flex-shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleTriggerAutomation('manual-summary')}
+                  disabled={isTriggeringAutomation}
+                  title="Run the configured post-meeting agent automation again for this summary"
+                  className="mr-2"
+                >
+                  {isTriggeringAutomation ? <Loader2 size={16} className="animate-spin" /> : <Bot size={16} />}
+                  Run automation
+                </Button>
                 <SummaryUpdaterButtonGroup
                   isSaving={isSaving}
                   isDirty={isTitleDirty || (summaryRef.current?.isDirty || false)}
@@ -373,6 +406,9 @@ export function SummaryPanel({
           meetingTitle={meetingTitle}
           modelConfig={modelConfig}
           transcriptCount={transcripts.length}
+          onTranscriptCitationSelect={onTranscriptCitationSelect}
+          onRunAutomation={() => handleTriggerAutomation('manual-chat')}
+          isRunningAutomation={isTriggeringAutomation}
         />
       </div>
 

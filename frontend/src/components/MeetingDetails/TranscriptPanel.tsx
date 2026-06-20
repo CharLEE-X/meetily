@@ -1,10 +1,10 @@
 "use client";
 
 import { Transcript, TranscriptSegmentData } from '@/types';
-import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
+import { VirtualizedTranscriptView, VirtualizedTranscriptViewHandle } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { SpeakerScreenshotPanel } from './SpeakerScreenshotPanel';
-import { useCallback, useMemo, useState, type CSSProperties } from 'react';
+import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -33,7 +33,11 @@ interface TranscriptPanelProps {
   style?: CSSProperties;
 }
 
-export function TranscriptPanel({
+export interface TranscriptPanelHandle {
+  scrollToTranscript: (target: { transcriptId?: string | null; audioStartTime?: number | null }) => boolean;
+}
+
+export const TranscriptPanel = forwardRef<TranscriptPanelHandle, TranscriptPanelProps>(function TranscriptPanel({
   transcripts,
   customPrompt,
   customPromptHistory = [],
@@ -54,8 +58,10 @@ export function TranscriptPanel({
   onRefetchTranscripts,
   className = '',
   style,
-}: TranscriptPanelProps) {
+}, ref) {
   const [speakerLabelsByTranscriptId, setSpeakerLabelsByTranscriptId] = useState<Record<string, string>>({});
+  const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
+  const transcriptViewRef = useRef<VirtualizedTranscriptViewHandle | null>(null);
 
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -75,6 +81,51 @@ export function TranscriptPanel({
   const handleSpeakerLabelsChange = useCallback((labelsByTranscriptId: Record<string, string>) => {
     setSpeakerLabelsByTranscriptId(labelsByTranscriptId);
   }, []);
+
+  const resolveTargetSegment = useCallback((target: { transcriptId?: string | null; audioStartTime?: number | null }) => {
+    if (target.transcriptId) {
+      const exact = convertedSegments.find((segment) => segment.id === target.transcriptId);
+      if (exact) return exact;
+    }
+
+    if (typeof target.audioStartTime === 'number' && Number.isFinite(target.audioStartTime)) {
+      let closest: TranscriptSegmentData | null = null;
+      let closestDistance = Number.POSITIVE_INFINITY;
+
+      convertedSegments.forEach((segment) => {
+        const distance = Math.abs(segment.timestamp - target.audioStartTime!);
+        if (distance < closestDistance) {
+          closest = segment;
+          closestDistance = distance;
+        }
+      });
+
+      return closestDistance <= 0.75 ? closest : null;
+    }
+
+    return null;
+  }, [convertedSegments]);
+
+  useImperativeHandle(ref, () => ({
+    scrollToTranscript: (target) => {
+      const segment = resolveTargetSegment(target);
+      if (!segment) return false;
+
+      const didScroll = transcriptViewRef.current?.scrollToSegment({
+        segmentId: segment.id,
+        timestamp: segment.timestamp,
+      }) ?? false;
+
+      if (didScroll) {
+        setHighlightedSegmentId(segment.id);
+        window.setTimeout(() => {
+          setHighlightedSegmentId((current) => current === segment.id ? null : current);
+        }, 2400);
+      }
+
+      return didScroll;
+    },
+  }), [resolveTargetSegment]);
 
   return (
     <div
@@ -103,6 +154,7 @@ export function TranscriptPanel({
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
         <VirtualizedTranscriptView
+          ref={transcriptViewRef}
           segments={convertedSegments}
           isRecording={isRecording}
           isPaused={false}
@@ -117,6 +169,7 @@ export function TranscriptPanel({
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
           speakerLabelsBySegmentId={speakerLabelsByTranscriptId}
+          highlightedSegmentId={highlightedSegmentId}
         />
       </div>
 
@@ -155,4 +208,4 @@ export function TranscriptPanel({
       )}
     </div>
   );
-}
+});

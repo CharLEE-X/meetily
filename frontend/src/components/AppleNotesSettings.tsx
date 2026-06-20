@@ -107,9 +107,11 @@ export function AppleNotesSettings() {
     setActionLoading("connect")
     setMessage(null)
     try {
-      await appleNotesService.connectProvider()
+      const account = await appleNotesService.connectProvider()
       await refresh()
-      setMessage("Apple Notes connection prepared. The first export will request macOS Automation permission.")
+      setMessage(account.status === "connected"
+        ? "Apple Notes connected. Meetily can export summaries after you confirm the destination from a meeting."
+        : account.lastError ?? "Apple Notes permission is needed. Allow access in macOS Privacy & Security, then connect again.")
     } catch (error) {
       setMessage(friendlyError(error))
     } finally {
@@ -201,7 +203,9 @@ export function AppleNotesSettings() {
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-950">Apple Notes</h3>
-                <p className="text-sm text-gray-600">Export completed meeting summaries to app-managed Notes.</p>
+                <p className="max-w-3xl text-sm leading-6 text-gray-600">
+                  Export completed meeting summaries to app-managed Apple Notes folders. Exports are useful for long-term recall because they can include summary structure, action items, calendar links, and related Meetily records in one place.
+                </p>
               </div>
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
@@ -254,7 +258,9 @@ export function AppleNotesSettings() {
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-2">
           <h3 className="text-lg font-semibold text-gray-950">Automation health</h3>
-          <p className="text-sm text-gray-600">Checks that control whether Apple Notes export can run reliably.</p>
+          <p className="max-w-3xl text-sm leading-6 text-gray-600">
+            Checks that control whether Apple Notes export can run reliably. Permission, destination confirmation, and recent export status are separated so you can see whether the blocker is macOS Automation, a missing folder confirmation, or an export error.
+          </p>
         </div>
         <div className="mt-5 grid gap-3 lg:grid-cols-2">
           {healthItems.map((item) => (
@@ -278,7 +284,9 @@ export function AppleNotesSettings() {
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-2">
           <h3 className="text-lg font-semibold text-gray-950">Destination and automation</h3>
-          <p className="text-sm text-gray-600">Manual export always asks for confirmation. Auto-export only runs after this destination has been confirmed.</p>
+          <p className="max-w-3xl text-sm leading-6 text-gray-600">
+            Choose the root folder where Meetily-managed notes should live and decide whether summaries should export automatically. Manual export always asks for confirmation, while auto-export only runs after this destination has been confirmed from a meeting.
+          </p>
         </div>
 
         <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
@@ -313,7 +321,7 @@ export function AppleNotesSettings() {
           />
           <span>
             <span className="block text-sm font-medium text-gray-950">Auto-export after summary completion</span>
-            <span className="mt-1 block text-xs text-gray-500">Off by default. The first export for each destination still requires confirmation from meeting details.</span>
+            <span className="mt-1 block text-xs leading-5 text-gray-500">Off by default. When enabled, new completed summaries can be written to the confirmed folder without another prompt, while failed exports remain visible in history.</span>
           </span>
         </label>
       </div>
@@ -322,7 +330,9 @@ export function AppleNotesSettings() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-lg font-semibold text-gray-950">Export history</h3>
-            <p className="text-sm text-gray-600">Recent Apple Notes exports created by Meetily.</p>
+            <p className="max-w-3xl text-sm leading-6 text-gray-600">
+              Recent Apple Notes exports created or updated by Meetily. Use this to confirm that automation ran, spot failed exports, and understand which account or folder received the note.
+            </p>
           </div>
           {isLoading && <Loader2 className="h-5 w-5 animate-spin text-gray-400" />}
         </div>

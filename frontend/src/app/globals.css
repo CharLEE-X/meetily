@@ -106,25 +106,25 @@
   }
 
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
+    --background: 222 47% 6%;
+    --foreground: 210 40% 96%;
+    --card: 222 32% 10%;
+    --card-foreground: 210 40% 96%;
+    --popover: 222 32% 10%;
+    --popover-foreground: 210 40% 96%;
     --primary: 0 0% 98%;
     --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
+    --secondary: 222 24% 14%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
+    --muted: 222 20% 16%;
+    --muted-foreground: 215 20% 68%;
+    --accent: 158 38% 18%;
+    --accent-foreground: 152 56% 88%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
+    --border: 217 19% 22%;
+    --input: 217 19% 22%;
+    --ring: 158 64% 46%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
@@ -184,6 +184,60 @@
   .custom-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: #cbd5d1 transparent;
+  }
+
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #475569;
+  }
+
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+  }
+
+  .dark .custom-scrollbar {
+    scrollbar-color: #475569 transparent;
+  }
+
+  .dark :where(.bg-white) {
+    background-color: hsl(var(--card)) !important;
+  }
+
+  .dark :where(.bg-gray-50, .bg-slate-50, .bg-slate-50\/70, .bg-white\/90, .bg-white\/95) {
+    background-color: hsl(var(--muted)) !important;
+  }
+
+  .dark :where(.bg-gray-100, .bg-slate-100) {
+    background-color: hsl(222 22% 18%) !important;
+  }
+
+  .dark :where(.border-gray-200, .border-gray-200\/80, .border-slate-200, .border-slate-200\/80, .border-gray-300, .border-slate-300) {
+    border-color: hsl(var(--border)) !important;
+  }
+
+  .dark :where(.text-gray-950, .text-slate-950, .text-gray-900, .text-slate-900, .text-gray-800, .text-slate-800, .text-black) {
+    color: hsl(var(--foreground)) !important;
+  }
+
+  .dark :where(.text-gray-700, .text-slate-700, .text-gray-600, .text-slate-600) {
+    color: hsl(215 20% 78%) !important;
+  }
+
+  .dark :where(.text-gray-500, .text-slate-500, .text-gray-400, .text-slate-400) {
+    color: hsl(var(--muted-foreground)) !important;
+  }
+
+  .dark :where(input, textarea, select) {
+    background-color: hsl(var(--card)) !important;
+    border-color: hsl(var(--input)) !important;
+    color: hsl(var(--foreground)) !important;
+  }
+
+  .dark :where(input::placeholder, textarea::placeholder) {
+    color: hsl(var(--muted-foreground)) !important;
+  }
+
+  .dark :where(.shadow-sm, .shadow, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl) {
+    --tw-shadow-color: rgb(0 0 0 / 0.35);
   }
 
   @media (prefers-reduced-motion: reduce) {

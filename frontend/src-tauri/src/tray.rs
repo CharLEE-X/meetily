@@ -1,8 +1,7 @@
 use tauri::{
-    Emitter,
     menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager, Runtime,
+    AppHandle, Emitter, Manager, Runtime,
 };
 
 #[derive(Debug, Clone)]
@@ -40,17 +39,44 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, item_id: &str) {
         "pause_recording" => pause_recording_handler(app),
         "resume_recording" => resume_recording_handler(app),
         "stop_recording" => stop_recording_handler(app),
-        "open_window" => focus_main_window(app),
-        "settings" => {
-            focus_main_window(app);
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.eval("window.location.assign('/settings')");
-            }
-        }
+        "open_window" => navigate_main_window(app, "/"),
+        "ask_meetings" => navigate_main_window(app, "/summary-chat"),
+        "import_audio" => import_audio_handler(app),
+        "open_recordings_folder" => open_recordings_folder_handler(app),
+        "settings" => navigate_main_window(app, "/settings"),
         "check_updates" => check_updates_handler(app),
         "quit" => app.exit(0),
         _ => {}
     }
+}
+
+fn navigate_main_window<R: Runtime>(app: &AppHandle<R>, path: &str) {
+    focus_main_window(app);
+    if let Some(window) = app.get_webview_window("main") {
+        let script = format!("window.location.assign('{}')", path);
+        if let Err(e) = window.eval(&script) {
+            log::error!("Failed to navigate main window to {}: {}", path, e);
+        }
+    }
+}
+
+fn import_audio_handler<R: Runtime>(app: &AppHandle<R>) {
+    focus_main_window(app);
+    if let Err(e) = app.emit("tray-open-import-audio", ()) {
+        log::error!("Failed to emit tray-open-import-audio event: {}", e);
+    }
+}
+
+fn open_recordings_folder_handler<R: Runtime>(app: &AppHandle<R>) {
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) =
+            crate::audio::recording_preferences::open_recordings_folder(app_clone.clone()).await
+        {
+            log::error!("Failed to open recordings folder from tray: {}", e);
+            let _ = app_clone.emit("tray-action-error", e);
+        }
+    });
 }
 fn toggle_recording_handler<R: Runtime>(app: &AppHandle<R>) {
     focus_main_window(app);
@@ -92,7 +118,10 @@ fn toggle_recording_handler<R: Runtime>(app: &AppHandle<R>) {
                     // Trigger frontend post-processing via event (works from any page)
                     // (SQLite save, navigation, analytics)
                     if let Err(e) = app_clone.emit("recording-stop-complete", true) {
-                        log::error!("Tray toggle: Failed to emit recording-stop-complete event: {}", e);
+                        log::error!(
+                            "Tray toggle: Failed to emit recording-stop-complete event: {}",
+                            e
+                        );
                     }
                 }
                 Err(e) => {
@@ -203,9 +232,7 @@ fn stop_recording_handler<R: Runtime>(app: &AppHandle<R>) {
 fn check_updates_handler<R: Runtime>(app: &AppHandle<R>) {
     focus_main_window(app);
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.eval(
-            "window.dispatchEvent(new CustomEvent('check-updates-from-tray'))"
-        );
+        let _ = window.eval("window.dispatchEvent(new CustomEvent('check-updates-from-tray'))");
     }
 }
 
@@ -269,7 +296,10 @@ async fn check_can_record<R: Runtime>(app: &AppHandle<R>) -> bool {
     let onboarding_complete = match crate::onboarding::load_onboarding_status(app).await {
         Ok(status) => status.completed,
         Err(e) => {
-            log::warn!("Tray: Failed to load onboarding status: {}, assuming complete", e);
+            log::warn!(
+                "Tray: Failed to load onboarding status: {}, assuming complete",
+                e
+            );
             true // Assume complete if we can't check (safe default)
         }
     };
@@ -284,7 +314,10 @@ async fn check_can_record<R: Runtime>(app: &AppHandle<R>) -> bool {
     match crate::parakeet_engine::commands::parakeet_has_available_models().await {
         Ok(has_models) => has_models,
         Err(e) => {
-            log::warn!("Tray: Failed to check Parakeet models: {}, assuming not ready", e);
+            log::warn!(
+                "Tray: Failed to check Parakeet models: {}, assuming not ready",
+                e
+            );
             false
         }
     }
@@ -330,8 +363,9 @@ fn build_menu<R: Runtime>(
     } else {
         match state {
             RecordingState::Stopped => {
-                builder = builder
-                    .item(&MenuItemBuilder::with_id("toggle_recording", "Start Recording").build(app)?);
+                builder = builder.item(
+                    &MenuItemBuilder::with_id("toggle_recording", "Start Recording").build(app)?,
+                );
             }
             RecordingState::Starting => {
                 builder = builder.item(
@@ -342,8 +376,14 @@ fn build_menu<R: Runtime>(
             }
             RecordingState::Recording => {
                 builder = builder
-                    .item(&MenuItemBuilder::with_id("pause_recording", "⏸ Pause Recording").build(app)?)
-                    .item(&MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording").build(app)?);
+                    .item(
+                        &MenuItemBuilder::with_id("pause_recording", "⏸ Pause Recording")
+                            .build(app)?,
+                    )
+                    .item(
+                        &MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording")
+                            .build(app)?,
+                    );
             }
             RecordingState::Pausing => {
                 builder = builder
@@ -352,7 +392,10 @@ fn build_menu<R: Runtime>(
                             .enabled(false)
                             .build(app)?,
                     )
-                    .item(&MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording").build(app)?);
+                    .item(
+                        &MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording")
+                            .build(app)?,
+                    );
             }
             RecordingState::Paused => {
                 builder = builder
@@ -360,7 +403,10 @@ fn build_menu<R: Runtime>(
                         &MenuItemBuilder::with_id("resume_recording", "▶ Resume Recording")
                             .build(app)?,
                     )
-                    .item(&MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording").build(app)?);
+                    .item(
+                        &MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording")
+                            .build(app)?,
+                    );
             }
             RecordingState::Resuming => {
                 builder = builder
@@ -369,7 +415,10 @@ fn build_menu<R: Runtime>(
                             .enabled(false)
                             .build(app)?,
                     )
-                    .item(&MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording").build(app)?);
+                    .item(
+                        &MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording")
+                            .build(app)?,
+                    );
             }
             RecordingState::Stopping => {
                 builder = builder.item(
@@ -383,7 +432,14 @@ fn build_menu<R: Runtime>(
 
     builder
         .item(&PredefinedMenuItem::separator(app)?)
-        .item(&MenuItemBuilder::with_id("open_window", "Open Main Window").build(app)?)
+        .item(&MenuItemBuilder::with_id("open_window", "Open Dashboard").build(app)?)
+        .item(&MenuItemBuilder::with_id("ask_meetings", "Ask Meetings").build(app)?)
+        .item(&MenuItemBuilder::with_id("import_audio", "Import Audio...").build(app)?)
+        .item(
+            &MenuItemBuilder::with_id("open_recordings_folder", "Open Recordings Folder")
+                .build(app)?,
+        )
+        .item(&PredefinedMenuItem::separator(app)?)
         .item(&MenuItemBuilder::with_id("settings", "Settings").build(app)?)
         .item(&MenuItemBuilder::with_id("check_updates", "Check for Updates").build(app)?)
         .item(&PredefinedMenuItem::separator(app)?)

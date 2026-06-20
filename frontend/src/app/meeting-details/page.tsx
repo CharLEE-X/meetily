@@ -44,6 +44,7 @@ function MeetingDetailsContent() {
     totalCount,
     loadedCount,
     loadMore,
+    loadUntilTranscript,
     refetch,
     error: transcriptError,
   } = usePaginatedTranscripts({ meetingId: meetingId || '' });
@@ -377,6 +378,7 @@ function MeetingDetailsContent() {
     totalCount={totalCount}
     loadedCount={loadedCount}
     onLoadMore={loadMore}
+    loadUntilTranscript={loadUntilTranscript}
   />;
 }
 

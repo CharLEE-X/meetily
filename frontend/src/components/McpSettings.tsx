@@ -333,7 +333,7 @@ export function McpSettings() {
               <h3 className="text-lg font-semibold text-gray-900">Meetily MCP</h3>
             </div>
             <p className="mt-2 max-w-2xl text-sm text-gray-600">
-              Local agent access is off by default. Enable it only for clients you trust on this machine.
+              Local agent access is off by default. Enable it only for clients you trust on this machine because authorized agents can query approved meeting metadata, summaries, transcripts, and workflow context through the local MCP endpoint.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -352,10 +352,12 @@ export function McpSettings() {
               <Power className="h-4 w-4" />
               Server URL
             </div>
+            <p className="mt-2 text-xs leading-5 text-gray-600">Agents use this local-only URL to call Meetily tools. It is not intended to be exposed on a public network.</p>
             <p className="mt-2 break-all font-mono text-xs text-gray-600">{serverUrl}</p>
           </div>
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
             <label className="text-sm font-medium text-gray-900" htmlFor="mcp-port">Port</label>
+            <p className="mt-2 text-xs leading-5 text-gray-600">Change this only if another local service already uses the default port. The server must be stopped before the port can change.</p>
             <input
               id="mcp-port"
               className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
@@ -371,7 +373,7 @@ export function McpSettings() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-medium text-gray-900">Auto-start</div>
-                <p className="mt-1 text-xs text-gray-600">Start MCP when Meetily opens.</p>
+                <p className="mt-1 text-xs leading-5 text-gray-600">Start MCP when Meetily opens so configured agents can use meeting tools without manually toggling the server each time.</p>
               </div>
               <Switch
                 checked={Boolean(status?.settings.autoStart)}
@@ -398,7 +400,9 @@ export function McpSettings() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Agent setup</h3>
-            <p className="mt-1 text-sm text-gray-600">Configure Claude, Codex, and Cursor to use the local Meetily MCP endpoint.</p>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
+              Configure Claude, Codex, and Cursor to use the local Meetily MCP endpoint. Setup writes or repairs the agent configuration, then the readiness checks show whether the app is configured and working.
+            </p>
           </div>
           <div className="flex gap-2">
             <button
@@ -505,6 +509,7 @@ export function McpSettings() {
           </div>
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
             <label className="text-sm font-medium text-gray-900" htmlFor="default-agent">Default agent</label>
+            <p className="mt-2 text-xs leading-5 text-gray-600">The preferred agent for post-meeting handoffs when no custom rule matches the meeting.</p>
             <select
               id="default-agent"
               className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
@@ -519,6 +524,7 @@ export function McpSettings() {
           </div>
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
             <label className="text-sm font-medium text-gray-900" htmlFor="workflow-mode">Post-meeting mode</label>
+            <p className="mt-2 text-xs leading-5 text-gray-600">Off disables handoffs, Ask prepares a review step, and Auto prepares the handoff automatically when the selected agent is ready.</p>
             <select
               id="workflow-mode"
               className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
@@ -573,7 +579,7 @@ export function McpSettings() {
               <option value="standard">Standard</option>
               <option value="detailed">Detailed</option>
             </select>
-            <p className="mt-2 text-xs text-gray-600">Controls how much cited meeting context is sent to the agent handoff.</p>
+            <p className="mt-2 text-xs leading-5 text-gray-600">Controls how much cited meeting context is sent to the agent handoff. Use Minimal for quick task routing, Standard for normal follow-up, and Detailed when the agent needs stronger transcript evidence.</p>
           </div>
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
             <label className="text-sm font-medium text-gray-900" htmlFor="prompt-template">Prompt template</label>
@@ -615,6 +621,9 @@ export function McpSettings() {
 
         <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
           <div className="text-sm font-medium text-gray-900">Allowed content sources</div>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-gray-600">
+            Choose which parts of a meeting can be included in agent handoffs. Disable sources you do not want agents to see, especially transcript excerpts, screenshot OCR, and artifact links.
+          </p>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             {([
               ["includeSummary", "Summary"],
@@ -644,7 +653,9 @@ export function McpSettings() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-medium text-gray-900">Automation rules</div>
-              <p className="mt-1 text-xs text-gray-600">First matching enabled rule overrides the global agent, mode, actions, budget, and sources.</p>
+              <p className="mt-1 max-w-3xl text-xs leading-5 text-gray-600">
+                First matching enabled rule overrides the global agent, mode, actions, budget, and sources. Use rules for predictable meeting types such as customer calls, project standups, or planning sessions.
+              </p>
             </div>
             <button
               className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-white disabled:opacity-50"
@@ -796,7 +807,7 @@ export function McpSettings() {
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <h3 className="text-lg font-semibold text-gray-900">Agent support matrix</h3>
         <p className="mt-1 text-sm text-gray-600">
-          Meetily can configure MCP for supported local agents, but direct task invocation depends on each client. Unsupported launch paths degrade to copyable handoff prompts.
+          Meetily can configure MCP for supported local agents, but direct task invocation depends on each client. Unsupported launch paths degrade to copyable handoff prompts so you can still pass meeting context manually.
         </p>
         <div className="mt-4 overflow-hidden rounded-lg border border-gray-200">
           <table className="w-full table-fixed text-left text-sm">
@@ -828,6 +839,9 @@ export function McpSettings() {
             <ShieldCheck className="h-5 w-5 text-blue-600" />
             <h3 className="text-lg font-semibold text-gray-900">Authorized clients</h3>
           </div>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
+            Clients listed here have been granted local access tokens for Meetily MCP. Revoke anything you no longer use or do not recognize.
+          </p>
           <div className="mt-4 space-y-3">
             {clients.length === 0 ? (
               <p className="text-sm text-gray-600">No trusted clients yet. Use Agent setup to authorize Claude, Codex, or Cursor.</p>
@@ -862,6 +876,9 @@ export function McpSettings() {
 
         <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-gray-900">Audit log</h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
+            Recent MCP tool calls from authorized clients. Use this to see which agent accessed which tool, whether it succeeded, and which meeting IDs were involved.
+          </p>
           <div className="mt-4 space-y-3">
             {auditEvents.length === 0 ? (
               <p className="text-sm text-gray-600">No MCP access events yet.</p>
@@ -892,6 +909,9 @@ export function McpSettings() {
 
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <h3 className="text-lg font-semibold text-gray-900">Post-meeting workflow log</h3>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
+          Recent handoff runs prepared after meetings. This helps you confirm which rule matched, which agent was targeted, and whether the workflow needed manual approval.
+        </p>
         <div className="mt-4">
           <AgentWorkflowRunsPanel limit={8} />
         </div>

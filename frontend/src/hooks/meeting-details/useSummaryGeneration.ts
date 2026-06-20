@@ -12,15 +12,7 @@ import {
   readMeetingSummaryLanguage,
   readCachedDetectedSummaryLanguage,
 } from '@/lib/summary-language-preferences';
-import { mcpService } from '@/services/mcpService';
-import {
-  getAgentWorkflowSettings,
-  prepareAgentWorkflow,
-} from '@/services/agentWorkflowService';
-import {
-  markAgentWorkflowPromptCopied,
-  triggerPreparedAgentWorkflow,
-} from '@/services/agentInvocationService';
+import { triggerMeetingAgentWorkflow } from '@/services/agentWorkflowTriggerService';
 
 async function resolveSummaryLanguage(
   meetingId: string,
@@ -88,85 +80,13 @@ export function useSummaryGeneration({
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
 
   const triggerPostMeetingWorkflow = useCallback(async (summary: Summary | { markdown?: string }, meetingTitle?: string) => {
-    const settings = getAgentWorkflowSettings();
-    if (settings.mode === 'off' || !settings.skillPackInstalled) {
-      return;
-    }
-
-    try {
-      const [mcpStatus, agentStatuses] = await Promise.all([
-        mcpService.getStatus(),
-        mcpService.getAgentStatuses(),
-      ]);
-      const prepared = prepareAgentWorkflow(
-        {
-          meetingId: meeting.id,
-          meetingTitle: meetingTitle || meeting.title || 'Untitled meeting',
-          templateId: selectedTemplate,
-          summary,
-          mcpUrl: mcpStatus.url,
-        },
-        mcpStatus,
-        agentStatuses,
-        settings
-      );
-
-      if (!prepared.canRun) {
-        toast.info('Post-meeting workflow skipped', {
-          description: prepared.reason ?? 'Review agent workflow settings.',
-        });
-        return;
-      }
-
-      const copyPrompt = () => {
-        if (!navigator.clipboard) {
-          toast.error('Clipboard is not available');
-          return;
-        }
-        navigator.clipboard.writeText(prepared.prompt).then(
-          () => {
-            markAgentWorkflowPromptCopied(prepared.run.id);
-            toast.success('Agent handoff copied');
-          },
-          () => toast.error('Unable to copy agent handoff')
-        );
-      };
-
-      if (prepared.run.mode === 'auto') {
-        const result = await triggerPreparedAgentWorkflow(prepared);
-        toast.info(
-          result.status === 'fallbackReady' ? 'Agent handoff fallback ready' : 'Post-meeting agent workflow triggered',
-          {
-            description: result.message,
-            duration: 12000,
-            action: result.prompt
-              ? {
-                label: 'Copy prompt',
-                onClick: copyPrompt,
-              }
-              : undefined,
-          }
-        );
-        return;
-      }
-
-      toast.info(
-        'Post-meeting workflow ready',
-        {
-          description: 'Review and copy the prepared agent prompt before running it.',
-          duration: 12000,
-          action: {
-            label: 'Copy prompt',
-            onClick: copyPrompt,
-          },
-        }
-      );
-    } catch (error) {
-      console.error('Failed to prepare post-meeting workflow:', error);
-      toast.error('Post-meeting workflow failed', {
-        description: error instanceof Error ? error.message : 'Review agent workflow settings.',
-      });
-    }
+    await triggerMeetingAgentWorkflow({
+      meetingId: meeting.id,
+      meetingTitle: meetingTitle || meeting.title || 'Untitled meeting',
+      templateId: selectedTemplate,
+      summary,
+      source: 'automatic-summary',
+    });
   }, [meeting.id, meeting.title, selectedTemplate]);
 
   // Helper to get status message

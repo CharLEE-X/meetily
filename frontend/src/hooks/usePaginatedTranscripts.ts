@@ -23,6 +23,7 @@ interface UsePaginatedTranscriptsReturn {
 
     // Actions
     loadMore: () => Promise<void>;
+    loadUntilTranscript: (target: { transcriptId?: string | null; audioStartTime?: number | null }) => Promise<boolean>;
     reset: () => void;
     refetch: () => Promise<void>;
 }
@@ -53,9 +54,14 @@ export function usePaginatedTranscripts({
     const [error, setError] = useState<string | null>(null);
 
     const offsetRef = useRef(0);
+    const transcriptsRef = useRef<Transcript[]>([]);
     const loadedMeetingIdRef = useRef<string | null>(null);
     const isLoadingRef = useRef(false);
     const lastLoadTimeRef = useRef(0); // Debounce protection
+
+    useEffect(() => {
+        transcriptsRef.current = transcripts;
+    }, [transcripts]);
 
     // Reset state when meeting changes
     const reset = useCallback(() => {
@@ -111,11 +117,14 @@ export function usePaginatedTranscripts({
                     const existingIds = new Set(prev.map(t => t.id));
                     const uniqueNew = newTranscripts.filter(t => !existingIds.has(t.id));
                     // Sort by audio_start_time
-                    return [...prev, ...uniqueNew].sort((a, b) =>
+                    const merged = [...prev, ...uniqueNew].sort((a, b) =>
                         (a.audio_start_time ?? 0) - (b.audio_start_time ?? 0)
                     );
+                    transcriptsRef.current = merged;
+                    return merged;
                 });
             } else {
+                transcriptsRef.current = newTranscripts;
                 setTranscripts(newTranscripts);
             }
 
@@ -151,6 +160,57 @@ export function usePaginatedTranscripts({
             isLoadingRef.current = false;
         }
     }, [hasMore, meetingId, loadTranscriptsAtOffset, isLoading]);
+
+    const transcriptMatchesTarget = useCallback((
+        transcript: Transcript,
+        target: { transcriptId?: string | null; audioStartTime?: number | null }
+    ) => {
+        if (target.transcriptId && transcript.id === target.transcriptId) {
+            return true;
+        }
+
+        if (typeof target.audioStartTime === 'number' && Number.isFinite(target.audioStartTime)) {
+            return Math.abs((transcript.audio_start_time ?? 0) - target.audioStartTime) < 0.75;
+        }
+
+        return false;
+    }, []);
+
+    const loadUntilTranscript = useCallback(async (
+        target: { transcriptId?: string | null; audioStartTime?: number | null }
+    ): Promise<boolean> => {
+        if (!meetingId || (!target.transcriptId && typeof target.audioStartTime !== 'number')) {
+            return false;
+        }
+
+        if (transcriptsRef.current.some((transcript) => transcriptMatchesTarget(transcript, target))) {
+            return true;
+        }
+
+        if (isLoadingRef.current) {
+            return false;
+        }
+
+        isLoadingRef.current = true;
+        setIsLoadingMore(true);
+        try {
+            while (offsetRef.current < totalCount || hasMore) {
+                const nextPage = await loadTranscriptsAtOffset(offsetRef.current, true);
+                if (nextPage.length === 0) {
+                    break;
+                }
+
+                if (nextPage.some((transcript) => transcriptMatchesTarget(transcript, target))) {
+                    return true;
+                }
+            }
+
+            return transcriptsRef.current.some((transcript) => transcriptMatchesTarget(transcript, target));
+        } finally {
+            setIsLoadingMore(false);
+            isLoadingRef.current = false;
+        }
+    }, [hasMore, loadTranscriptsAtOffset, meetingId, totalCount, transcriptMatchesTarget]);
 
     // Force refetch of data (e.g., after retranscription)
     const refetch = useCallback(async () => {
@@ -209,6 +269,7 @@ export function usePaginatedTranscripts({
         loadedCount: transcripts.length,
         error,
         loadMore,
+        loadUntilTranscript,
         reset,
         refetch,
     };

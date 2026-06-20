@@ -263,7 +263,9 @@ export function CalendarSettings() {
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-950">Apple Calendar</h3>
-                <p className="text-sm text-gray-600">Read upcoming event metadata locally for meeting prompts and recording titles.</p>
+                <p className="max-w-3xl text-sm leading-6 text-gray-600">
+                  Read upcoming event metadata locally for meeting prompts, recording titles, assisted join links, and better post-meeting context. Meetily does not read private meeting content beyond the metadata needed for these workflows.
+                </p>
               </div>
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
@@ -320,7 +322,9 @@ export function CalendarSettings() {
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-2">
           <h3 className="text-lg font-semibold text-gray-950">Automation health</h3>
-          <p className="text-sm text-gray-600">Checks that control meeting detection, prompt metadata, and event creation.</p>
+          <p className="max-w-3xl text-sm leading-6 text-gray-600">
+            Checks that control whether calendar-based meeting detection, title suggestions, prompt metadata, and event creation can run reliably. Warning states usually mean macOS permission is missing, sync has not completed, or event creation is disabled.
+          </p>
         </div>
         <div className="mt-5 grid gap-3 lg:grid-cols-2">
           {healthItems.map((item) => (
@@ -344,7 +348,9 @@ export function CalendarSettings() {
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <div>
           <h3 className="text-lg font-semibold text-gray-950">Event creation</h3>
-          <p className="text-sm text-gray-600">Create or update Meetily-owned Apple Calendar events for completed recordings.</p>
+          <p className="max-w-3xl text-sm leading-6 text-gray-600">
+            Create or update Meetily-owned Apple Calendar events for completed recordings so meetings, summaries, notes, and follow-up records can stay linked. This is off by default, and Meetily only updates events it created or explicitly linked.
+          </p>
         </div>
         <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
           <label className="block">
@@ -377,7 +383,7 @@ export function CalendarSettings() {
           />
           <span>
             <span className="block text-sm font-medium text-gray-950">Allow Meetily to create calendar events</span>
-            <span className="mt-1 block text-xs text-gray-500">Off by default. Meetily only updates events it created or linked.</span>
+            <span className="mt-1 block text-xs leading-5 text-gray-500">Off by default. When enabled, completed recordings can create a calendar event in the target calendar and later attach linked summary/export metadata.</span>
           </span>
         </label>
       </div>
@@ -386,7 +392,9 @@ export function CalendarSettings() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-lg font-semibold text-gray-950">Upcoming meetings</h3>
-            <p className="text-sm text-gray-600">Select an event to populate the next recording title and meeting metadata.</p>
+            <p className="max-w-3xl text-sm leading-6 text-gray-600">
+              Select an event to populate the next recording title, meeting URL, participants, and automation context. Selection affects only the next recording and can be cleared before you start.
+            </p>
           </div>
           {isLoading && <Loader2 className="h-5 w-5 animate-spin text-gray-400" />}
         </div>

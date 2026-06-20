@@ -22,8 +22,8 @@ export function BetaSettings() {
         <AlertCircle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
         <div className="text-sm text-yellow-800">
           <p className="font-medium">Beta Features</p>
-          <p className="mt-1">
-            These features are still being tested. You may encounter issues, and we appreciate your feedback.
+          <p className="mt-1 max-w-3xl leading-6">
+            These features are still being tested and may change shape before becoming stable. Enable them when you want to validate a new workflow early; disable them if you need the most predictable recording and summary experience.
           </p>
         </div>
       </div>
@@ -45,8 +45,11 @@ export function BetaSettings() {
                   BETA
                 </span>
               </div>
-              <p className="text-sm text-gray-600">
+              <p className="max-w-3xl text-sm leading-6 text-gray-600">
                 {BETA_FEATURE_DESCRIPTIONS[featureKey]}
+              </p>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500">
+                Turning this on exposes the related UI and workflow paths for testing. Turning it off hides the beta entry points but does not delete existing meetings or completed work.
               </p>
             </div>
 
@@ -62,8 +65,8 @@ export function BetaSettings() {
 
       {/* Info Box */}
       <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-        <p className="text-sm text-blue-800">
-          <strong>Note:</strong> When disabled, beta features will be hidden. Your existing meetings remain unaffected.
+        <p className="text-sm leading-6 text-blue-800">
+          <strong>Note:</strong> Beta settings are local to this app installation. When disabled, beta features are hidden and your existing meetings remain unaffected.
         </p>
       </div>
     </div>

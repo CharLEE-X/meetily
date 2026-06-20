@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { isTauriRuntime } from '@/lib/tauri';
 
 export type MeetingChatRole = 'user' | 'assistant';
@@ -42,6 +43,23 @@ export interface MeetingChatIndexStatus {
   rebuilt: boolean;
 }
 
+export interface MeetingChatStreamEvent {
+  scope: 'meeting' | 'summary' | string;
+  meetingId: string;
+  messageId: string;
+  kind: 'started' | 'delta' | 'done' | string;
+  delta: string | null;
+  status: MeetingChatStatus | null;
+  error: string | null;
+}
+
+export async function listenToMeetingChatStream(
+  handler: (event: MeetingChatStreamEvent) => void,
+): Promise<UnlistenFn | null> {
+  if (!isTauriRuntime()) return null;
+  return listen<MeetingChatStreamEvent>('meeting-chat-stream', (event) => handler(event.payload));
+}
+
 export const meetingChatService = {
   async listMessages(meetingId: string): Promise<MeetingChatMessage[]> {
     if (!isTauriRuntime()) return [];
@@ -65,5 +83,26 @@ export const meetingChatService = {
   async rebuildIndex(meetingId: string): Promise<MeetingChatIndexStatus | null> {
     if (!isTauriRuntime()) return null;
     return invoke<MeetingChatIndexStatus>('meeting_chat_rebuild_index', { meetingId });
+  },
+};
+
+export const globalSummaryChatService = {
+  async listMessages(): Promise<MeetingChatMessage[]> {
+    if (!isTauriRuntime()) return [];
+    return invoke<MeetingChatMessage[]>('global_summary_chat_list_messages');
+  },
+
+  async ask(question: string): Promise<AskMeetingChatResponse> {
+    if (!isTauriRuntime()) {
+      throw new Error('Summary chat is available in the desktop app.');
+    }
+    return invoke<AskMeetingChatResponse>('global_summary_chat_ask', {
+      request: { question },
+    });
+  },
+
+  async cancel(): Promise<void> {
+    if (!isTauriRuntime()) return;
+    await invoke('global_summary_chat_cancel');
   },
 };

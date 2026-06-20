@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, MessageCircle } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -450,6 +450,7 @@ const Sidebar: React.FC = () => {
     const isHomePage = pathname === '/';
     const isMeetingPage = pathname?.includes('/meeting-details');
     const isSettingsPage = pathname === '/settings';
+    const isSummaryChatPage = pathname === '/summary-chat';
 
     return (
       <TooltipProvider>
@@ -467,7 +468,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Home</p>
+              <p>Dashboard</p>
             </TooltipContent>
           </Tooltip>
 
@@ -487,6 +488,21 @@ const Sidebar: React.FC = () => {
             </TooltipTrigger>
             <TooltipContent side="right">
               <p>{isRecording ? "Recording in progress..." : "Start Recording"}</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => router.push('/summary-chat')}
+                className={`rounded-2xl p-2.5 transition-colors duration-150 ${isSummaryChatPage ? 'bg-slate-900 text-white shadow-[0_10px_24px_rgba(15,23,42,0.14)]' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
+                  }`}
+              >
+                <MessageCircle className="h-5 w-5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Ask meetings</p>
             </TooltipContent>
           </Tooltip>
 
@@ -520,7 +536,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Meeting Notes</p>
+              <p>Meeting library</p>
             </TooltipContent>
           </Tooltip>
 
@@ -720,12 +736,24 @@ const Sidebar: React.FC = () => {
           {/* Fixed navigation items */}
           <div className="flex-shrink-0">
             {!isCollapsed && (
+              <div className="px-3 pt-3">
+                <div className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Workspace</div>
+                <div
+                  onClick={() => router.push('/')}
+                  className={`flex h-10 cursor-pointer items-center rounded-xl p-3 text-sm font-semibold transition-colors ${pathname === '/' ? 'bg-slate-900 text-white shadow-[0_10px_24px_rgba(15,23,42,0.12)]' : 'text-slate-800 hover:bg-slate-100'}`}
+                >
+                  <Home className="mr-2 h-4 w-4" />
+                  <span>Dashboard</span>
+                </div>
+              </div>
+            )}
+            {!isCollapsed && (
               <div
-                onClick={() => router.push('/')}
-                className="mx-3 mt-3 flex h-10 cursor-pointer items-center rounded-xl p-3 text-base font-semibold text-slate-800 transition-colors hover:bg-slate-100"
+                onClick={() => router.push('/summary-chat')}
+                className={`mx-3 mt-1 flex h-10 cursor-pointer items-center rounded-xl p-3 text-sm font-semibold transition-colors ${pathname === '/summary-chat' ? 'bg-slate-900 text-white shadow-[0_10px_24px_rgba(15,23,42,0.12)]' : 'text-slate-800 hover:bg-slate-100'}`}
               >
-                <Home className="mr-2 h-4 w-4" />
-                <span>Home</span>
+                <MessageCircle className="mr-2 h-4 w-4" />
+                <span>Ask meetings</span>
               </div>
             )}
           </div>
@@ -736,13 +764,21 @@ const Sidebar: React.FC = () => {
             {/* Meeting Notes folder header - fixed */}
             {!isCollapsed && (
               <div className="flex-shrink-0">
+                <div className="mx-3 mt-4 px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Meeting library
+                </div>
                 {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
                   <div key={item.id}>
                     <div
-                      className="mx-3 mt-3 flex h-10 items-center rounded-xl p-3 text-base font-semibold"
+                      className="mx-3 flex h-10 items-center rounded-xl p-3 text-sm font-semibold"
                     >
                       <NotebookPen className="mr-2 h-4 w-4 text-slate-500" />
-                      <span className="text-slate-700">{item.title}</span>
+                      <span className="text-slate-700">All meetings</span>
+                      {item.children && (
+                        <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+                          {item.children.length}
+                        </span>
+                      )}
                       {searchQuery && item.id === 'meetings' && isSearching && (
                         <span className="ml-2 animate-pulse text-xs text-emerald-700">Searching...</span>
                       )}
@@ -771,6 +807,7 @@ const Sidebar: React.FC = () => {
         {!isCollapsed && (
 
           <div className="flex-shrink-0 border-t border-slate-200/80 p-3">
+            <div className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Actions</div>
             <button
               onClick={handleRecordingToggle}
               disabled={isRecording}
@@ -784,7 +821,7 @@ const Sidebar: React.FC = () => {
               ) : (
                 <>
                   <Mic className="mr-2 h-4 w-4" />
-                  <span>Start Recording</span>
+                  <span>Start recording</span>
                 </>
               )}
             </button>

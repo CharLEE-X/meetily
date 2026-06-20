@@ -235,6 +235,59 @@ export default function RootLayout({
     setShowImportDialog(true);
   }, []);
 
+  useEffect(() => {
+    if (!nativeRuntime) return
+
+    const unlisteners: UnlistenFn[] = [];
+    let cleanedUp = false;
+
+    const setupListeners = async () => {
+      const unlistenImportAudio = await listen('tray-open-import-audio', () => {
+        if (showOnboarding) {
+          toast.error('Please complete setup first', {
+            description: 'Finish onboarding before importing audio.'
+          });
+          return;
+        }
+
+        if (!loadBetaFeatures().importAndRetranscribe) {
+          toast.error('Beta feature disabled', {
+            description: 'Enable "Import Audio & Retranscribe" in Settings > Beta to use this feature.'
+          });
+          return;
+        }
+
+        handleOpenImportDialog();
+      });
+
+      if (cleanedUp) {
+        unlistenImportAudio();
+        return;
+      }
+      unlisteners.push(unlistenImportAudio);
+
+      const unlistenTrayError = await listen<string>('tray-action-error', (event) => {
+        toast.error('Tray action failed', {
+          description: event.payload,
+        });
+      });
+
+      if (cleanedUp) {
+        unlistenTrayError();
+        unlisteners.forEach(unlisten => unlisten());
+        return;
+      }
+      unlisteners.push(unlistenTrayError);
+    };
+
+    setupListeners();
+
+    return () => {
+      cleanedUp = true;
+      unlisteners.forEach(unlisten => unlisten());
+    };
+  }, [handleOpenImportDialog, nativeRuntime, showOnboarding]);
+
   const handleOnboardingComplete = () => {
     console.log('[Layout] Onboarding completed, reloading app')
     setShowOnboarding(false)
@@ -247,7 +300,7 @@ export default function RootLayout({
     return (
       <html lang="en">
         <body className={`${plusJakartaSans.variable} font-sans antialiased`}>
-          <main className="min-h-screen bg-[#f4f6f4] text-slate-950">
+          <main className="min-h-screen bg-background text-foreground">
             <div className="mx-auto flex min-h-screen max-w-3xl flex-col justify-center px-6 py-16">
               <div className="space-y-5">
                 <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">Web preview</p>
@@ -301,7 +354,7 @@ export default function RootLayout({
                               {showOnboarding ? (
                                 <OnboardingFlow onComplete={handleOnboardingComplete} />
                               ) : (
-                                <div className="flex min-h-screen bg-[#f4f6f4] text-slate-950">
+                                <div className="flex min-h-screen bg-background text-foreground">
                                   <Sidebar />
                                   <MainContent>{children}</MainContent>
                                 </div>
