@@ -131,6 +131,17 @@ pnpm run tauri:build
 
 Current Meetily does not require a separate FastAPI service, Docker backend, or manually started whisper-server process. Local transcription is handled by the Rust/Tauri desktop app.
 
+### Transcription Accuracy Upgrade
+
+This fork adds local transcription accuracy controls for high-signal meeting capture:
+
+- Fast, balanced, and high-accuracy model profiles over the existing Parakeet and Whisper local model catalogs.
+- Clear readiness states for missing, downloading, and ready transcription models.
+- Preprocessing presets that document the current native capture path and guide noisy-room or diagnostic benchmark runs.
+- Explicit language guidance: Whisper supports pinned languages and auto-translate, while Parakeet currently uses automatic language detection.
+
+Default behavior is unchanged for existing installs: new recordings continue to use the current Parakeet int8 default unless the user selects another profile. See [transcription accuracy baseline](../docs/transcription-accuracy-baseline.md), [benchmark fixtures](../docs/transcription-benchmark-fixtures.json), and [preprocessing/language handling](../docs/transcription-preprocessing-and-language.md) for QA details.
+
 For build and acceleration details, see:
 
 - [Building from Source](../docs/BUILDING.md)
