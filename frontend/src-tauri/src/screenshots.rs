@@ -56,6 +56,7 @@ impl Default for ScreenshotPreferences {
 #[derive(Debug, Clone, Default, PartialEq)]
 struct CaptureRuntimeState {
     paused: bool,
+    stopped: bool,
     last_capture_at: Option<DateTime<Utc>>,
     capture_count: u32,
 }
@@ -162,6 +163,7 @@ pub async fn start_meeting_screenshot_capture<R: Runtime>(
     let preferences = load_screenshot_preferences(&app)
         .await
         .map_err(|err| format!("Failed to load screenshot preferences: {}", err))?;
+    prune_expired_meeting_screenshots(state.db_manager.pool(), preferences.retention_days).await?;
 
     if !preferences.enabled {
         return Ok(ScreenshotCaptureStatus {
@@ -199,6 +201,9 @@ pub async fn start_meeting_screenshot_capture<R: Runtime>(
 
     let handle = tokio::spawn(async move {
         loop {
+            if is_capture_stopped(&runtime_state) {
+                break;
+            }
             let next_preferences = match load_screenshot_preferences(&app_for_task).await {
                 Ok(value) => value,
                 Err(err) => {
@@ -414,7 +419,7 @@ pub async fn delete_meeting_screenshot(
     let pool = state.db_manager.pool();
     let row = sqlx::query(
         r#"
-        SELECT file_path, metadata_json
+        SELECT file_path, thumbnail_path, metadata_json
         FROM meeting_screenshots
         WHERE id = ?
         "#,
@@ -429,16 +434,11 @@ pub async fn delete_meeting_screenshot(
     };
 
     let file_path: Option<String> = row.try_get("file_path").ok();
-    if let Some(file_path) = file_path {
-        if let Err(err) = std::fs::remove_file(&file_path) {
-            if err.kind() != std::io::ErrorKind::NotFound {
-                return Err(format!(
-                    "Failed to remove screenshot file {}: {}",
-                    file_path, err
-                ));
-            }
-        }
-    }
+    remove_optional_file(file_path.as_deref())
+        .map_err(|err| format!("Failed to remove screenshot file: {}", err))?;
+    let thumbnail_path: Option<String> = row.try_get("thumbnail_path").ok();
+    remove_optional_file(thumbnail_path.as_deref())
+        .map_err(|err| format!("Failed to remove screenshot thumbnail: {}", err))?;
 
     let now = Utc::now().to_rfc3339();
     if should_remove_metadata {
@@ -477,6 +477,17 @@ pub async fn delete_meeting_screenshot(
     }
 
     Ok(())
+}
+
+fn remove_optional_file(file_path: Option<&str>) -> std::io::Result<()> {
+    let Some(file_path) = file_path.filter(|value| !value.trim().is_empty()) else {
+        return Ok(());
+    };
+    match std::fs::remove_file(file_path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
 }
 
 fn screenshot_metadata_after_image_removal(
@@ -1143,18 +1154,62 @@ async fn load_meeting_screenshots(
         .collect())
 }
 
+async fn prune_expired_meeting_screenshots(
+    pool: &sqlx::SqlitePool,
+    retention_days: u32,
+) -> Result<(), String> {
+    let retention_days = retention_days.max(1);
+    let cutoff = Utc::now() - chrono::Duration::days(retention_days as i64);
+    let cutoff = cutoff.to_rfc3339();
+    let rows = sqlx::query(
+        r#"
+        SELECT id, file_path, thumbnail_path
+        FROM meeting_screenshots
+        WHERE captured_at < ?
+        "#,
+    )
+    .bind(&cutoff)
+    .fetch_all(pool)
+    .await
+    .map_err(|err| format!("Failed to load expired screenshots: {}", err))?;
+
+    for row in rows {
+        let file_path: Option<String> = row.try_get("file_path").ok();
+        remove_optional_file(file_path.as_deref())
+            .map_err(|err| format!("Failed to remove expired screenshot file: {}", err))?;
+        let thumbnail_path: Option<String> = row.try_get("thumbnail_path").ok();
+        remove_optional_file(thumbnail_path.as_deref())
+            .map_err(|err| format!("Failed to remove expired screenshot thumbnail: {}", err))?;
+        let id: String = row.get("id");
+        sqlx::query("DELETE FROM meeting_screenshots WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|err| format!("Failed to delete expired screenshot metadata: {}", err))?;
+    }
+
+    Ok(())
+}
+
 fn stop_capture_task(meeting_id: &str) -> bool {
     let Ok(mut tasks) = CAPTURE_TASKS.lock() else {
         return false;
     };
     if let Ok(mut states) = CAPTURE_RUNTIME.lock() {
-        states.remove(meeting_id);
+        if let Some(runtime_state) = states.remove(meeting_id) {
+            if let Ok(mut state) = runtime_state.lock() {
+                state.stopped = true;
+            }
+        }
     }
-    if let Some(handle) = tasks.remove(meeting_id) {
-        handle.abort();
-        return true;
-    }
-    false
+    tasks.remove(meeting_id).is_some()
+}
+
+fn is_capture_stopped(runtime_state: &Arc<Mutex<CaptureRuntimeState>>) -> bool {
+    runtime_state
+        .lock()
+        .map(|state| state.stopped)
+        .unwrap_or(true)
 }
 
 fn set_capture_paused(meeting_id: &str, paused: bool) -> Result<bool, String> {
@@ -1214,7 +1269,8 @@ fn mark_capture_completed(runtime_state: &Arc<Mutex<CaptureRuntimeState>>) -> Re
 fn normalize_trigger_reason(value: Option<&str>) -> String {
     match value {
         Some(reason @ ("speechEvent" | "speakerChange")) => reason.to_string(),
-        _ => "speechEvent".to_string(),
+        Some(_) => "unknown".to_string(),
+        _ => "unknown".to_string(),
     }
 }
 
@@ -1336,9 +1392,15 @@ end tell"#,
         return Err("Active meeting window bounds were too small or invalid; skipped call-window screenshot".to_string());
     }
 
-    let app_name_string = app_name.map(str::to_string);
-    let window_title_string = window_title.map(str::to_string);
-    let provider = detect_call_window_provider(app_name, window_title).ok_or_else(|| {
+    let active_tab_url = if app_name.map(is_supported_browser_app).unwrap_or(false) {
+        Some(resolve_browser_active_tab_url(app_name.ok_or_else(|| {
+            "Browser window metadata was unavailable; skipped call-window screenshot".to_string()
+        })?)?)
+    } else {
+        None
+    };
+    let provider = detect_call_window_provider(app_name, window_title, active_tab_url.as_deref())
+        .ok_or_else(|| {
         "No active supported meeting window was detected; skipped call-window screenshot"
             .to_string()
     })?;
@@ -1348,8 +1410,8 @@ end tell"#,
 
     Ok(CallWindowCaptureTarget {
         provider,
-        app_name: app_name_string,
-        window_title: window_title_string,
+        app_name: app_name.map(str::to_string),
+        window_title: window_title.map(str::to_string),
         window_id: Some(window_id),
         bounds,
         checked_at,
@@ -1403,23 +1465,23 @@ fn is_usable_window_bounds(bounds: &ScreenshotWindowBounds) -> bool {
 fn detect_call_window_provider(
     app_name: Option<&str>,
     window_title: Option<&str>,
+    active_tab_url: Option<&str>,
 ) -> Option<String> {
     let app = app_name.unwrap_or_default().to_lowercase();
     let title = window_title.unwrap_or_default().to_lowercase();
-    let is_browser = contains_any(
-        &app,
-        &[
-            "google chrome",
-            "chrome",
-            "arc",
-            "safari",
-            "microsoft edge",
-            "firefox",
-        ],
-    );
+    let active_tab_url = active_tab_url.unwrap_or_default().to_lowercase();
+    let is_browser = is_supported_browser_app(&app);
 
-    if is_browser && contains_any(&title, &["meet.google.com", "google meet"]) {
+    if is_browser && is_browser_meeting_url(&active_tab_url, "googleMeet") {
         Some("googleMeet".to_string())
+    } else if is_browser && is_browser_meeting_url(&active_tab_url, "zoom") {
+        Some("zoom".to_string())
+    } else if is_browser && is_browser_meeting_url(&active_tab_url, "teams") {
+        Some("teams".to_string())
+    } else if is_browser && is_browser_meeting_url(&active_tab_url, "webex") {
+        Some("webex".to_string())
+    } else if is_browser && is_browser_meeting_url(&active_tab_url, "slack") {
+        Some("slack".to_string())
     } else if equals_any(&app, &["zoom.us", "zoom workplace", "zoom"])
         || contains_any(&title, &["zoom.us", "zoom meeting", "zoom workplace"])
     {
@@ -1454,6 +1516,63 @@ fn detect_call_window_provider(
     } else {
         None
     }
+}
+
+fn is_browser_meeting_url(url: &str, provider: &str) -> bool {
+    match provider {
+        "googleMeet" => url.contains("meet.google.com/"),
+        "zoom" => {
+            (url.contains("zoom.us/j/") || url.contains("zoom.com/j/"))
+                || url.contains("zoom.us/wc/")
+                || url.contains("zoom.com/wc/")
+        }
+        "teams" => {
+            contains_any(url, &["teams.microsoft.com/l/meetup-join", "teams.live.com/meet"])
+        }
+        "webex" => contains_any(url, &["webex.com/meet/", "webex.com/join/", ".webex.com/"]),
+        "slack" => url.contains("slack.com/huddle"),
+        _ => false,
+    }
+}
+
+fn is_supported_browser_app(app_name: &str) -> bool {
+    let app = app_name.to_lowercase();
+    contains_any(
+        &app,
+        &[
+            "google chrome",
+            "chrome",
+            "arc",
+            "safari",
+            "microsoft edge",
+            "firefox",
+        ],
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_browser_active_tab_url(app_name: &str) -> Result<String, String> {
+    let app_name = app_name.trim();
+    let script = if app_name.eq_ignore_ascii_case("safari") {
+        r#"tell application "Safari"
+return URL of front document as text
+end tell"#
+        .to_string()
+    } else {
+        format!(
+            r#"tell application "{}"
+return URL of active tab of front window as text
+end tell"#,
+            app_name.replace('"', "")
+        )
+    };
+    let url = run_osascript(&script)
+        .map_err(|err| user_facing_call_window_error(&err))?
+        .ok_or_else(|| "Active browser tab URL was unavailable; skipped call-window screenshot".to_string())?;
+    if url.trim().is_empty() {
+        return Err("Active browser tab URL was empty; skipped call-window screenshot".to_string());
+    }
+    Ok(url)
 }
 
 fn equals_any(value: &str, candidates: &[&str]) -> bool {
@@ -1776,23 +1895,39 @@ mod tests {
     #[test]
     fn detects_supported_call_window_provider() {
         assert_eq!(
-            detect_call_window_provider(Some("Google Chrome"), Some("Google Meet - standup")),
+            detect_call_window_provider(
+                Some("Google Chrome"),
+                Some("Google Meet - standup"),
+                Some("https://meet.google.com/abc-defg-hij")
+            ),
             Some("googleMeet".to_string())
         );
         assert_eq!(
-            detect_call_window_provider(Some("Microsoft Teams"), Some("Weekly Sync")),
-            Some("teams".to_string())
-        );
-        assert_eq!(
-            detect_call_window_provider(Some("Zoom Workplace"), Some("Zoom Meeting")),
-            Some("zoom".to_string())
-        );
-        assert_eq!(
-            detect_call_window_provider(Some("Google Chrome"), Some("Zoom pricing page")),
+            detect_call_window_provider(
+                Some("Google Chrome"),
+                Some("Google Meet - standup"),
+                Some("https://bank.example.com/login")
+            ),
             None
         );
         assert_eq!(
-            detect_call_window_provider(Some("Finder"), Some("Downloads")),
+            detect_call_window_provider(Some("Microsoft Teams"), Some("Weekly Sync"), None),
+            Some("teams".to_string())
+        );
+        assert_eq!(
+            detect_call_window_provider(Some("Zoom Workplace"), Some("Zoom Meeting"), None),
+            Some("zoom".to_string())
+        );
+        assert_eq!(
+            detect_call_window_provider(
+                Some("Google Chrome"),
+                Some("Zoom pricing page"),
+                Some("https://zoom.us/pricing")
+            ),
+            None
+        );
+        assert_eq!(
+            detect_call_window_provider(Some("Finder"), Some("Downloads"), None),
             None
         );
     }
@@ -1880,6 +2015,7 @@ mod tests {
     fn scheduler_stops_after_max_capture_count() {
         let mut state = CaptureRuntimeState {
             paused: false,
+            stopped: false,
             last_capture_at: None,
             capture_count: MAX_SCREENSHOTS_PER_MEETING,
         };

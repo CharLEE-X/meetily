@@ -270,17 +270,50 @@ async fn delete_meeting_with_transaction(
         .execute(&mut *transaction)
         .await?;
 
-    // 5. Delete from transcripts
+    // 5. Delete meeting screenshots and app-managed screenshot files
+    let screenshot_files = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+        "SELECT file_path, thumbnail_path FROM meeting_screenshots WHERE meeting_id = ?",
+    )
+    .bind(meeting_id)
+    .fetch_all(&mut *transaction)
+    .await?;
+
+    for (file_path, thumbnail_path) in screenshot_files {
+        remove_optional_file(file_path.as_deref())?;
+        remove_optional_file(thumbnail_path.as_deref())?;
+    }
+
+    sqlx::query("DELETE FROM meeting_screenshots WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    // 6. Delete from transcripts
     sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
 
-    // 6. Finally, delete the meeting
+    // 7. Finally, delete the meeting
     let result = sqlx::query("DELETE FROM meetings WHERE id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
 
     Ok(result.rows_affected() > 0)
+}
+
+fn remove_optional_file(file_path: Option<&str>) -> Result<(), SqlxError> {
+    let Some(file_path) = file_path.filter(|value| !value.trim().is_empty()) else {
+        return Ok(());
+    };
+
+    match std::fs::remove_file(file_path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(SqlxError::Protocol(format!(
+            "failed to remove meeting screenshot artifact {}: {}",
+            file_path, err
+        ))),
+    }
 }

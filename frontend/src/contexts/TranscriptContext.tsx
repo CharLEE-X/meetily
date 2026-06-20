@@ -421,16 +421,27 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             indexedDBService.saveTranscript(currentMeetingId, update)
               .catch(err => console.warn('IndexedDB save failed:', err));
 
-            if (
-              (sessionStorage.getItem('screenshot_capture_mode') ?? screenshotCaptureModeRef.current) === 'speechEvent' &&
-              !update.is_partial &&
-              update.text.trim().length > 0
-            ) {
-              triggerMeetingScreenshotCapture(
-                currentMeetingId,
-                sessionStorage.getItem('recording_started_at'),
-                'speechEvent'
-              ).catch((error) => {
+            if (!update.is_partial && update.text.trim().length > 0) {
+              const triggerSpeechEventScreenshot = async () => {
+                let captureMode = sessionStorage.getItem('screenshot_capture_mode') ?? screenshotCaptureModeRef.current;
+                if (!captureMode) {
+                  const preferences = await getScreenshotPreferences();
+                  if (preferences.enabled) {
+                    captureMode = preferences.captureMode;
+                    screenshotCaptureModeRef.current = preferences.captureMode;
+                    sessionStorage.setItem('screenshot_capture_mode', preferences.captureMode);
+                  }
+                }
+                if (captureMode !== 'speechEvent') return;
+
+                await triggerMeetingScreenshotCapture(
+                  currentMeetingId,
+                  sessionStorage.getItem('recording_started_at'),
+                  'speechEvent'
+                );
+              };
+
+              triggerSpeechEventScreenshot().catch((error) => {
                 console.warn('Speech-event screenshot trigger failed:', error);
               });
             }
