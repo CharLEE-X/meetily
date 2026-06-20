@@ -39,14 +39,15 @@
 
 mod defaults;
 mod loader;
+pub mod storage;
 mod types;
 
 // Re-export public API
 pub use loader::{
-    get_template, list_template_ids, list_templates, set_bundled_templates_dir,
-    validate_and_parse_template,
+    get_template, list_stored_templates, list_template_ids, list_templates,
+    set_bundled_templates_dir, validate_and_parse_template,
 };
-pub use types::{Template, TemplateSection};
+pub use types::{Template, TemplateSection, ALLOWED_TEMPLATE_VARIABLES, TEMPLATE_SCHEMA_VERSION};
 
 #[cfg(test)]
 mod tests {

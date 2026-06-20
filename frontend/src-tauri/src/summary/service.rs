@@ -722,8 +722,12 @@ mod tests {
 
     fn test_template(section_title: &str) -> Template {
         Template {
+            id: None,
+            schema_version: crate::summary::templates::TEMPLATE_SCHEMA_VERSION,
             name: "Test".to_string(),
             description: "Test template".to_string(),
+            variables: vec![],
+            custom_instructions: None,
             sections: vec![crate::summary::templates::TemplateSection {
                 title: section_title.to_string(),
                 instruction: "Summarize this section".to_string(),

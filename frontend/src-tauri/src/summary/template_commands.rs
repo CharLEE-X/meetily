@@ -1,6 +1,7 @@
 use crate::summary::templates;
+use crate::summary::templates::storage::{self, StoredTemplate, TemplateExportBundle};
 use serde::{Deserialize, Serialize};
-use tauri::Runtime;
+use tauri::{Manager, Runtime};
 use tracing::{info, warn};
 
 /// Template metadata for UI display
@@ -14,6 +15,9 @@ pub struct TemplateInfo {
 
     /// Brief description of the template's purpose
     pub description: String,
+
+    /// Source of the template: builtIn or custom
+    pub source: String,
 }
 
 /// Detailed template structure for preview/debugging
@@ -32,6 +36,13 @@ pub struct TemplateDetails {
     pub sections: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveTemplateRequest {
+    pub id: String,
+    pub template: templates::Template,
+}
+
 /// Lists all available templates
 ///
 /// Returns templates from both built-in (embedded) and custom (user data directory) sources.
@@ -45,20 +56,125 @@ pub async fn api_list_templates<R: Runtime>(
 ) -> Result<Vec<TemplateInfo>, String> {
     info!("api_list_templates called");
 
-    let templates = templates::list_templates();
+    let stored_templates = templates::list_stored_templates();
 
-    let template_infos: Vec<TemplateInfo> = templates
+    let template_infos: Vec<TemplateInfo> = stored_templates
         .into_iter()
-        .map(|(id, name, description)| TemplateInfo {
-            id,
-            name,
-            description,
+        .map(|stored| TemplateInfo {
+            id: stored.id,
+            name: stored.template.name,
+            description: stored.template.description,
+            source: match stored.source {
+                storage::TemplateSource::BuiltIn => "builtIn".to_string(),
+                storage::TemplateSource::Custom => "custom".to_string(),
+            },
         })
         .collect();
 
     info!("Found {} available templates", template_infos.len());
 
     Ok(template_infos)
+}
+
+#[tauri::command]
+pub async fn api_save_custom_template<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    request: SaveTemplateRequest,
+) -> Result<StoredTemplate, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data directory: {}", error))?;
+
+    storage::save_custom_template_to_dir(&app_data_dir, &request.id, request.template)
+}
+
+#[tauri::command]
+pub async fn api_delete_custom_template<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<(), String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data directory: {}", error))?;
+
+    storage::delete_custom_template_from_dir(&app_data_dir, &template_id)
+}
+
+#[tauri::command]
+pub async fn api_duplicate_template<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    template_id: String,
+    new_template_id: String,
+    new_name: String,
+) -> Result<StoredTemplate, String> {
+    let mut template = templates::get_template(&template_id)?;
+    template.name = new_name;
+    template.id = Some(new_template_id.clone());
+
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data directory: {}", error))?;
+
+    storage::save_custom_template_to_dir(&app_data_dir, &new_template_id, template)
+}
+
+#[tauri::command]
+pub async fn api_export_custom_templates<R: Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<TemplateExportBundle, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data directory: {}", error))?;
+
+    storage::export_custom_templates_from_dir(&app_data_dir)
+}
+
+#[tauri::command]
+pub async fn api_import_custom_templates<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    bundle_json: String,
+) -> Result<Vec<StoredTemplate>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data directory: {}", error))?;
+
+    storage::import_custom_templates_to_dir(&app_data_dir, &bundle_json)
+}
+
+#[tauri::command]
+pub async fn api_restore_default_templates<R: Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<StoredTemplate>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data directory: {}", error))?;
+    let mut restored = Vec::new();
+
+    for id in [
+        "daily_standup",
+        "sales_marketing_client_call",
+        "psychiatric_session",
+        "retrospective",
+        "project_sync",
+        "standard_meeting",
+    ] {
+        let mut template = templates::get_template(id)?;
+        let new_id = storage::next_available_template_id(&app_data_dir, &format!("{}_copy", id))?;
+        template.id = Some(new_id.clone());
+        restored.push(storage::save_custom_template_to_dir(
+            &app_data_dir,
+            &new_id,
+            template,
+        )?);
+    }
+
+    Ok(restored)
 }
 
 /// Gets detailed information about a specific template
@@ -73,7 +189,10 @@ pub async fn api_get_template_details<R: Runtime>(
     _app: tauri::AppHandle<R>,
     template_id: String,
 ) -> Result<TemplateDetails, String> {
-    info!("api_get_template_details called for template_id: {}", template_id);
+    info!(
+        "api_get_template_details called for template_id: {}",
+        template_id
+    );
 
     let template = templates::get_template(&template_id)?;
 
@@ -140,6 +259,7 @@ mod tests {
     async fn test_validate_template_valid() {
         let valid_json = r#"
         {
+            "schema_version": 1,
             "name": "Test Template",
             "description": "A test template",
             "sections": [

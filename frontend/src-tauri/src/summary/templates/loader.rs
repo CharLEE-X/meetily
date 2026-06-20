@@ -1,9 +1,10 @@
 use super::defaults;
+use super::storage::{self, StoredTemplate, TemplateSource};
 use super::types::Template;
-use std::path::PathBuf;
-use tracing::{debug, info, warn};
 use once_cell::sync::Lazy;
+use std::path::PathBuf;
 use std::sync::RwLock;
+use tracing::{debug, info, warn};
 
 // Global storage for the bundled templates directory path
 static BUNDLED_TEMPLATES_DIR: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(None));
@@ -22,10 +23,10 @@ pub fn set_bundled_templates_dir(path: PathBuf) {
 /// - macOS: ~/Library/Application Support/Meetily/templates/
 /// - Windows: %APPDATA%\Meetily\templates\
 /// - Linux: ~/.config/Meetily/templates/
-fn get_custom_templates_dir() -> Option<PathBuf> {
+pub fn get_custom_templates_dir() -> Option<PathBuf> {
     let mut path = dirs::data_dir()?;
     path.push("Meetily");
-    path.push("templates");
+    path.push("summary-templates");
     Some(path)
 }
 
@@ -44,7 +45,10 @@ fn load_bundled_template(template_id: &str) -> Option<String> {
 
     match std::fs::read_to_string(&template_path) {
         Ok(content) => {
-            info!("Loaded bundled template '{}' from {:?}", template_id, template_path);
+            info!(
+                "Loaded bundled template '{}' from {:?}",
+                template_id, template_path
+            );
             Some(content)
         }
         Err(e) => {
@@ -69,7 +73,10 @@ fn load_custom_template(template_id: &str) -> Option<String> {
 
     match std::fs::read_to_string(&template_path) {
         Ok(content) => {
-            info!("Loaded custom template '{}' from {:?}", template_id, template_path);
+            info!(
+                "Loaded custom template '{}' from {:?}",
+                template_id, template_path
+            );
             Some(content)
         }
         Err(e) => {
@@ -125,8 +132,11 @@ pub fn get_template(template_id: &str) -> Result<Template, String> {
 /// # Returns
 /// Parsed and validated Template struct
 pub fn validate_and_parse_template(json_content: &str) -> Result<Template, String> {
-    let template: Template = serde_json::from_str(json_content)
-        .map_err(|e| format!("Failed to parse template JSON: {}", e))?;
+    let template = match serde_json::from_str::<StoredTemplate>(json_content) {
+        Ok(stored) => stored.template,
+        Err(_) => serde_json::from_str::<Template>(json_content)
+            .map_err(|e| format!("Failed to parse template JSON: {}", e))?,
+    };
 
     template.validate()?;
 
@@ -214,6 +224,45 @@ pub fn list_templates() -> Vec<(String, String, String)> {
         }
     }
 
+    templates
+}
+
+pub fn list_stored_templates() -> Vec<StoredTemplate> {
+    let mut templates = Vec::new();
+
+    for id in defaults::list_builtin_template_ids() {
+        if let Some(raw) = defaults::get_builtin_template(id) {
+            match validate_and_parse_template(raw) {
+                Ok(mut template) => {
+                    template.id = Some(id.to_string());
+                    templates.push(StoredTemplate {
+                        id: id.to_string(),
+                        template,
+                        source: TemplateSource::BuiltIn,
+                        created_at: "".to_string(),
+                        updated_at: "".to_string(),
+                    });
+                }
+                Err(e) => warn!("Failed to load built-in template '{}': {}", id, e),
+            }
+        }
+    }
+
+    if let Some(custom_dir) =
+        get_custom_templates_dir().and_then(|dir| dir.parent().map(PathBuf::from))
+    {
+        match storage::load_custom_templates_from_dir(&custom_dir) {
+            Ok(custom) => {
+                for custom_template in custom {
+                    templates.retain(|existing| existing.id != custom_template.id);
+                    templates.push(custom_template);
+                }
+            }
+            Err(e) => warn!("Failed to load stored custom templates: {}", e),
+        }
+    }
+
+    templates.sort_by(|a, b| a.template.name.cmp(&b.template.name));
     templates
 }
 
