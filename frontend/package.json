@@ -28,7 +28,8 @@
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
         "lint": "next lint",
-        "test:meeting-detection": "node --test --experimental-strip-types src/services/meetingDetectionSignals.test.ts"
+        "test:meeting-detection": "node --test --experimental-strip-types src/services/meetingDetectionSignals.test.ts",
+        "test:transcription-preprocessing": "node --test --experimental-strip-types src/lib/transcriptionPreprocessing.test.ts"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",

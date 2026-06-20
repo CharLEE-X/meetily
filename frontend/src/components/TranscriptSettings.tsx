@@ -15,6 +15,12 @@ import {
     getTranscriptionQualityProfile,
 } from '@/lib/transcriptionProfiles';
 import type { TranscriptionQualityProfile } from '@/lib/transcriptionProfiles';
+import {
+    TRANSCRIPTION_PREPROCESSING_PRESETS,
+    TRANSCRIPTION_PREPROCESSING_STORAGE_KEY,
+    getTranscriptionPreprocessingPreset,
+} from '@/lib/transcriptionPreprocessing';
+import type { TranscriptionPreprocessingPresetId } from '@/lib/transcriptionPreprocessing';
 
 
 export interface TranscriptModelProps {
@@ -38,7 +44,12 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
     const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
     const [profileReadiness, setProfileReadiness] = useState<Record<string, ProfileReadiness>>({});
+    const [preprocessingPresetId, setPreprocessingPresetId] = useState<TranscriptionPreprocessingPresetId>(() => {
+        if (typeof window === 'undefined') return 'balanced';
+        return getTranscriptionPreprocessingPreset(window.localStorage.getItem(TRANSCRIPTION_PREPROCESSING_STORAGE_KEY)).id;
+    });
     const activeProfile = getTranscriptionQualityProfile(transcriptModelConfig);
+    const activePreprocessingPreset = getTranscriptionPreprocessingPreset(preprocessingPresetId);
 
     // Sync uiProvider when backend config changes (e.g., after model selection or initial load)
     useEffect(() => {
@@ -194,6 +205,13 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }
     };
 
+    const handlePreprocessingPresetSelect = (presetId: TranscriptionPreprocessingPresetId) => {
+        setPreprocessingPresetId(presetId);
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(TRANSCRIPTION_PREPROCESSING_STORAGE_KEY, presetId);
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
@@ -279,6 +297,59 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         );
                     })}
                 </div>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-900">Preprocessing preset</h3>
+                        <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
+                            These presets describe how to run the current native capture path for better accuracy checks. Balanced keeps the production defaults: resampling, high-pass filtering, loudness normalization, and VAD pause bridging.
+                        </p>
+                    </div>
+                    <div className="rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-gray-700 ring-1 ring-gray-200">
+                        {activePreprocessingPreset.name}
+                    </div>
+                </div>
+                <div className="mt-5 grid gap-3 lg:grid-cols-3">
+                    {TRANSCRIPTION_PREPROCESSING_PRESETS.map((preset) => {
+                        const isSelected = activePreprocessingPreset.id === preset.id;
+                        return (
+                            <button
+                                key={preset.id}
+                                type="button"
+                                onClick={() => handlePreprocessingPresetSelect(preset.id)}
+                                className={`rounded-lg border p-4 text-left transition hover:border-blue-300 hover:bg-blue-50/40 ${isSelected
+                                    ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200'
+                                    : 'border-gray-200 bg-white'
+                                    }`}
+                            >
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <div className="text-sm font-semibold text-gray-900">{preset.name}</div>
+                                        <div className="mt-1 text-xs font-medium uppercase tracking-wide text-blue-700">{preset.badge}</div>
+                                    </div>
+                                    {isSelected && <CheckCircle2 className="h-5 w-5 shrink-0 text-blue-600" />}
+                                </div>
+                                <p className="mt-3 text-sm leading-6 text-gray-600">{preset.summary}</p>
+                                <div className="mt-4 text-xs leading-5 text-gray-600">
+                                    <div className="font-medium text-gray-900">Best for</div>
+                                    <p>{preset.bestFor}</p>
+                                    <div className="mt-3 font-medium text-gray-900">Pipeline notes</div>
+                                    <ul className="mt-1 list-disc space-y-1 pl-4">
+                                        {preset.pipeline.map((step) => (
+                                            <li key={step}>{step}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
+                {transcriptModelConfig.provider === 'parakeet' && (
+                    <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-100">
+                        Parakeet uses automatic language detection. Choose a Whisper profile when you need to pin a specific language or use auto-translate to English.
+                    </p>
+                )}
             </div>
             <div>
                 {/* <div className="flex justify-between items-center mb-4">
@@ -413,5 +484,4 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         </div >
     )
 }
-
 
