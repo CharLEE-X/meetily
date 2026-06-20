@@ -7,6 +7,7 @@ use crate::summary::metadata::{
     read_detected_summary_language_from_metadata, read_summary_language_from_metadata,
     write_detected_summary_language_to_metadata, write_summary_language_to_metadata,
 };
+use crate::summary::templates;
 use crate::summary::language_detection::{
     detect_summary_language, SummaryLanguageDetection,
 };
@@ -349,6 +350,13 @@ pub async fn api_process_transcript<R: Runtime>(
     let pool = state.db_manager.pool().clone();
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
+
+    templates::get_template(&final_template_id).map_err(|e| {
+        format!(
+            "Template '{}' is invalid or unavailable: {}",
+            final_template_id, e
+        )
+    })?;
 
     // Normalise empty / whitespace-only to None so "" and null behave identically
     let summary_language = summary_language.and_then(|s| {

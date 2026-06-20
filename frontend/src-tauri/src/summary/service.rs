@@ -54,6 +54,7 @@ fn strip_title_if_present(markdown: &str) -> String {
 }
 
 const ENGLISH_CACHE_FIELD: &str = "english_cache";
+const SUMMARY_TEMPLATE_METADATA_FIELD: &str = "summary_template";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct SummaryCacheSource {
@@ -140,8 +141,34 @@ fn build_summary_result_json(
     source: SummaryCacheSource,
     output_language: Option<&str>,
 ) -> serde_json::Value {
+    build_summary_result_json_with_template(
+        final_markdown,
+        english_markdown,
+        source,
+        output_language,
+        None,
+    )
+}
+
+fn build_summary_result_json_with_template(
+    final_markdown: &str,
+    english_markdown: &str,
+    source: SummaryCacheSource,
+    output_language: Option<&str>,
+    template: Option<&Template>,
+) -> serde_json::Value {
+    let template_metadata = template.map(|template| {
+        serde_json::json!({
+            "id": &source.template_id,
+            "schemaVersion": template.schema_version,
+            "name": &template.name,
+            "fingerprint": &source.template_fingerprint,
+        })
+    });
+
     serde_json::json!({
         "markdown": strip_title_if_present(final_markdown),
+        SUMMARY_TEMPLATE_METADATA_FIELD: template_metadata,
         ENGLISH_CACHE_FIELD: EnglishSummaryCache {
             markdown: english_markdown.to_string(),
             source,
@@ -554,11 +581,12 @@ impl SummaryService {
                     }
                 }
 
-                let result_json = build_summary_result_json(
+                let result_json = build_summary_result_json_with_template(
                     &final_markdown,
                     &english_markdown,
                     cache_source,
                     summary_language.as_deref(),
+                    Some(&template),
                 );
 
                 // Update database with completed status
@@ -774,6 +802,52 @@ mod tests {
         assert_eq!(
             extract_cached_english_markdown(&raw, &source, Some("de")).unwrap(),
             Some("# Meeting\n## Points\nHello".to_string())
+        );
+    }
+
+    #[test]
+    fn test_summary_result_records_template_metadata() {
+        let source = sample_cache_source();
+        let fingerprint = source.template_fingerprint.clone();
+        let mut template = test_template("Summary");
+        template.id = Some("standard_meeting".to_string());
+        template.name = "Standard Meeting Notes".to_string();
+
+        let result = build_summary_result_json_with_template(
+            "# Meeting\n## Summary\nFinal",
+            "# Meeting\n## Summary\nEnglish",
+            source,
+            Some("en"),
+            Some(&template),
+        );
+
+        assert_eq!(
+            result
+                .get(SUMMARY_TEMPLATE_METADATA_FIELD)
+                .and_then(|value| value.get("id"))
+                .and_then(|value| value.as_str()),
+            Some("standard_meeting")
+        );
+        assert_eq!(
+            result
+                .get(SUMMARY_TEMPLATE_METADATA_FIELD)
+                .and_then(|value| value.get("schemaVersion"))
+                .and_then(|value| value.as_u64()),
+            Some(crate::summary::templates::TEMPLATE_SCHEMA_VERSION as u64)
+        );
+        assert_eq!(
+            result
+                .get(SUMMARY_TEMPLATE_METADATA_FIELD)
+                .and_then(|value| value.get("name"))
+                .and_then(|value| value.as_str()),
+            Some("Standard Meeting Notes")
+        );
+        assert_eq!(
+            result
+                .get(SUMMARY_TEMPLATE_METADATA_FIELD)
+                .and_then(|value| value.get("fingerprint"))
+                .and_then(|value| value.as_str()),
+            Some(fingerprint.as_str())
         );
     }
 
