@@ -1237,6 +1237,16 @@ mod tests {
         assert_eq!(context.citations[0].transcript_id, None);
         assert!(context.prompt_context.contains("id=\"A1\""));
         assert!(context.prompt_context.contains("label=\"Action item\""));
+
+        let screenshot_context =
+            build_context_from_index_rows(&rows, "Which screenshot showed Adrian?");
+
+        assert_eq!(screenshot_context.citations[0].id, "I1");
+        assert_eq!(screenshot_context.citations[0].source_type, "screenshot");
+        assert_eq!(
+            screenshot_context.citations[0].file_path.as_deref(),
+            Some("/tmp/shot.png")
+        );
     }
 
     #[test]
@@ -1257,6 +1267,14 @@ mod tests {
 
         assert!(context.prompt_context.contains("<\\/excerpt>"));
         assert_eq!(context.prompt_context.matches("</excerpt>").count(), 1);
+    }
+
+    #[test]
+    fn context_handles_empty_meetings() {
+        let context = build_context_from_index_rows(&[], "What happened?");
+
+        assert!(context.citations.is_empty());
+        assert!(context.prompt_context.is_empty());
     }
 
     #[test]

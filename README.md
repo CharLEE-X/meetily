@@ -125,6 +125,7 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **Real-time Transcription:** Get a live transcript of your meeting as it happens.
 - **AI-Powered Summaries:** Generate summaries of your meetings using powerful language models.
 - **Advanced Exports:** Export completed meetings as Markdown, PDF, or DOCX with selectable sections and local auto-export preferences. See [Advanced Exports](docs/advanced-exports.md).
+- **Meeting Chat:** Ask source-cited follow-up questions from meeting details using local retrieval over transcripts, summaries, actions, notes, and enabled screenshot metadata. See [Meeting Chat Release Notes](docs/meeting-chat-release-notes.md).
 - **Calendar Integration:** Connect Apple Calendar on macOS, sync upcoming event metadata locally, and select an event to prefill the next recording title and meeting-detection metadata. See [Calendar Integration Release Notes](docs/calendar-integration-release-notes.md).
 - **Apple Reminders Follow-Ups:** On macOS, connect Apple Reminders, review editable follow-up drafts, create only selected reminders, and return to meeting-linked reminder history. See [Apple Reminders Release Notes](docs/apple-reminders-release-notes.md).
 - **Apple Notes Export:** On macOS, export meeting summaries to Apple Notes after a destination preview, update app-managed notes instead of duplicating them, and link Notes exports with Apple Calendar artifacts when both integrations are enabled. See [Apple Notes Release Notes](docs/apple-notes-release-notes.md).
@@ -245,7 +246,7 @@ This fork is adding a local-first set of Pro-equivalent workflow features in a
 phased order so storage, exports, chat, Apple Notes, MCP, and agent workflows
 share the same meeting artifact model instead of creating duplicated silos.
 
-Planned feature areas:
+Shipped and planned feature areas:
 
 - **Transcription accuracy and model selection:** higher-accuracy local profiles,
   preprocessing presets, language handling, and QA benchmarks.
@@ -260,7 +261,9 @@ Planned feature areas:
   periodic screenshots with per-meeting confirmation, visible capture state, and
   deletion controls.
 - **Meeting chat:** local-first retrieval over transcripts, summaries, and
-  enabled artifacts with citations back to meeting sources.
+  enabled artifacts with citations back to meeting sources. See
+  [Meeting Chat Retrieval](docs/meeting-chat-retrieval.md) and
+  [Meeting Chat Release Notes](docs/meeting-chat-release-notes.md).
 - **Calendar integration:** selected-calendar sync that stores minimal event
   metadata, can be disconnected, starts with Apple Calendar on macOS, and keeps
   a provider-neutral path for future ICS and Google Calendar support. See
