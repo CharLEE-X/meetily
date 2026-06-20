@@ -29,6 +29,7 @@
         "tauri:build:hipblas": "tauri build -- --features hipblas",
         "lint": "next lint",
         "test:meeting-detection": "node --test --experimental-strip-types src/services/meetingDetectionSignals.test.ts",
+        "test:post-recording-checklist": "node --test --experimental-strip-types src/services/postRecordingChecklistService.test.ts",
         "test:recording-audit": "node --test --experimental-strip-types src/services/recordingAuditService.test.ts",
         "test:transcription-preprocessing": "node --test --experimental-strip-types src/lib/transcriptionPreprocessing.test.ts"
     },

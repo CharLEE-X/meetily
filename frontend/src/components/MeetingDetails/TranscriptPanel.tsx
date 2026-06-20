@@ -146,10 +146,12 @@ export const TranscriptPanel = forwardRef<TranscriptPanelHandle, TranscriptPanel
       </div>
 
       {meetingId && (
-        <SpeakerScreenshotPanel
-          meetingId={meetingId}
-          onSpeakerLabelsChange={handleSpeakerLabelsChange}
-        />
+        <div id="meeting-context-review">
+          <SpeakerScreenshotPanel
+            meetingId={meetingId}
+            onSpeakerLabelsChange={handleSpeakerLabelsChange}
+          />
+        </div>
       )}
 
       {/* Transcript content - use virtualized view for better performance */}

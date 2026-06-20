@@ -13,6 +13,7 @@ import { AppleNotesExportPanel } from './AppleNotesExportPanel';
 import { CalendarEventPanel } from './CalendarEventPanel';
 import { AgentWorkflowRunsPanel } from '@/components/AgentWorkflowRunsPanel';
 import { RecordingAuditTrail } from '@/components/RecordingAuditTrail';
+import { PostRecordingReviewChecklist } from './PostRecordingReviewChecklist';
 import { MeetingChatPanel } from './MeetingChatPanel';
 import { MeetingChatCitation } from '@/services/meetingChatService';
 import Analytics from '@/lib/analytics';
@@ -470,6 +471,7 @@ export function SummaryPanel({
               languageSlot={transcripts.length > 0 ? languageSlot : undefined}
             />
           </div>
+          <PostRecordingReviewChecklist meetingId={meeting.id} hasSummary={false} />
           {/* Empty state message */}
           <EmptyStateSummary
             onGenerate={() => onGenerateSummary(customPrompt)}
@@ -544,10 +546,17 @@ export function SummaryPanel({
               }}
             />
           </div>
-          <CalendarEventPanel meetingId={meeting.id} hasSummary={!!aiSummary} />
-          <AppleNotesExportPanel meetingId={meeting.id} hasSummary={!!aiSummary} summaryStatus={summaryStatus} />
-          <ReminderDraftReview meetingId={meeting.id} hasSummary={!!aiSummary} />
-          <div className="mx-6 mb-6 mt-2 rounded-2xl border border-gray-200 bg-white p-4">
+          <PostRecordingReviewChecklist meetingId={meeting.id} hasSummary={!!aiSummary} />
+          <div id="calendar-review">
+            <CalendarEventPanel meetingId={meeting.id} hasSummary={!!aiSummary} />
+          </div>
+          <div id="notes-review">
+            <AppleNotesExportPanel meetingId={meeting.id} hasSummary={!!aiSummary} summaryStatus={summaryStatus} />
+          </div>
+          <div id="reminders-review">
+            <ReminderDraftReview meetingId={meeting.id} hasSummary={!!aiSummary} />
+          </div>
+          <div id="agent-review" className="mx-6 mb-6 mt-2 rounded-2xl border border-gray-200 bg-white p-4">
             <h3 className="text-sm font-semibold text-gray-900">Agent workflow runs</h3>
             <div className="mt-3">
               <AgentWorkflowRunsPanel meetingId={meeting.id} limit={4} />
