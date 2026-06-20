@@ -6,10 +6,15 @@ export type MeetingChatStatus = 'pending' | 'completed' | 'failed' | 'canceled';
 
 export interface MeetingChatCitation {
   id: string;
-  transcriptId: string;
+  sourceType: 'transcript' | 'summary' | 'action_item' | 'key_point' | 'note' | 'screenshot' | string;
+  sourceId: string;
+  sourceLabel: string;
+  transcriptId: string | null;
   timestamp: string;
   audioStartTime: number | null;
   audioEndTime: number | null;
+  title: string | null;
+  filePath: string | null;
   excerpt: string;
 }
 
@@ -31,6 +36,12 @@ export interface AskMeetingChatResponse {
   assistantMessage: MeetingChatMessage;
 }
 
+export interface MeetingChatIndexStatus {
+  meetingId: string;
+  itemCount: number;
+  rebuilt: boolean;
+}
+
 export const meetingChatService = {
   async listMessages(meetingId: string): Promise<MeetingChatMessage[]> {
     if (!isTauriRuntime()) return [];
@@ -46,8 +57,13 @@ export const meetingChatService = {
     });
   },
 
-  async cancel(): Promise<void> {
+  async cancel(meetingId?: string): Promise<void> {
     if (!isTauriRuntime()) return;
-    await invoke('meeting_chat_cancel');
+    await invoke('meeting_chat_cancel', meetingId ? { meetingId } : {});
+  },
+
+  async rebuildIndex(meetingId: string): Promise<MeetingChatIndexStatus | null> {
+    if (!isTauriRuntime()) return null;
+    return invoke<MeetingChatIndexStatus>('meeting_chat_rebuild_index', { meetingId });
   },
 };

@@ -773,6 +773,7 @@ pub fn run() {
             meeting_chat::meeting_chat_ask,
             meeting_chat::meeting_chat_cancel,
             meeting_chat::meeting_chat_list_messages,
+            meeting_chat::meeting_chat_rebuild_index,
             // Meeting detection commands
             meeting_detection::get_meeting_activity_signals,
             // Calendar integration commands
