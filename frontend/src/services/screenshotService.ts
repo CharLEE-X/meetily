@@ -12,12 +12,15 @@ export interface MeetingScreenshot {
   meetingId: string;
   capturedAt: string;
   recordingTime?: number | null;
-  filePath: string;
+  filePath?: string | null;
   thumbnailPath?: string | null;
   displayLabel?: string | null;
   status: string;
   redactionStatus: string;
   source: string;
+  provider?: string | null;
+  relevanceConfidence?: number | null;
+  skipReason?: string | null;
 }
 
 export interface ScreenshotCaptureStatus {

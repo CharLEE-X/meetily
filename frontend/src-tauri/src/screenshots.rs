@@ -52,12 +52,15 @@ pub struct MeetingScreenshot {
     pub meeting_id: String,
     pub captured_at: String,
     pub recording_time: Option<f64>,
-    pub file_path: String,
+    pub file_path: Option<String>,
     pub thumbnail_path: Option<String>,
     pub display_label: Option<String>,
     pub status: String,
     pub redaction_status: String,
     pub source: String,
+    pub provider: Option<String>,
+    pub relevance_confidence: Option<f64>,
+    pub skip_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +81,8 @@ struct ScreenshotAnalysis {
     provider: Option<String>,
     visible_names: Vec<String>,
     text_snippets: Vec<String>,
+    relevance_status: String,
+    skip_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -278,10 +283,12 @@ pub async fn delete_meeting_screenshot(
     .map_err(|err| format!("Failed to delete screenshot metadata: {}", err))?;
 
     if delete_file.unwrap_or(true) {
-        let file_path: String = row.get("file_path");
-        if let Err(err) = std::fs::remove_file(&file_path) {
-            if err.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("Failed to remove screenshot file {}: {}", file_path, err);
+        let file_path: Option<String> = row.try_get("file_path").ok();
+        if let Some(file_path) = file_path {
+            if let Err(err) = std::fs::remove_file(&file_path) {
+                if err.kind() != std::io::ErrorKind::NotFound {
+                    log::warn!("Failed to remove screenshot file {}: {}", file_path, err);
+                }
             }
         }
     }
@@ -352,9 +359,40 @@ async fn capture_and_store_screenshot<R: Runtime>(
     let preferences = load_screenshot_preferences(app)
         .await
         .map_err(|err| format!("Failed to load screenshot preferences: {}", err))?;
-    let capture_plan = build_capture_plan(&preferences).await?;
     let screenshot_id = Uuid::new_v4().to_string();
     let captured_at = Utc::now();
+    let recording_time = recording_started_at
+        .map(|started_at| (captured_at - started_at).num_milliseconds() as f64 / 1000.0)
+        .filter(|seconds| *seconds >= 0.0);
+    let display_label = recording_time.map(|seconds| format_time_label(seconds));
+    let captured_at_string = captured_at.to_rfc3339();
+
+    let capture_plan = match build_capture_plan(&preferences).await {
+        Ok(plan) => plan,
+        Err(err) => {
+            store_skipped_screenshot(
+                pool,
+                SkippedScreenshotRecord {
+                    screenshot_id,
+                    meeting_id,
+                    captured_at: &captured_at_string,
+                    recording_time,
+                    display_label: display_label.as_deref(),
+                    source_trigger,
+                    capture_target: &preferences.capture_target,
+                    provider: None,
+                    window_title: None,
+                    window_id: None,
+                    window_bounds: None,
+                    confidence: None,
+                    relevance_status: "skipped",
+                    skip_reason: &err,
+                },
+            )
+            .await?;
+            return Ok(None);
+        }
+    };
     let file_path = screenshot_file_path(app, meeting_id, &screenshot_id, captured_at)
         .map_err(|err| format!("Failed to prepare screenshot folder: {}", err))?;
 
@@ -362,6 +400,10 @@ async fn capture_and_store_screenshot<R: Runtime>(
 
     let analysis = analyze_screenshot(&file_path).await;
     if !analysis.is_relevant {
+        let skip_reason = analysis
+            .skip_reason
+            .clone()
+            .unwrap_or_else(|| "Screenshot did not look like a supported meeting UI".to_string());
         if let Err(err) = std::fs::remove_file(&file_path) {
             if err.kind() != std::io::ErrorKind::NotFound {
                 log::warn!(
@@ -371,14 +413,43 @@ async fn capture_and_store_screenshot<R: Runtime>(
                 );
             }
         }
+        store_skipped_screenshot(
+            pool,
+            SkippedScreenshotRecord {
+                screenshot_id,
+                meeting_id,
+                captured_at: &captured_at_string,
+                recording_time,
+                display_label: display_label.as_deref(),
+                source_trigger,
+                capture_target: &capture_plan.capture_target,
+                provider: analysis.provider.as_deref().or_else(|| {
+                    capture_plan
+                        .call_window
+                        .as_ref()
+                        .map(|target| target.provider.as_str())
+                }),
+                window_title: capture_plan
+                    .call_window
+                    .as_ref()
+                    .and_then(|target| target.window_title.as_deref()),
+                window_id: capture_plan
+                    .call_window
+                    .as_ref()
+                    .and_then(|target| target.window_id),
+                window_bounds: capture_plan
+                    .call_window
+                    .as_ref()
+                    .map(|target| &target.bounds),
+                confidence: Some(analysis.confidence),
+                relevance_status: &analysis.relevance_status,
+                skip_reason: &skip_reason,
+            },
+        )
+        .await?;
         return Ok(None);
     }
 
-    let recording_time = recording_started_at
-        .map(|started_at| (captured_at - started_at).num_milliseconds() as f64 / 1000.0)
-        .filter(|seconds| *seconds >= 0.0);
-    let display_label = recording_time.map(|seconds| format_time_label(seconds));
-    let captured_at_string = captured_at.to_rfc3339();
     let now = Utc::now().to_rfc3339();
     let file_path_string = file_path.to_string_lossy().to_string();
 
@@ -432,13 +503,82 @@ async fn capture_and_store_screenshot<R: Runtime>(
         meeting_id: meeting_id.to_string(),
         captured_at: captured_at_string,
         recording_time,
-        file_path: file_path_string,
+        file_path: Some(file_path_string),
         thumbnail_path: None,
         display_label,
         status: "captured".to_string(),
         redaction_status: "not_available".to_string(),
         source: source_trigger.to_string(),
+        provider: analysis.provider,
+        relevance_confidence: Some(analysis.confidence),
+        skip_reason: None,
     }))
+}
+
+struct SkippedScreenshotRecord<'a> {
+    screenshot_id: String,
+    meeting_id: &'a str,
+    captured_at: &'a str,
+    recording_time: Option<f64>,
+    display_label: Option<&'a str>,
+    source_trigger: &'a str,
+    capture_target: &'a str,
+    provider: Option<&'a str>,
+    window_title: Option<&'a str>,
+    window_id: Option<u32>,
+    window_bounds: Option<&'a ScreenshotWindowBounds>,
+    confidence: Option<f64>,
+    relevance_status: &'a str,
+    skip_reason: &'a str,
+}
+
+async fn store_skipped_screenshot(
+    pool: &sqlx::SqlitePool,
+    record: SkippedScreenshotRecord<'_>,
+) -> Result<(), String> {
+    let now = Utc::now().to_rfc3339();
+    let metadata_json = json!({
+        "analysis": {
+            "isRelevant": false,
+            "confidence": record.confidence.unwrap_or(0.0),
+            "provider": record.provider,
+            "visibleNames": [],
+            "textSnippets": [],
+            "relevanceStatus": record.relevance_status,
+            "skipReason": record.skip_reason,
+        },
+        "captureTarget": record.capture_target,
+        "provider": record.provider,
+        "windowTitle": record.window_title,
+        "windowId": record.window_id,
+        "windowBounds": record.window_bounds,
+        "sourceTrigger": record.source_trigger,
+        "recordingTime": record.recording_time,
+        "skipReason": record.skip_reason,
+    })
+    .to_string();
+
+    sqlx::query(
+        r#"
+        INSERT INTO meeting_screenshots
+            (id, meeting_id, captured_at, recording_time, file_path, display_label, status, redaction_status, source, created_at, updated_at, metadata_json)
+        VALUES (?, ?, ?, ?, NULL, ?, 'skipped', 'not_available', ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&record.screenshot_id)
+    .bind(record.meeting_id)
+    .bind(record.captured_at)
+    .bind(record.recording_time)
+    .bind(record.display_label)
+    .bind(record.source_trigger)
+    .bind(&now)
+    .bind(&now)
+    .bind(&metadata_json)
+    .execute(pool)
+    .await
+    .map_err(|err| format!("Failed to store skipped screenshot metadata: {}", err))?;
+
+    Ok(())
 }
 
 async fn analyze_screenshot(path: &Path) -> ScreenshotAnalysis {
@@ -462,6 +602,7 @@ async fn analyze_screenshot(path: &Path) -> ScreenshotAnalysis {
 fn analyze_recognized_text(recognized_text: &[String]) -> ScreenshotAnalysis {
     let provider = detect_meeting_provider(recognized_text);
     let visible_names = extract_visible_names(recognized_text);
+    let sensitive_reason = detect_sensitive_frame_reason(recognized_text);
     let has_provider = provider.is_some();
     let has_visible_name = !visible_names.is_empty();
     let has_call_controls = recognized_text.iter().any(|text| {
@@ -471,16 +612,40 @@ fn analyze_recognized_text(recognized_text: &[String]) -> ScreenshotAnalysis {
         )
     });
 
-    let confidence = match (has_provider, has_visible_name, has_call_controls) {
+    let mut confidence: f64 = match (has_provider, has_visible_name, has_call_controls) {
         (true, true, _) => 0.92,
         (true, false, true) => 0.78,
         (true, false, false) => 0.62,
-        (false, true, true) => 0.68,
+        // Name + controls without a supported provider is ambiguous enough to record as skipped metadata.
+        (false, true, true) => 0.48,
         _ => 0.0,
+    };
+    if sensitive_reason.is_some() {
+        confidence = confidence.min(0.35);
+    }
+    let is_relevant = confidence >= SCREENSHOT_RELEVANCE_THRESHOLD && sensitive_reason.is_none();
+    let relevance_status = if is_relevant {
+        "kept"
+    } else if confidence > 0.0 && sensitive_reason.is_none() {
+        "needsReview"
+    } else {
+        "skipped"
+    }
+    .to_string();
+    let skip_reason = if is_relevant {
+        None
+    } else {
+        Some(sensitive_reason.unwrap_or_else(|| {
+            if confidence > 0.0 {
+                "Meeting UI confidence was too low; skipped for review".to_string()
+            } else {
+                "No supported meeting UI was detected".to_string()
+            }
+        }))
     };
 
     ScreenshotAnalysis {
-        is_relevant: confidence >= SCREENSHOT_RELEVANCE_THRESHOLD,
+        is_relevant,
         confidence,
         provider,
         visible_names,
@@ -490,6 +655,33 @@ fn analyze_recognized_text(recognized_text: &[String]) -> ScreenshotAnalysis {
             .take(20)
             .cloned()
             .collect(),
+        relevance_status,
+        skip_reason,
+    }
+}
+
+fn detect_sensitive_frame_reason(recognized_text: &[String]) -> Option<String> {
+    let joined = recognized_text.join(" ").to_lowercase();
+    if contains_any(
+        &joined,
+        &[
+            "one-time code",
+            "verification code",
+            "api key",
+            "secret key",
+            "private key",
+            "recovery code",
+            "credit card",
+        ],
+    ) || joined
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|tokens| matches!(tokens, ["password", "field" | "reset" | "login"]))
+    {
+        Some("Sensitive private content was detected in the call window".to_string())
+    } else {
+        None
     }
 }
 
@@ -596,7 +788,7 @@ async fn load_meeting_screenshots(
     let rows = sqlx::query(
         r#"
         SELECT id, meeting_id, captured_at, recording_time, file_path, thumbnail_path,
-               display_label, status, redaction_status, source
+               display_label, status, redaction_status, source, metadata_json
         FROM meeting_screenshots
         WHERE meeting_id = ? AND deleted_at IS NULL
         ORDER BY COALESCE(recording_time, 0), captured_at
@@ -609,17 +801,50 @@ async fn load_meeting_screenshots(
 
     Ok(rows
         .into_iter()
-        .map(|row| MeetingScreenshot {
-            id: row.get("id"),
-            meeting_id: row.get("meeting_id"),
-            captured_at: row.get("captured_at"),
-            recording_time: row.try_get("recording_time").ok(),
-            file_path: row.get("file_path"),
-            thumbnail_path: row.try_get("thumbnail_path").ok(),
-            display_label: row.try_get("display_label").ok(),
-            status: row.get("status"),
-            redaction_status: row.get("redaction_status"),
-            source: row.get("source"),
+        .map(|row| {
+            let metadata_json: Option<String> = row.try_get("metadata_json").ok();
+            let metadata = metadata_json
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
+            let analysis = metadata.as_ref().and_then(|value| value.get("analysis"));
+
+            MeetingScreenshot {
+                id: row.get("id"),
+                meeting_id: row.get("meeting_id"),
+                captured_at: row.get("captured_at"),
+                recording_time: row.try_get("recording_time").ok(),
+                file_path: row.try_get("file_path").ok(),
+                thumbnail_path: row.try_get("thumbnail_path").ok(),
+                display_label: row.try_get("display_label").ok(),
+                status: row.get("status"),
+                redaction_status: row.get("redaction_status"),
+                source: row.get("source"),
+                provider: metadata
+                    .as_ref()
+                    .and_then(|value| value.get("provider"))
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        analysis
+                            .and_then(|value| value.get("provider"))
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string)
+                    }),
+                relevance_confidence: analysis
+                    .and_then(|value| value.get("confidence"))
+                    .and_then(|value| value.as_f64()),
+                skip_reason: metadata
+                    .as_ref()
+                    .and_then(|value| value.get("skipReason"))
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        analysis
+                            .and_then(|value| value.get("skipReason"))
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string)
+                    }),
+            }
         })
         .collect())
 }
@@ -1270,6 +1495,8 @@ mod tests {
         assert!(analysis.is_relevant);
         assert_eq!(analysis.provider, Some("Google Meet".to_string()));
         assert_eq!(analysis.visible_names, vec!["Adrian Witaszak".to_string()]);
+        assert_eq!(analysis.relevance_status, "kept");
+        assert!(analysis.skip_reason.is_none());
     }
 
     #[test]
@@ -1282,6 +1509,43 @@ mod tests {
 
         assert!(!analysis.is_relevant);
         assert!(analysis.visible_names.is_empty());
+        assert_eq!(analysis.relevance_status, "skipped");
+        assert_eq!(
+            analysis.skip_reason.as_deref(),
+            Some("No supported meeting UI was detected")
+        );
+    }
+
+    #[test]
+    fn screenshot_analysis_marks_low_confidence_meeting_frames_for_review() {
+        let analysis = analyze_recognized_text(&[
+            "Adrian Witaszak".to_string(),
+            "Mute".to_string(),
+            "Camera".to_string(),
+        ]);
+
+        assert!(!analysis.is_relevant);
+        assert_eq!(analysis.relevance_status, "needsReview");
+        assert_eq!(
+            analysis.skip_reason.as_deref(),
+            Some("Meeting UI confidence was too low; skipped for review")
+        );
+    }
+
+    #[test]
+    fn screenshot_analysis_skips_sensitive_frames_even_with_meeting_signals() {
+        let analysis = analyze_recognized_text(&[
+            "meet.google.com/trv-nxib-ftd".to_string(),
+            "Adrian Witaszak".to_string(),
+            "API key sk-live-123".to_string(),
+        ]);
+
+        assert!(!analysis.is_relevant);
+        assert_eq!(analysis.relevance_status, "skipped");
+        assert_eq!(
+            analysis.skip_reason.as_deref(),
+            Some("Sensitive private content was detected in the call window")
+        );
     }
 
     #[test]

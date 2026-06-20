@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Camera, RefreshCw, Trash2, Users } from 'lucide-react';
+import { Camera, EyeOff, RefreshCw, Trash2, Users } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import {
@@ -195,15 +195,39 @@ export function SpeakerScreenshotPanel({
           <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
             {screenshots.map((screenshot) => (
               <div key={screenshot.id} className="w-36 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-                <img
-                  src={convertFileSrc(screenshot.filePath)}
-                  alt={screenshot.displayLabel ?? 'Meeting screenshot'}
+                {screenshot.filePath && screenshot.status === 'captured' ? (
+                  <img
+                    src={convertFileSrc(screenshot.filePath)}
+                    alt={screenshot.displayLabel ?? 'Meeting screenshot'}
                     className="h-20 w-full object-cover"
-                />
+                  />
+                ) : (
+                  <div className="flex h-20 flex-col justify-center gap-1 bg-amber-50 px-2 text-amber-900">
+                    <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide">
+                      <EyeOff className="h-3.5 w-3.5" />
+                      Skipped
+                    </div>
+                    <p
+                      className="line-clamp-2 text-[11px] leading-snug"
+                      title={screenshot.skipReason ?? 'Capture did not look like a supported meeting window.'}
+                    >
+                      {screenshot.skipReason ?? 'Capture did not look like a supported meeting window.'}
+                    </p>
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-                  <span className="truncate text-xs font-medium text-slate-600">
-                    {screenshot.displayLabel ?? new Date(screenshot.capturedAt).toLocaleTimeString()}
-                  </span>
+                  <div className="min-w-0">
+                    <span className="block truncate text-xs font-medium text-slate-600">
+                      {screenshot.displayLabel ?? new Date(screenshot.capturedAt).toLocaleTimeString()}
+                    </span>
+                    {screenshot.provider || typeof screenshot.relevanceConfidence === 'number' ? (
+                      <span className="block truncate text-[10px] text-slate-400">
+                        {[screenshot.provider, typeof screenshot.relevanceConfidence === 'number' ? `${Math.round(screenshot.relevanceConfidence * 100)}%` : null]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     onClick={() => handleDeleteScreenshot(screenshot.id)}
