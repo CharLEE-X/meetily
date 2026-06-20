@@ -124,6 +124,7 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **Local First:** All processing is done on your machine. No data ever leaves your computer.
 - **Real-time Transcription:** Get a live transcript of your meeting as it happens.
 - **AI-Powered Summaries:** Generate summaries of your meetings using powerful language models.
+- **Custom Summary Templates:** Create local summary templates, preview the markdown shape, import/export template JSON, and remember the selected template per meeting. See [Custom Summary Templates](docs/custom-summary-templates.md) and [Custom Summary Templates Release Notes](docs/custom-summary-templates-release-notes.md).
 - **Advanced Exports:** Export completed meetings as Markdown, PDF, or DOCX with selectable sections and local auto-export preferences. See [Advanced Exports](docs/advanced-exports.md).
 - **Meeting Chat:** Ask source-cited follow-up questions from meeting details using local retrieval over transcripts, summaries, actions, notes, and enabled screenshot metadata. See [Meeting Chat Release Notes](docs/meeting-chat-release-notes.md).
 - **Calendar Integration:** Connect Apple Calendar on macOS, sync upcoming event metadata locally, and select an event to prefill the next recording title and meeting-detection metadata. See [Calendar Integration Release Notes](docs/calendar-integration-release-notes.md).
@@ -251,7 +252,8 @@ Shipped and planned feature areas:
 - **Transcription accuracy and model selection:** higher-accuracy local profiles,
   preprocessing presets, language handling, and QA benchmarks.
 - **Custom summary templates:** reusable local templates with per-meeting
-  selection and regeneration.
+  selection, regeneration, import/export, and editable copies of built-in
+  templates. See [Custom Summary Templates](docs/custom-summary-templates.md).
 - **Advanced exports:** Markdown, PDF, and DOCX exports with preview,
   destination history, and retryable failures.
 - **Meeting detection and assisted join:** calendar-backed prompts and optional

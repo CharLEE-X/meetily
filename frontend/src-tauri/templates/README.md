@@ -1,6 +1,8 @@
 # Meeting Summary Templates
 
-This directory contains template definitions for meeting summary generation.
+This directory contains bundled template definitions for meeting summary generation.
+Users normally manage editable templates from **Settings → Templates**; these
+bundled files are the built-in defaults and should remain safe fallbacks.
 
 ## Available Templates
 
@@ -30,8 +32,12 @@ Each template JSON file follows this schema:
 
 ```json
 {
+  "id": "optional_stable_id",
+  "schema_version": 1,
   "name": "Template Name",
   "description": "Brief description of the template's purpose",
+  "variables": ["meeting_title", "transcript", "custom_instructions"],
+  "custom_instructions": "Optional template-level guidance",
   "sections": [
     {
       "title": "Section Title",
@@ -47,17 +53,22 @@ Each template JSON file follows this schema:
 
 Users can add custom templates to the application data directory:
 
-- **macOS**: `~/Library/Application Support/Meetily/templates/`
-- **Windows**: `%APPDATA%\Meetily\templates\`
-- **Linux**: `~/.config/Meetily/templates/`
+- **macOS**: `~/Library/Application Support/Meetily/summary-templates/`
+- **Windows**: `%APPDATA%\Meetily\summary-templates\`
+- **Linux**: `~/.local/share/Meetily/summary-templates/`
 
-Custom templates override built-in templates with the same filename.
+Custom templates override built-in templates with the same ID. Legacy loose JSON
+files under the older `templates/` app-data directory are still read for
+migration compatibility, but new saves and imports go to `summary-templates/`.
 
 ## Template Fields
 
 ### Root Level
 - `name` (required): Display name for the template
+- `schema_version` (required for new templates): Current supported version is `1`
 - `description` (required): Brief explanation of the template's use case
+- `variables` (optional): Allowed variables exposed in the editor
+- `custom_instructions` (optional): Template-level model guidance
 - `sections` (required): Array of section definitions
 
 ### Section Object
@@ -82,5 +93,5 @@ let available = templates::list_templates();
 
 // Validate custom template JSON
 let custom_json = std::fs::read_to_string("custom.json")?;
-let validated = templates::validate_template(&custom_json)?;
+let validated = templates::validate_and_parse_template(&custom_json)?;
 ```
