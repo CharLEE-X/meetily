@@ -2,7 +2,7 @@ use crate::state::AppState;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::Row;
+use sqlx::{Row, Sqlite, Transaction};
 use std::collections::{BTreeMap, HashMap};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
@@ -115,6 +115,13 @@ struct VisualSpeakerCue {
     confidence: f64,
 }
 
+#[derive(Debug)]
+struct ManualLabelMutation {
+    label_id: String,
+    previous_label: Option<SpeakerLabel>,
+    was_new: bool,
+}
+
 #[tauri::command]
 pub async fn run_speaker_labeling<R: Runtime>(
     app: AppHandle<R>,
@@ -203,6 +210,8 @@ pub async fn update_speaker_label<R: Runtime>(
 
     let meeting_id: String = existing.get("meeting_id");
     let previous_name: String = existing.get("display_name");
+    let previous_source: String = existing.get("source");
+    let previous_status: String = existing.get("status");
     if previous_name == display_name {
         return Ok(row_to_speaker_label(existing));
     }
@@ -226,8 +235,16 @@ pub async fn update_speaker_label<R: Runtime>(
     }
 
     let correction_id = Uuid::new_v4().to_string();
-    let before_json = serde_json::json!({ "displayName": previous_name });
-    let after_json = serde_json::json!({ "displayName": display_name });
+    let before_json = serde_json::json!({
+        "labelId": label_id,
+        "displayName": previous_name,
+        "source": previous_source,
+        "status": previous_status,
+    });
+    let after_json = serde_json::json!({
+        "labelId": label_id,
+        "displayName": display_name,
+    });
 
     let mut tx = pool
         .begin()
@@ -294,6 +311,290 @@ pub async fn update_speaker_label<R: Runtime>(
     .map_err(|err| format!("Failed to load updated speaker label: {}", err))?;
 
     Ok(row_to_speaker_label(updated))
+}
+
+#[tauri::command]
+pub async fn accept_speaker_label<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    label_id: String,
+) -> Result<SpeakerLabel, String> {
+    let pool = state.db_manager.pool();
+    let now = Utc::now().to_rfc3339();
+    let existing = load_active_speaker_label(pool, &label_id).await?;
+    let correction_id = Uuid::new_v4().to_string();
+
+    let before_json = serde_json::json!({
+        "labelId": existing.id,
+        "displayName": existing.display_name,
+        "source": existing.source,
+        "status": existing.status,
+    });
+    let after_json = serde_json::json!({
+        "labelId": existing.id,
+        "status": "confirmed",
+    });
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|err| format!("Failed to start speaker correction transaction: {}", err))?;
+    insert_speaker_correction(
+        &mut tx,
+        &correction_id,
+        &existing.meeting_id,
+        "accept",
+        before_json,
+        after_json,
+        &now,
+    )
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE speaker_labels
+        SET status = 'confirmed', updated_at = ?
+        WHERE id = ?
+        "#,
+    )
+    .bind(&now)
+    .bind(&label_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to accept speaker label: {}", err))?;
+    sqlx::query(
+        r#"
+        UPDATE transcript_speaker_segments
+        SET source = 'manual', correction_id = ?, updated_at = ?
+        WHERE speaker_label_id = ?
+        "#,
+    )
+    .bind(&correction_id)
+    .bind(&now)
+    .bind(&label_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to confirm speaker segments: {}", err))?;
+    tx.commit()
+        .await
+        .map_err(|err| format!("Failed to commit speaker correction: {}", err))?;
+
+    load_active_speaker_label(pool, &label_id).await
+}
+
+#[tauri::command]
+pub async fn assign_transcript_speaker<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    transcript_id: String,
+    display_name: String,
+) -> Result<SpeakerLabelingResult, String> {
+    let display_name = normalize_display_name(&display_name)?;
+    let pool = state.db_manager.pool();
+    let now = Utc::now().to_rfc3339();
+    let correction_id = Uuid::new_v4().to_string();
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|err| format!("Failed to start speaker assignment transaction: {}", err))?;
+    let previous_segments =
+        load_segments_for_transcript(&mut tx, &meeting_id, &transcript_id).await?;
+    let transcript_times = load_transcript_times(&mut tx, &meeting_id, &transcript_id).await?;
+    let label_mutation =
+        get_or_create_manual_label(&mut tx, &meeting_id, &display_name, &now).await?;
+    insert_speaker_correction(
+        &mut tx,
+        &correction_id,
+        &meeting_id,
+        "assign",
+        serde_json::json!({
+            "meetingId": meeting_id,
+            "transcriptId": transcript_id,
+            "segments": previous_segments,
+            "labelMutation": {
+                "labelId": label_mutation.label_id,
+                "wasNew": label_mutation.was_new,
+                "previousLabel": label_mutation.previous_label,
+            },
+        }),
+        serde_json::json!({
+            "transcriptId": transcript_id,
+            "labelId": label_mutation.label_id,
+            "displayName": display_name,
+        }),
+        &now,
+    )
+    .await?;
+    sqlx::query(
+        r#"
+        DELETE FROM transcript_speaker_segments
+        WHERE meeting_id = ? AND transcript_id = ?
+        "#,
+    )
+    .bind(&meeting_id)
+    .bind(&transcript_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to replace speaker assignment: {}", err))?;
+    sqlx::query(
+        r#"
+        INSERT INTO transcript_speaker_segments
+            (id, meeting_id, transcript_id, speaker_label_id, start_time, end_time, source, confidence, created_at, updated_at, correction_id)
+        VALUES (?, ?, ?, ?, ?, ?, 'manual', 1.0, ?, ?, ?)
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(&meeting_id)
+    .bind(&transcript_id)
+    .bind(&label_mutation.label_id)
+    .bind(transcript_times.0)
+    .bind(transcript_times.1)
+    .bind(&now)
+    .bind(&now)
+    .bind(&correction_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to assign transcript speaker: {}", err))?;
+    tx.commit()
+        .await
+        .map_err(|err| format!("Failed to commit speaker assignment: {}", err))?;
+
+    load_speaker_labeling_result(state.inner(), &meeting_id, "stored").await
+}
+
+#[tauri::command]
+pub async fn merge_speaker_labels<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    source_label_id: String,
+    target_label_id: String,
+) -> Result<SpeakerLabelingResult, String> {
+    if source_label_id == target_label_id {
+        return Err("Choose two different speaker labels to merge".to_string());
+    }
+    let pool = state.db_manager.pool();
+    let now = Utc::now().to_rfc3339();
+    let correction_id = Uuid::new_v4().to_string();
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|err| format!("Failed to start speaker merge transaction: {}", err))?;
+    let source = load_active_speaker_label_in_tx(&mut tx, &source_label_id).await?;
+    let target = load_active_speaker_label_in_tx(&mut tx, &target_label_id).await?;
+    if source.meeting_id != target.meeting_id {
+        return Err("Speaker labels must belong to the same meeting".to_string());
+    }
+    let moved_segments = load_segments_for_label(&mut tx, &source_label_id).await?;
+    insert_speaker_correction(
+        &mut tx,
+        &correction_id,
+        &source.meeting_id,
+        "merge",
+        serde_json::json!({
+            "sourceLabel": source,
+            "targetLabel": target,
+            "movedSegments": moved_segments,
+        }),
+        serde_json::json!({
+            "sourceLabelId": source_label_id,
+            "targetLabelId": target_label_id,
+        }),
+        &now,
+    )
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE transcript_speaker_segments
+        SET speaker_label_id = ?, source = 'manual', correction_id = ?, updated_at = ?
+        WHERE speaker_label_id = ?
+        "#,
+    )
+    .bind(&target_label_id)
+    .bind(&correction_id)
+    .bind(&now)
+    .bind(&source_label_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to merge speaker segments: {}", err))?;
+    sqlx::query(
+        r#"
+        UPDATE speaker_labels
+        SET status = 'deleted', deleted_at = ?, updated_at = ?
+        WHERE id = ?
+        "#,
+    )
+    .bind(&now)
+    .bind(&now)
+    .bind(&source_label_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to delete merged speaker label: {}", err))?;
+    sqlx::query(
+        r#"
+        UPDATE speaker_labels
+        SET status = 'confirmed', updated_at = ?
+        WHERE id = ?
+        "#,
+    )
+    .bind(&now)
+    .bind(&target_label_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| format!("Failed to confirm target speaker label: {}", err))?;
+    tx.commit()
+        .await
+        .map_err(|err| format!("Failed to commit speaker merge: {}", err))?;
+
+    load_speaker_labeling_result(state.inner(), &source.meeting_id, "stored").await
+}
+
+#[tauri::command]
+pub async fn undo_last_speaker_correction<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<SpeakerLabelingResult, String> {
+    let pool = state.db_manager.pool();
+    let row = sqlx::query(
+        r#"
+        SELECT id, action, before_json
+        FROM speaker_corrections
+        WHERE meeting_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(&meeting_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| format!("Failed to load speaker correction: {}", err))?
+    .ok_or_else(|| "No speaker correction to undo".to_string())?;
+    let correction_id: String = row.get("id");
+    let action: String = row.get("action");
+    let before_raw: Option<String> = row.try_get("before_json").ok();
+    let before_json = before_raw
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .unwrap_or(Value::Null);
+    let now = Utc::now().to_rfc3339();
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|err| format!("Failed to start speaker undo transaction: {}", err))?;
+    undo_speaker_correction_action(&mut tx, &action, &before_json, &now).await?;
+    sqlx::query("DELETE FROM speaker_corrections WHERE id = ?")
+        .bind(&correction_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| format!("Failed to remove undone speaker correction: {}", err))?;
+    tx.commit()
+        .await
+        .map_err(|err| format!("Failed to commit speaker undo: {}", err))?;
+
+    load_speaker_labeling_result(state.inner(), &meeting_id, "stored").await
 }
 
 fn load_speaker_labeling_preferences<R: Runtime>(
@@ -509,6 +810,540 @@ fn row_to_speaker_label(row: sqlx::sqlite::SqliteRow) -> SpeakerLabel {
         status: row.get("status"),
         confidence: row.try_get("confidence").ok(),
     }
+}
+
+async fn load_active_speaker_label(
+    pool: &sqlx::SqlitePool,
+    label_id: &str,
+) -> Result<SpeakerLabel, String> {
+    let row = sqlx::query(
+        r#"
+        SELECT id, meeting_id, display_name, source, status, confidence
+        FROM speaker_labels
+        WHERE id = ? AND deleted_at IS NULL
+        "#,
+    )
+    .bind(label_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| format!("Failed to load speaker label: {}", err))?
+    .ok_or_else(|| "Speaker label not found".to_string())?;
+    Ok(row_to_speaker_label(row))
+}
+
+async fn load_active_speaker_label_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    label_id: &str,
+) -> Result<SpeakerLabel, String> {
+    let row = sqlx::query(
+        r#"
+        SELECT id, meeting_id, display_name, source, status, confidence
+        FROM speaker_labels
+        WHERE id = ? AND deleted_at IS NULL
+        "#,
+    )
+    .bind(label_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|err| format!("Failed to load speaker label: {}", err))?
+    .ok_or_else(|| "Speaker label not found".to_string())?;
+    Ok(row_to_speaker_label(row))
+}
+
+async fn insert_speaker_correction(
+    tx: &mut Transaction<'_, Sqlite>,
+    correction_id: &str,
+    meeting_id: &str,
+    action: &str,
+    before_json: Value,
+    after_json: Value,
+    now: &str,
+) -> Result<(), String> {
+    sqlx::query(
+        r#"
+        INSERT INTO speaker_corrections (id, meeting_id, action, before_json, after_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(correction_id)
+    .bind(meeting_id)
+    .bind(action)
+    .bind(before_json.to_string())
+    .bind(after_json.to_string())
+    .bind(now)
+    .execute(&mut **tx)
+    .await
+    .map_err(|err| format!("Failed to store speaker correction: {}", err))?;
+    Ok(())
+}
+
+async fn get_or_create_manual_label(
+    tx: &mut Transaction<'_, Sqlite>,
+    meeting_id: &str,
+    display_name: &str,
+    now: &str,
+) -> Result<ManualLabelMutation, String> {
+    if let Some(row) = sqlx::query(
+        r#"
+        SELECT id, meeting_id, display_name, source, status, confidence
+        FROM speaker_labels
+        WHERE meeting_id = ? AND display_name = ? AND deleted_at IS NULL
+        "#,
+    )
+    .bind(meeting_id)
+    .bind(display_name)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|err| format!("Failed to load existing speaker label: {}", err))?
+    {
+        let previous_label = row_to_speaker_label(row);
+        let label_id = previous_label.id.clone();
+        sqlx::query(
+            r#"
+            UPDATE speaker_labels
+            SET status = 'confirmed', source = 'manual', updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(now)
+        .bind(&label_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|err| format!("Failed to confirm speaker label: {}", err))?;
+        return Ok(ManualLabelMutation {
+            label_id,
+            previous_label: Some(previous_label),
+            was_new: false,
+        });
+    }
+
+    let label_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        r#"
+        INSERT INTO speaker_labels
+            (id, meeting_id, display_name, source, status, confidence, created_at, updated_at)
+        VALUES (?, ?, ?, 'manual', 'confirmed', 1.0, ?, ?)
+        "#,
+    )
+    .bind(&label_id)
+    .bind(meeting_id)
+    .bind(display_name)
+    .bind(now)
+    .bind(now)
+    .execute(&mut **tx)
+    .await
+    .map_err(|err| format!("Failed to create speaker label: {}", err))?;
+    Ok(ManualLabelMutation {
+        label_id,
+        previous_label: None,
+        was_new: true,
+    })
+}
+
+async fn load_transcript_times(
+    tx: &mut Transaction<'_, Sqlite>,
+    meeting_id: &str,
+    transcript_id: &str,
+) -> Result<(Option<f64>, Option<f64>), String> {
+    let row = sqlx::query(
+        r#"
+        SELECT audio_start_time, audio_end_time
+        FROM transcripts
+        WHERE meeting_id = ? AND id = ?
+        "#,
+    )
+    .bind(meeting_id)
+    .bind(transcript_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|err| format!("Failed to load transcript timing: {}", err))?
+    .ok_or_else(|| "Transcript segment not found".to_string())?;
+    Ok((
+        row.try_get("audio_start_time").ok(),
+        row.try_get("audio_end_time").ok(),
+    ))
+}
+
+async fn load_segments_for_transcript(
+    tx: &mut Transaction<'_, Sqlite>,
+    meeting_id: &str,
+    transcript_id: &str,
+) -> Result<Vec<Value>, String> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, speaker_label_id, start_time, end_time, source, confidence, correction_id
+        FROM transcript_speaker_segments
+        WHERE meeting_id = ? AND transcript_id = ?
+        "#,
+    )
+    .bind(meeting_id)
+    .bind(transcript_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|err| format!("Failed to load previous speaker segments: {}", err))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.get::<String, _>("id"),
+                "meetingId": meeting_id,
+                "transcriptId": transcript_id,
+                "speakerLabelId": row.get::<String, _>("speaker_label_id"),
+                "startTime": row.try_get::<f64, _>("start_time").ok(),
+                "endTime": row.try_get::<f64, _>("end_time").ok(),
+                "source": row.get::<String, _>("source"),
+                "confidence": row.try_get::<f64, _>("confidence").ok(),
+                "correctionId": row.try_get::<String, _>("correction_id").ok(),
+            })
+        })
+        .collect())
+}
+
+async fn load_segments_for_label(
+    tx: &mut Transaction<'_, Sqlite>,
+    label_id: &str,
+) -> Result<Vec<Value>, String> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, meeting_id, transcript_id, speaker_label_id, start_time, end_time, source, confidence, correction_id
+        FROM transcript_speaker_segments
+        WHERE speaker_label_id = ?
+        "#,
+    )
+    .bind(label_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|err| format!("Failed to load speaker segments: {}", err))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.get::<String, _>("id"),
+                "meetingId": row.get::<String, _>("meeting_id"),
+                "transcriptId": row.get::<String, _>("transcript_id"),
+                "speakerLabelId": row.get::<String, _>("speaker_label_id"),
+                "startTime": row.try_get::<f64, _>("start_time").ok(),
+                "endTime": row.try_get::<f64, _>("end_time").ok(),
+                "source": row.get::<String, _>("source"),
+                "confidence": row.try_get::<f64, _>("confidence").ok(),
+                "correctionId": row.try_get::<String, _>("correction_id").ok(),
+            })
+        })
+        .collect())
+}
+
+async fn undo_speaker_correction_action(
+    tx: &mut Transaction<'_, Sqlite>,
+    action: &str,
+    before_json: &Value,
+    now: &str,
+) -> Result<(), String> {
+    match action {
+        "accept" | "rename" => {
+            let label_id = before_json
+                .get("labelId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Correction cannot be undone".to_string())?;
+            let display_name = before_json.get("displayName").and_then(Value::as_str);
+            let source = before_json.get("source").and_then(Value::as_str);
+            let status = before_json
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or(STATUS_DETECTED);
+            if let (Some(display_name), Some(source)) = (display_name, source) {
+                sqlx::query(
+                    r#"
+                    UPDATE speaker_labels
+                    SET display_name = ?, source = ?, status = ?, updated_at = ?
+                    WHERE id = ?
+                    "#,
+                )
+                .bind(display_name)
+                .bind(source)
+                .bind(status)
+                .bind(now)
+                .bind(label_id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| format!("Failed to undo speaker label correction: {}", err))?;
+            } else {
+                sqlx::query(
+                    r#"
+                    UPDATE speaker_labels
+                    SET status = ?, updated_at = ?
+                    WHERE id = ?
+                    "#,
+                )
+                .bind(status)
+                .bind(now)
+                .bind(label_id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| format!("Failed to undo speaker label correction: {}", err))?;
+            }
+        }
+        "assign" => {
+            let meeting_id = before_json
+                .get("meetingId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Correction cannot be undone".to_string())?;
+            let transcript_id = before_json
+                .get("transcriptId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Correction cannot be undone".to_string())?;
+            sqlx::query(
+                "DELETE FROM transcript_speaker_segments WHERE meeting_id = ? AND transcript_id = ?",
+            )
+            .bind(meeting_id)
+            .bind(transcript_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|err| format!("Failed to undo speaker assignment: {}", err))?;
+            restore_label_mutation(tx, before_json.get("labelMutation"), now).await?;
+            if let Some(segments) = before_json.get("segments").and_then(Value::as_array) {
+                for segment in segments {
+                    restore_segment_snapshot(tx, segment, now).await?;
+                }
+            }
+        }
+        "merge" => {
+            let source_label = before_json
+                .get("sourceLabel")
+                .ok_or_else(|| "Correction cannot be undone".to_string())?;
+            let source_label_id = source_label
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Correction cannot be undone".to_string())?;
+            let target_label = before_json
+                .get("targetLabel")
+                .ok_or_else(|| "Correction cannot be undone".to_string())?;
+            let target_label_id = target_label
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Correction cannot be undone".to_string())?;
+            let moved_segments = before_json
+                .get("movedSegments")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            sqlx::query(
+                r#"
+                UPDATE speaker_labels
+                SET source = ?, status = ?, deleted_at = NULL, updated_at = ?
+                WHERE id = ?
+                "#,
+            )
+            .bind(
+                source_label
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .unwrap_or(SOURCE_HEURISTIC),
+            )
+            .bind(
+                source_label
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or(STATUS_DETECTED),
+            )
+            .bind(now)
+            .bind(source_label_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|err| format!("Failed to restore merged speaker label: {}", err))?;
+            sqlx::query(
+                r#"
+                UPDATE speaker_labels
+                SET source = ?, status = ?, updated_at = ?
+                WHERE id = ?
+                "#,
+            )
+            .bind(
+                target_label
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .unwrap_or(SOURCE_HEURISTIC),
+            )
+            .bind(
+                target_label
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or(STATUS_DETECTED),
+            )
+            .bind(now)
+            .bind(target_label_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|err| format!("Failed to restore merge target label: {}", err))?;
+            for segment in &moved_segments {
+                restore_segment_snapshot(tx, segment, now).await?;
+            }
+        }
+        _ => return Err("Correction cannot be undone".to_string()),
+    }
+    Ok(())
+}
+
+async fn restore_label_mutation(
+    tx: &mut Transaction<'_, Sqlite>,
+    mutation: Option<&Value>,
+    now: &str,
+) -> Result<(), String> {
+    let mutation = mutation.ok_or_else(|| "Correction cannot be undone".to_string())?;
+    let label_id = mutation
+        .get("labelId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Correction cannot be undone".to_string())?;
+    let was_new = mutation
+        .get("wasNew")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if was_new {
+        sqlx::query(
+            r#"
+            UPDATE speaker_labels
+            SET status = 'deleted', deleted_at = ?, updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(now)
+        .bind(now)
+        .bind(label_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|err| format!("Failed to undo new speaker label: {}", err))?;
+        return Ok(());
+    }
+
+    let previous_label = mutation
+        .get("previousLabel")
+        .ok_or_else(|| "Correction cannot be undone".to_string())?;
+    let display_name = previous_label
+        .get("display_name")
+        .or_else(|| previous_label.get("displayName"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Correction cannot be undone".to_string())?;
+    let source = previous_label
+        .get("source")
+        .and_then(Value::as_str)
+        .unwrap_or("manual");
+    let status = previous_label
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("confirmed");
+    let confidence = previous_label.get("confidence").and_then(Value::as_f64);
+
+    sqlx::query(
+        r#"
+        UPDATE speaker_labels
+        SET display_name = ?, source = ?, status = ?, confidence = ?, deleted_at = NULL, updated_at = ?
+        WHERE id = ?
+        "#,
+    )
+    .bind(display_name)
+    .bind(source)
+    .bind(status)
+    .bind(confidence)
+    .bind(now)
+    .bind(label_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|err| format!("Failed to restore speaker label: {}", err))?;
+    Ok(())
+}
+
+async fn restore_segment_snapshot(
+    tx: &mut Transaction<'_, Sqlite>,
+    segment: &Value,
+    now: &str,
+) -> Result<(), String> {
+    let id = segment
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Correction cannot be undone".to_string())?;
+    let meeting_id = segment
+        .get("meetingId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Correction cannot be undone".to_string())?;
+    let transcript_id = segment
+        .get("transcriptId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Correction cannot be undone".to_string())?;
+    let speaker_label_id = segment
+        .get("speakerLabelId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Correction cannot be undone".to_string())?;
+    let source = segment
+        .get("source")
+        .and_then(Value::as_str)
+        .unwrap_or(SOURCE_HEURISTIC);
+    let confidence = segment.get("confidence").and_then(Value::as_f64);
+    let start_time = segment.get("startTime").and_then(Value::as_f64);
+    let end_time = segment.get("endTime").and_then(Value::as_f64);
+    let correction_id = segment
+        .get("correctionId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    let label_exists =
+        sqlx::query("SELECT id FROM speaker_labels WHERE id = ? AND deleted_at IS NULL")
+            .bind(speaker_label_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|err| format!("Failed to validate restored speaker label: {}", err))?
+            .is_some();
+    if !label_exists {
+        return Err(
+            "Cannot restore speaker assignment because the speaker label is missing".to_string(),
+        );
+    }
+
+    let update_result = sqlx::query(
+        r#"
+        UPDATE transcript_speaker_segments
+        SET meeting_id = ?, transcript_id = ?, speaker_label_id = ?, start_time = ?, end_time = ?,
+            source = ?, confidence = ?, correction_id = ?, updated_at = ?
+        WHERE id = ?
+        "#,
+    )
+    .bind(meeting_id)
+    .bind(transcript_id)
+    .bind(speaker_label_id)
+    .bind(start_time)
+    .bind(end_time)
+    .bind(source)
+    .bind(confidence)
+    .bind(correction_id.as_deref())
+    .bind(now)
+    .bind(id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|err| format!("Failed to restore speaker segment: {}", err))?;
+
+    if update_result.rows_affected() == 0 {
+        sqlx::query(
+            r#"
+            INSERT INTO transcript_speaker_segments
+                (id, meeting_id, transcript_id, speaker_label_id, start_time, end_time, source, confidence, created_at, updated_at, correction_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(id)
+        .bind(meeting_id)
+        .bind(transcript_id)
+        .bind(speaker_label_id)
+        .bind(start_time)
+        .bind(end_time)
+        .bind(source)
+        .bind(confidence)
+        .bind(now)
+        .bind(now)
+        .bind(correction_id.as_deref())
+        .execute(&mut **tx)
+        .await
+        .map_err(|err| format!("Failed to restore speaker segment: {}", err))?;
+    }
+    Ok(())
 }
 
 async fn load_transcripts_for_labeling(

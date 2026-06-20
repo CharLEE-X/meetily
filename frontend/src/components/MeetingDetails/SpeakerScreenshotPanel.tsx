@@ -5,11 +5,17 @@ import { Camera, EyeOff, FileX, RefreshCw, Trash2, Users } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import {
+  acceptSpeakerLabel,
+  assignTranscriptSpeaker,
+  clearSpeakerLabels,
   getSpeakerLabels,
+  mergeSpeakerLabels,
   runSpeakerLabeling,
   SpeakerLabel,
   SpeakerLabelSuggestion,
   TranscriptSpeakerSegment,
+  TranscriptSpeakerLabelView,
+  undoLastSpeakerCorrection,
   updateSpeakerLabel,
 } from '@/services/speakerService';
 import {
@@ -20,7 +26,7 @@ import {
 
 interface SpeakerScreenshotPanelProps {
   meetingId: string;
-  onSpeakerLabelsChange: (labelsByTranscriptId: Record<string, string>) => void;
+  onSpeakerLabelsChange: (labelsByTranscriptId: Record<string, TranscriptSpeakerLabelView>) => void;
 }
 
 export function SpeakerScreenshotPanel({
@@ -33,7 +39,9 @@ export function SpeakerScreenshotPanel({
   const [screenshots, setScreenshots] = useState<MeetingScreenshot[]>([]);
   const [loadingSpeakers, setLoadingSpeakers] = useState(false);
   const [savingLabelId, setSavingLabelId] = useState<string | null>(null);
+  const [assigningSuggestionKey, setAssigningSuggestionKey] = useState<string | null>(null);
   const [draftNames, setDraftNames] = useState<Record<string, string>>({});
+  const [mergeTargets, setMergeTargets] = useState<Record<string, string>>({});
 
   const labelsById = useMemo(() => {
     return labels.reduce<Record<string, SpeakerLabel>>((acc, label) => {
@@ -43,36 +51,50 @@ export function SpeakerScreenshotPanel({
   }, [labels]);
 
   useEffect(() => {
-    const labelsByTranscriptId = segments.reduce<Record<string, string>>((acc, segment) => {
+    const labelsByTranscriptId = segments.reduce<Record<string, TranscriptSpeakerLabelView>>((acc, segment) => {
       const label = labelsById[segment.speakerLabelId];
       if (label) {
-        acc[segment.transcriptId] = label.displayName;
+        acc[segment.transcriptId] = {
+          displayName: label.displayName,
+          status: label.status,
+          source: segment.source || label.source,
+          confidence: segment.confidence ?? label.confidence,
+        };
       }
       return acc;
     }, {});
     onSpeakerLabelsChange(labelsByTranscriptId);
   }, [segments, labelsById, onSpeakerLabelsChange]);
 
+  const applySpeakerResult = useCallback((result: {
+    labels: SpeakerLabel[];
+    segments: TranscriptSpeakerSegment[];
+    visualSuggestions?: SpeakerLabelSuggestion[];
+  }) => {
+    setLabels(result.labels);
+    setSegments(result.segments);
+    setVisualSuggestions(result.visualSuggestions ?? []);
+    setDraftNames(
+      result.labels.reduce<Record<string, string>>((acc, label) => {
+        acc[label.id] = label.displayName;
+        return acc;
+      }, {})
+    );
+    setMergeTargets({});
+  }, []);
+
   const refreshSpeakers = useCallback(async () => {
     if (!meetingId) return;
     setLoadingSpeakers(true);
     try {
       const result = await getSpeakerLabels(meetingId);
-      setLabels(result.labels);
-      setSegments(result.segments);
-      setVisualSuggestions(result.visualSuggestions ?? []);
-      setDraftNames(
-        result.labels.reduce<Record<string, string>>((acc, label) => {
-          acc[label.id] = label.displayName;
-          return acc;
-        }, {})
-      );
+      applySpeakerResult(result);
     } catch (error) {
       console.error('Failed to load speaker labels:', error);
     } finally {
       setLoadingSpeakers(false);
     }
-  }, [meetingId]);
+  }, [applySpeakerResult, meetingId]);
 
   const refreshScreenshots = useCallback(async () => {
     if (!meetingId) return;
@@ -92,19 +114,83 @@ export function SpeakerScreenshotPanel({
     setLoadingSpeakers(true);
     try {
       const result = await runSpeakerLabeling(meetingId);
-      setLabels(result.labels);
-      setSegments(result.segments);
-      setVisualSuggestions(result.visualSuggestions ?? []);
-      setDraftNames(
-        result.labels.reduce<Record<string, string>>((acc, label) => {
-          acc[label.id] = label.displayName;
-          return acc;
-        }, {})
-      );
+      applySpeakerResult(result);
       toast.success('Speaker labels updated');
     } catch (error) {
       console.error('Failed to run speaker labeling:', error);
       toast.error('Failed to update speaker labels');
+    } finally {
+      setLoadingSpeakers(false);
+    }
+  };
+
+  const handleAcceptSpeaker = async (label: SpeakerLabel) => {
+    setSavingLabelId(label.id);
+    try {
+      const updated = await acceptSpeakerLabel(label.id);
+      setLabels((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      toast.success('Speaker label confirmed');
+    } catch (error) {
+      console.error('Failed to accept speaker label:', error);
+      toast.error(String(error));
+    } finally {
+      setSavingLabelId(null);
+    }
+  };
+
+  const handleMergeSpeaker = async (label: SpeakerLabel) => {
+    const targetLabelId = mergeTargets[label.id];
+    if (!targetLabelId || targetLabelId === label.id) return;
+    setSavingLabelId(label.id);
+    try {
+      applySpeakerResult(await mergeSpeakerLabels(label.id, targetLabelId));
+      toast.success('Speaker labels merged');
+    } catch (error) {
+      console.error('Failed to merge speaker labels:', error);
+      toast.error(String(error));
+    } finally {
+      setSavingLabelId(null);
+    }
+  };
+
+  const handleAssignSuggestion = async (suggestion: SpeakerLabelSuggestion) => {
+    const key = `${suggestion.transcriptId}-${suggestion.snapshotId}`;
+    setAssigningSuggestionKey(key);
+    try {
+      applySpeakerResult(
+        await assignTranscriptSpeaker(meetingId, suggestion.transcriptId, suggestion.displayName)
+      );
+      toast.success('Speaker assigned to transcript segment');
+    } catch (error) {
+      console.error('Failed to assign speaker suggestion:', error);
+      toast.error(String(error));
+    } finally {
+      setAssigningSuggestionKey(null);
+    }
+  };
+
+  const handleClearGenerated = async () => {
+    setLoadingSpeakers(true);
+    try {
+      await clearSpeakerLabels(meetingId, false);
+      await refreshSpeakers();
+      toast.success('Generated speaker labels cleared');
+    } catch (error) {
+      console.error('Failed to clear speaker labels:', error);
+      toast.error(String(error));
+    } finally {
+      setLoadingSpeakers(false);
+    }
+  };
+
+  const handleUndo = async () => {
+    setLoadingSpeakers(true);
+    try {
+      applySpeakerResult(await undoLastSpeakerCorrection(meetingId));
+      toast.success('Speaker correction undone');
+    } catch (error) {
+      console.error('Failed to undo speaker correction:', error);
+      toast.error(String(error));
     } finally {
       setLoadingSpeakers(false);
     }
@@ -184,7 +270,7 @@ export function SpeakerScreenshotPanel({
         ) : (
           <div className="mt-3 space-y-2">
             {labels.map((label) => (
-              <div key={label.id} className="flex items-center gap-2">
+              <div key={label.id} className="flex flex-wrap items-center gap-2">
                 <input
                   value={draftNames[label.id] ?? label.displayName}
                   onChange={(event) =>
@@ -202,6 +288,45 @@ export function SpeakerScreenshotPanel({
                 <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500">
                   {label.status}
                 </span>
+                {label.status !== 'confirmed' ? (
+                  <button
+                    type="button"
+                    onClick={() => handleAcceptSpeaker(label)}
+                    disabled={savingLabelId === label.id}
+                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                  >
+                    Accept
+                  </button>
+                ) : null}
+                {labels.length > 1 ? (
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={mergeTargets[label.id] ?? ''}
+                      onChange={(event) =>
+                        setMergeTargets((current) => ({ ...current, [label.id]: event.target.value }))
+                      }
+                      className="max-w-[140px] rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600"
+                      aria-label={`Merge ${label.displayName} into another speaker`}
+                    >
+                      <option value="">Merge into...</option>
+                      {labels
+                        .filter((item) => item.id !== label.id)
+                        .map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.displayName}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => handleMergeSpeaker(label)}
+                      disabled={!mergeTargets[label.id] || savingLabelId === label.id}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Merge
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -232,6 +357,16 @@ export function SpeakerScreenshotPanel({
                   <span className="text-emerald-600">
                     {Math.round(suggestion.confidence * 100)}%
                   </span>
+                  {!suggestion.autoApplied ? (
+                    <button
+                      type="button"
+                      onClick={() => handleAssignSuggestion(suggestion)}
+                      disabled={assigningSuggestionKey === `${suggestion.transcriptId}-${suggestion.snapshotId}`}
+                      className="ml-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 hover:bg-emerald-200 disabled:opacity-60"
+                    >
+                      Assign
+                    </button>
+                  ) : null}
                 </span>
               ))}
               {visualSuggestions.length > 6 ? (
@@ -242,6 +377,24 @@ export function SpeakerScreenshotPanel({
             </div>
           </div>
         ) : null}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleClearGenerated}
+            disabled={loadingSpeakers}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+          >
+            Clear generated
+          </button>
+          <button
+            type="button"
+            onClick={handleUndo}
+            disabled={loadingSpeakers}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+          >
+            Undo last correction
+          </button>
+        </div>
       </section>
 
       <section>

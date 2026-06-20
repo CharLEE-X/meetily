@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
+import { TranscriptSpeakerLabelView } from "@/services/speakerService";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -34,7 +35,7 @@ export interface VirtualizedTranscriptViewProps {
     totalCount?: number;
     loadedCount?: number;
     onLoadMore?: () => void;
-    speakerLabelsBySegmentId?: Record<string, string>;
+    speakerLabelsBySegmentId?: Record<string, TranscriptSpeakerLabelView>;
     highlightedSegmentId?: string | null;
 }
 
@@ -86,7 +87,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
-    speakerLabel?: string;
+    speakerLabel?: TranscriptSpeakerLabelView;
     highlighted?: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
@@ -111,8 +112,24 @@ const TranscriptSegment = memo(function TranscriptSegment({
                 </Tooltip>
                 <div className="flex-1">
                     {speakerLabel && (
-                        <div className="mb-1 text-[11px] font-medium uppercase text-blue-600">
-                            {speakerLabel}
+                        <div className="mb-1 flex max-w-full flex-wrap items-center gap-1.5">
+                            <span className={`inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                speakerLabel.status === 'confirmed'
+                                    ? 'bg-emerald-50 text-emerald-700'
+                                    : speakerLabel.source === 'manual'
+                                      ? 'bg-blue-50 text-blue-700'
+                                      : 'bg-amber-50 text-amber-700'
+                            }`}>
+                                <span className="truncate">{speakerLabel.displayName}</span>
+                            </span>
+                            <span className="text-[10px] font-medium uppercase text-slate-400">
+                                {speakerLabel.status === 'confirmed' ? 'Confirmed' : 'Suggested'}
+                            </span>
+                            {typeof speakerLabel.confidence === 'number' ? (
+                                <span className="text-[10px] text-slate-400">
+                                    {Math.round(speakerLabel.confidence * 100)}%
+                                </span>
+                            ) : null}
                         </div>
                     )}
                     {isStreaming ? (

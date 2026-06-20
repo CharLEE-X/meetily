@@ -5,6 +5,7 @@ import { VirtualizedTranscriptView, VirtualizedTranscriptViewHandle } from '@/co
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { SpeakerScreenshotPanel } from './SpeakerScreenshotPanel';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { TranscriptSpeakerLabelView } from '@/services/speakerService';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -59,7 +60,7 @@ export const TranscriptPanel = forwardRef<TranscriptPanelHandle, TranscriptPanel
   className = '',
   style,
 }, ref) {
-  const [speakerLabelsByTranscriptId, setSpeakerLabelsByTranscriptId] = useState<Record<string, string>>({});
+  const [speakerLabelsByTranscriptId, setSpeakerLabelsByTranscriptId] = useState<Record<string, TranscriptSpeakerLabelView>>({});
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
   const transcriptViewRef = useRef<VirtualizedTranscriptViewHandle | null>(null);
 
@@ -78,7 +79,7 @@ export const TranscriptPanel = forwardRef<TranscriptPanelHandle, TranscriptPanel
     }));
   }, [transcripts, usePagination, segments]);
 
-  const handleSpeakerLabelsChange = useCallback((labelsByTranscriptId: Record<string, string>) => {
+  const handleSpeakerLabelsChange = useCallback((labelsByTranscriptId: Record<string, TranscriptSpeakerLabelView>) => {
     setSpeakerLabelsByTranscriptId(labelsByTranscriptId);
   }, []);
 

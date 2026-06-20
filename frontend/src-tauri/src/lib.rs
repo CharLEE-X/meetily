@@ -712,6 +712,10 @@ pub fn run() {
             speaker::get_speaker_labels,
             speaker::clear_speaker_labels,
             speaker::update_speaker_label,
+            speaker::accept_speaker_label,
+            speaker::assign_transcript_speaker,
+            speaker::merge_speaker_labels,
+            speaker::undo_last_speaker_correction,
             speaker::get_speaker_labeling_preferences,
             speaker::set_speaker_labeling_preferences,
             // Meeting screenshot commands

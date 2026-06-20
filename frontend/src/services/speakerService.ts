@@ -20,6 +20,13 @@ export interface TranscriptSpeakerSegment {
   confidence?: number | null;
 }
 
+export interface TranscriptSpeakerLabelView {
+  displayName: string;
+  status: string;
+  source: string;
+  confidence?: number | null;
+}
+
 export interface SpeakerLabelingResult {
   meetingId: string;
   labels: SpeakerLabel[];
@@ -65,6 +72,33 @@ export async function updateSpeakerLabel(
   displayName: string,
 ): Promise<SpeakerLabel> {
   return invoke<SpeakerLabel>('update_speaker_label', { labelId, displayName });
+}
+
+export async function acceptSpeakerLabel(labelId: string): Promise<SpeakerLabel> {
+  return invoke<SpeakerLabel>('accept_speaker_label', { labelId });
+}
+
+export async function assignTranscriptSpeaker(
+  meetingId: string,
+  transcriptId: string,
+  displayName: string,
+): Promise<SpeakerLabelingResult> {
+  return invoke<SpeakerLabelingResult>('assign_transcript_speaker', {
+    meetingId,
+    transcriptId,
+    displayName,
+  });
+}
+
+export async function mergeSpeakerLabels(
+  sourceLabelId: string,
+  targetLabelId: string,
+): Promise<SpeakerLabelingResult> {
+  return invoke<SpeakerLabelingResult>('merge_speaker_labels', { sourceLabelId, targetLabelId });
+}
+
+export async function undoLastSpeakerCorrection(meetingId: string): Promise<SpeakerLabelingResult> {
+  return invoke<SpeakerLabelingResult>('undo_last_speaker_correction', { meetingId });
 }
 
 export async function getSpeakerLabelingPreferences(): Promise<SpeakerLabelingPreferences> {
