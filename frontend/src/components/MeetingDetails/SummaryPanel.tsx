@@ -12,10 +12,11 @@ import { ReminderDraftReview } from './ReminderDraftReview';
 import { AppleNotesExportPanel } from './AppleNotesExportPanel';
 import { CalendarEventPanel } from './CalendarEventPanel';
 import { AgentWorkflowRunsPanel } from '@/components/AgentWorkflowRunsPanel';
+import { MeetingChatPanel } from './MeetingChatPanel';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
-import { Languages, ChevronDown } from 'lucide-react';
+import { Languages, ChevronDown, FileText, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
@@ -106,6 +107,7 @@ export function SummaryPanel({
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [activeView, setActiveView] = useState<'summary' | 'chat'>('summary');
   const languageLoadVersionRef = useRef(0);
   const activeMeetingIdRef = useRef(meeting.id);
   const languageSaveVersionRef = useRef(0);
@@ -230,6 +232,10 @@ export function SummaryPanel({
 
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
+  useEffect(() => {
+    setActiveView('summary');
+  }, [meeting.id]);
+
   const languageSlot = (
     <Popover open={langPickerOpen} onOpenChange={setLangPickerOpen}>
       <PopoverTrigger asChild>
@@ -270,48 +276,83 @@ export function SummaryPanel({
           onChange={onTitleChange}
         /> */}
 
-        {/* Button groups - only show when summary exists */}
-        {aiSummary && !isSummaryLoading && (
-          <div className="flex w-full flex-wrap items-center justify-center gap-2 pt-0">
-            {/* Left-aligned: Summary Generator Button Group */}
-            <div className="min-w-0 flex-shrink-0">
-              <SummaryGeneratorButtonGroup
-                modelConfig={modelConfig}
-                setModelConfig={setModelConfig}
-                onSaveModelConfig={onSaveModelConfig}
-                onGenerateSummary={onGenerateSummary}
-                onStopGeneration={onStopGeneration}
-                customPrompt={customPrompt}
-                summaryStatus={summaryStatus}
-                availableTemplates={availableTemplates}
-                selectedTemplate={selectedTemplate}
-                onTemplateSelect={onTemplateSelect}
-                hasTranscripts={transcripts.length > 0}
-                hasSummary={!!aiSummary}
-                isModelConfigLoading={isModelConfigLoading}
-                onOpenModelSettings={onOpenModelSettings}
-                languageSlot={languageSlot}
-              />
-            </div>
-
-            {/* Right-aligned: Summary Updater Button Group */}
-            <div className="min-w-0 flex-shrink-0">
-              <SummaryUpdaterButtonGroup
-                isSaving={isSaving}
-                isDirty={isTitleDirty || (summaryRef.current?.isDirty || false)}
-                onSave={onSaveAll}
-                onCopy={onCopySummary}
-                onFind={() => {
-                  // TODO: Implement find in summary functionality
-                  console.log('Find in summary clicked');
-                }}
-                onOpenFolder={onOpenFolder}
-                onExport={() => setExportDialogOpen(true)}
-                hasSummary={!!aiSummary}
-              />
-            </div>
+        <div className="flex w-full flex-wrap items-center justify-between gap-3">
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1" role="tablist" aria-label="Meeting details view">
+            <button
+              type="button"
+              role="tab"
+              id="meeting-summary-tab"
+              aria-selected={activeView === 'summary'}
+              aria-controls="meeting-summary-panel"
+              onClick={() => setActiveView('summary')}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${activeView === 'summary'
+                ? 'bg-white text-slate-950 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800'
+                }`}
+            >
+              <FileText size={16} />
+              Summary
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="meeting-chat-tab"
+              aria-selected={activeView === 'chat'}
+              aria-controls="meeting-chat-panel"
+              onClick={() => setActiveView('chat')}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${activeView === 'chat'
+                ? 'bg-white text-slate-950 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800'
+                }`}
+            >
+              <MessageCircle size={16} />
+              Chat
+            </button>
           </div>
-        )}
+
+          {/* Button groups - only show when summary exists */}
+          {activeView === 'summary' && aiSummary && !isSummaryLoading && (
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+              {/* Left-aligned: Summary Generator Button Group */}
+              <div className="min-w-0 flex-shrink-0">
+                <SummaryGeneratorButtonGroup
+                  modelConfig={modelConfig}
+                  setModelConfig={setModelConfig}
+                  onSaveModelConfig={onSaveModelConfig}
+                  onGenerateSummary={onGenerateSummary}
+                  onStopGeneration={onStopGeneration}
+                  customPrompt={customPrompt}
+                  summaryStatus={summaryStatus}
+                  availableTemplates={availableTemplates}
+                  selectedTemplate={selectedTemplate}
+                  onTemplateSelect={onTemplateSelect}
+                  hasTranscripts={transcripts.length > 0}
+                  hasSummary={!!aiSummary}
+                  isModelConfigLoading={isModelConfigLoading}
+                  onOpenModelSettings={onOpenModelSettings}
+                  languageSlot={languageSlot}
+                />
+              </div>
+
+              {/* Right-aligned: Summary Updater Button Group */}
+              <div className="min-w-0 flex-shrink-0">
+                <SummaryUpdaterButtonGroup
+                  isSaving={isSaving}
+                  isDirty={isTitleDirty || (summaryRef.current?.isDirty || false)}
+                  onSave={onSaveAll}
+                  onCopy={onCopySummary}
+                  onFind={() => {
+                    // TODO: Implement find in summary functionality
+                    console.log('Find in summary clicked');
+                  }}
+                  onOpenFolder={onOpenFolder}
+                  onExport={() => setExportDialogOpen(true)}
+                  hasSummary={!!aiSummary}
+                />
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <ExportMeetingDialog
@@ -320,7 +361,29 @@ export function SummaryPanel({
         onOpenChange={setExportDialogOpen}
       />
 
-      {isSummaryLoading ? (
+      <div
+        id="meeting-chat-panel"
+        role="tabpanel"
+        aria-labelledby="meeting-chat-tab"
+        hidden={activeView !== 'chat'}
+        className={activeView === 'chat' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+      >
+        <MeetingChatPanel
+          meetingId={meeting.id}
+          meetingTitle={meetingTitle}
+          modelConfig={modelConfig}
+          transcriptCount={transcripts.length}
+        />
+      </div>
+
+      <div
+        id="meeting-summary-panel"
+        role="tabpanel"
+        aria-labelledby="meeting-summary-tab"
+        hidden={activeView !== 'summary'}
+        className={activeView === 'summary' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+      >
+        {isSummaryLoading ? (
         <div className="flex flex-col h-full">
           {/* Show button group during generation */}
           <div className="flex items-center justify-center pb-4 pt-8">
@@ -462,7 +525,8 @@ export function SummaryPanel({
             </div>
           )}
         </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
