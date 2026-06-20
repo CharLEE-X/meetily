@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "suite": "meetily-transcription-baseline",
+  "createdFor": "CHA-1675",
+  "fixtureRoot": "docs/fixtures/transcription",
+  "metrics": [
+    "word_error_rate",
+    "character_error_rate",
+    "realtime_factor",
+    "peak_rss_mb",
+    "segments_emitted",
+    "average_confidence",
+    "timestamp_drift_ms",
+    "failure_mode"
+  ],
+  "fixtures": [
+    {
+      "id": "short-clean-en",
+      "kind": "short",
+      "durationSeconds": 60,
+      "language": "en",
+      "speakerCount": 1,
+      "noiseProfile": "clean",
+      "referenceTranscript": "short-clean-en.txt",
+      "audio": "short-clean-en.wav",
+      "purpose": "Fast smoke test for provider readiness, language defaults, and confidence output."
+    },
+    {
+      "id": "long-meeting-en",
+      "kind": "long",
+      "durationSeconds": 3600,
+      "language": "en",
+      "speakerCount": 3,
+      "noiseProfile": "office",
+      "referenceTranscript": "long-meeting-en.txt",
+      "audio": "long-meeting-en.wav",
+      "purpose": "Long-meeting stability, memory ceiling, chunk ordering, and timestamp drift."
+    },
+    {
+      "id": "noisy-laptop-en",
+      "kind": "noisy",
+      "durationSeconds": 300,
+      "language": "en",
+      "speakerCount": 2,
+      "noiseProfile": "keyboard-fan-room",
+      "referenceTranscript": "noisy-laptop-en.txt",
+      "audio": "noisy-laptop-en.wav",
+      "purpose": "Preprocessing sensitivity for fan noise, keyboard transients, clipping, and VAD fragmentation."
+    },
+    {
+      "id": "multi-speaker-overlap-en",
+      "kind": "multi-speaker",
+      "durationSeconds": 600,
+      "language": "en",
+      "speakerCount": 4,
+      "noiseProfile": "call-overlap",
+      "referenceTranscript": "multi-speaker-overlap-en.txt",
+      "audio": "multi-speaker-overlap-en.wav",
+      "purpose": "Speaker turn-taking, overlap robustness, and repeated partial/empty segment behavior."
+    },
+    {
+      "id": "non-english-es",
+      "kind": "non-english",
+      "durationSeconds": 300,
+      "language": "es",
+      "speakerCount": 1,
+      "noiseProfile": "clean",
+      "referenceTranscript": "non-english-es.txt",
+      "audio": "non-english-es.wav",
+      "purpose": "Manual language handling for Whisper and documented Parakeet auto-language limitation."
+    }
+  ],
+  "baselineMatrix": [
+    {
+      "provider": "parakeet",
+      "model": "parakeet-tdt-0.6b-v3-int8",
+      "profile": "current-default-fast",
+      "expectedStrength": "Low-latency local streaming and small memory footprint.",
+      "knownGap": "No confidence score and no manual language override."
+    },
+    {
+      "provider": "localWhisper",
+      "model": "large-v3-turbo",
+      "profile": "current-default-accuracy",
+      "expectedStrength": "Higher accuracy and manual language support.",
+      "knownGap": "Larger download and slower inference than Parakeet."
+    }
+  ]
+}
