@@ -6,8 +6,8 @@ use serde_json::json;
 use sqlx::Row;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
@@ -75,6 +75,9 @@ pub struct MeetingScreenshot {
     pub source: String,
     pub provider: Option<String>,
     pub relevance_confidence: Option<f64>,
+    pub relevance_status: Option<String>,
+    pub capture_trigger: Option<String>,
+    pub speaker_evidence: bool,
     pub skip_reason: Option<String>,
 }
 
@@ -259,7 +262,9 @@ pub async fn stop_meeting_screenshot_capture(
 }
 
 #[tauri::command]
-pub async fn pause_meeting_screenshot_capture(meeting_id: String) -> Result<ScreenshotCaptureStatus, String> {
+pub async fn pause_meeting_screenshot_capture(
+    meeting_id: String,
+) -> Result<ScreenshotCaptureStatus, String> {
     let active = set_capture_paused(&meeting_id, true)?;
     Ok(ScreenshotCaptureStatus {
         meeting_id,
@@ -271,7 +276,9 @@ pub async fn pause_meeting_screenshot_capture(meeting_id: String) -> Result<Scre
 }
 
 #[tauri::command]
-pub async fn resume_meeting_screenshot_capture(meeting_id: String) -> Result<ScreenshotCaptureStatus, String> {
+pub async fn resume_meeting_screenshot_capture(
+    meeting_id: String,
+) -> Result<ScreenshotCaptureStatus, String> {
     let active = set_capture_paused(&meeting_id, false)?;
     Ok(ScreenshotCaptureStatus {
         meeting_id,
@@ -393,13 +400,23 @@ pub async fn delete_meeting_screenshot(
     state: tauri::State<'_, AppState>,
     screenshot_id: String,
     delete_file: Option<bool>,
+    remove_metadata: Option<bool>,
 ) -> Result<(), String> {
+    let should_delete_file = delete_file.unwrap_or(true);
+    let should_remove_metadata = remove_metadata.unwrap_or(true);
+    if !should_delete_file {
+        return Err(
+            "Screenshot deletion must remove the image file to avoid orphaned meeting artifacts"
+                .to_string(),
+        );
+    }
+
     let pool = state.db_manager.pool();
     let row = sqlx::query(
         r#"
-        SELECT file_path
+        SELECT file_path, metadata_json
         FROM meeting_screenshots
-        WHERE id = ? AND deleted_at IS NULL
+        WHERE id = ?
         "#,
     )
     .bind(&screenshot_id)
@@ -411,33 +428,99 @@ pub async fn delete_meeting_screenshot(
         return Ok(());
     };
 
-    let now = Utc::now().to_rfc3339();
-    sqlx::query(
-        r#"
-        UPDATE meeting_screenshots
-        SET status = 'deleted', deleted_at = ?, updated_at = ?
-        WHERE id = ?
-        "#,
-    )
-    .bind(&now)
-    .bind(&now)
-    .bind(&screenshot_id)
-    .execute(pool)
-    .await
-    .map_err(|err| format!("Failed to delete screenshot metadata: {}", err))?;
-
-    if delete_file.unwrap_or(true) {
-        let file_path: Option<String> = row.try_get("file_path").ok();
-        if let Some(file_path) = file_path {
-            if let Err(err) = std::fs::remove_file(&file_path) {
-                if err.kind() != std::io::ErrorKind::NotFound {
-                    log::warn!("Failed to remove screenshot file {}: {}", file_path, err);
-                }
+    let file_path: Option<String> = row.try_get("file_path").ok();
+    if let Some(file_path) = file_path {
+        if let Err(err) = std::fs::remove_file(&file_path) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                return Err(format!(
+                    "Failed to remove screenshot file {}: {}",
+                    file_path, err
+                ));
             }
         }
     }
 
+    let now = Utc::now().to_rfc3339();
+    if should_remove_metadata {
+        sqlx::query(
+            r#"
+            DELETE FROM meeting_screenshots
+            WHERE id = ?
+            "#,
+        )
+        .bind(&screenshot_id)
+        .execute(pool)
+        .await
+        .map_err(|err| format!("Failed to delete screenshot metadata: {}", err))?;
+    } else {
+        sqlx::query(
+            r#"
+            UPDATE meeting_screenshots
+            SET status = 'deleted',
+                file_path = NULL,
+                thumbnail_path = NULL,
+                redaction_status = 'image_removed',
+                metadata_json = ?,
+                updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(screenshot_metadata_after_image_removal(
+            row.try_get("metadata_json").ok(),
+            &now,
+        ))
+        .bind(&now)
+        .bind(&screenshot_id)
+        .execute(pool)
+        .await
+        .map_err(|err| format!("Failed to update screenshot metadata: {}", err))?;
+    }
+
     Ok(())
+}
+
+fn screenshot_metadata_after_image_removal(
+    metadata_json: Option<String>,
+    removed_at: &str,
+) -> String {
+    let metadata = metadata_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .unwrap_or_else(|| json!({}));
+    let analysis = metadata.get("analysis");
+    let provider = metadata
+        .get("provider")
+        .cloned()
+        .or_else(|| analysis.and_then(|value| value.get("provider")).cloned());
+    let confidence = analysis
+        .and_then(|value| value.get("confidence"))
+        .and_then(|value| value.as_f64())
+        .unwrap_or(0.0);
+    let relevance_status = analysis
+        .and_then(|value| value.get("relevanceStatus"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("imageRemoved");
+    let removal_reason = "Screenshot image was removed by the user";
+
+    json!({
+        "analysis": {
+            "isRelevant": false,
+            "confidence": confidence,
+            "provider": provider.clone().unwrap_or(serde_json::Value::Null),
+            "visibleNames": [],
+            "textSnippets": [],
+            "relevanceStatus": relevance_status,
+            "skipReason": removal_reason,
+        },
+        "captureTarget": metadata.get("captureTarget").cloned().unwrap_or(serde_json::Value::Null),
+        "provider": provider.unwrap_or(serde_json::Value::Null),
+        "sourceTrigger": metadata.get("sourceTrigger").cloned().unwrap_or(serde_json::Value::Null),
+        "recordingTime": metadata.get("recordingTime").cloned().unwrap_or(serde_json::Value::Null),
+        "imageRemovedAt": removed_at,
+        "imageRemovedByUser": true,
+        "skipReason": removal_reason,
+    })
+    .to_string()
 }
 
 #[tauri::command]
@@ -529,6 +612,7 @@ async fn capture_and_store_screenshot<R: Runtime>(
                     window_id: None,
                     window_bounds: None,
                     confidence: None,
+                    status: "skipped",
                     relevance_status: "skipped",
                     skip_reason: &err,
                 },
@@ -540,7 +624,51 @@ async fn capture_and_store_screenshot<R: Runtime>(
     let file_path = screenshot_file_path(app, meeting_id, &screenshot_id, captured_at)
         .map_err(|err| format!("Failed to prepare screenshot folder: {}", err))?;
 
-    capture_screen_to_file(&file_path, &capture_plan).await?;
+    if let Err(err) = capture_screen_to_file(&file_path, &capture_plan).await {
+        if let Err(remove_err) = std::fs::remove_file(&file_path) {
+            if remove_err.kind() != std::io::ErrorKind::NotFound {
+                log::warn!(
+                    "Failed to remove failed screenshot file {}: {}",
+                    file_path.display(),
+                    remove_err
+                );
+            }
+        }
+        store_skipped_screenshot(
+            pool,
+            SkippedScreenshotRecord {
+                screenshot_id,
+                meeting_id,
+                captured_at: &captured_at_string,
+                recording_time,
+                display_label: display_label.as_deref(),
+                source_trigger,
+                capture_target: &capture_plan.capture_target,
+                provider: capture_plan
+                    .call_window
+                    .as_ref()
+                    .map(|target| target.provider.as_str()),
+                window_title: capture_plan
+                    .call_window
+                    .as_ref()
+                    .and_then(|target| target.window_title.as_deref()),
+                window_id: capture_plan
+                    .call_window
+                    .as_ref()
+                    .and_then(|target| target.window_id),
+                window_bounds: capture_plan
+                    .call_window
+                    .as_ref()
+                    .map(|target| &target.bounds),
+                confidence: None,
+                status: "failed",
+                relevance_status: "failed",
+                skip_reason: &err,
+            },
+        )
+        .await?;
+        return Ok(None);
+    }
 
     let analysis = analyze_screenshot(&file_path).await;
     if !analysis.is_relevant {
@@ -586,6 +714,7 @@ async fn capture_and_store_screenshot<R: Runtime>(
                     .as_ref()
                     .map(|target| &target.bounds),
                 confidence: Some(analysis.confidence),
+                status: "skipped",
                 relevance_status: &analysis.relevance_status,
                 skip_reason: &skip_reason,
             },
@@ -655,6 +784,9 @@ async fn capture_and_store_screenshot<R: Runtime>(
         source: source_trigger.to_string(),
         provider: analysis.provider,
         relevance_confidence: Some(analysis.confidence),
+        relevance_status: Some(analysis.relevance_status),
+        capture_trigger: Some(source_trigger.to_string()),
+        speaker_evidence: !analysis.visible_names.is_empty(),
         skip_reason: None,
     }))
 }
@@ -672,6 +804,7 @@ struct SkippedScreenshotRecord<'a> {
     window_id: Option<u32>,
     window_bounds: Option<&'a ScreenshotWindowBounds>,
     confidence: Option<f64>,
+    status: &'a str,
     relevance_status: &'a str,
     skip_reason: &'a str,
 }
@@ -706,7 +839,7 @@ async fn store_skipped_screenshot(
         r#"
         INSERT INTO meeting_screenshots
             (id, meeting_id, captured_at, recording_time, file_path, display_label, status, redaction_status, source, created_at, updated_at, metadata_json)
-        VALUES (?, ?, ?, ?, NULL, ?, 'skipped', 'not_available', ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, NULL, ?, ?, 'not_available', ?, ?, ?, ?)
         "#,
     )
     .bind(&record.screenshot_id)
@@ -714,6 +847,7 @@ async fn store_skipped_screenshot(
     .bind(record.captured_at)
     .bind(record.recording_time)
     .bind(record.display_label)
+    .bind(record.status)
     .bind(record.source_trigger)
     .bind(&now)
     .bind(&now)
@@ -934,7 +1068,7 @@ async fn load_meeting_screenshots(
         SELECT id, meeting_id, captured_at, recording_time, file_path, thumbnail_path,
                display_label, status, redaction_status, source, metadata_json
         FROM meeting_screenshots
-        WHERE meeting_id = ? AND deleted_at IS NULL
+        WHERE meeting_id = ?
         ORDER BY COALESCE(recording_time, 0), captured_at
         "#,
     )
@@ -977,6 +1111,22 @@ async fn load_meeting_screenshots(
                 relevance_confidence: analysis
                     .and_then(|value| value.get("confidence"))
                     .and_then(|value| value.as_f64()),
+                relevance_status: analysis
+                    .and_then(|value| value.get("relevanceStatus"))
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                capture_trigger: metadata
+                    .as_ref()
+                    .and_then(|value| value.get("sourceTrigger"))
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+                    .or_else(|| Some(row.get("source"))),
+                speaker_evidence: row.get::<String, _>("status") == "captured"
+                    && analysis
+                        .and_then(|value| value.get("visibleNames"))
+                        .and_then(|value| value.as_array())
+                        .map(|names| !names.is_empty())
+                        .unwrap_or(false),
                 skip_reason: metadata
                     .as_ref()
                     .and_then(|value| value.get("skipReason"))
@@ -1029,7 +1179,11 @@ fn reserve_capture_slot(
     let mut state = runtime_state
         .lock()
         .map_err(|_| "Failed to update screenshot scheduler state".to_string())?;
-    Ok(should_reserve_capture_slot(&mut state, now, min_gap_seconds))
+    Ok(should_reserve_capture_slot(
+        &mut state,
+        now,
+        min_gap_seconds,
+    ))
 }
 
 fn should_reserve_capture_slot(
@@ -1795,6 +1949,49 @@ mod tests {
             analysis.skip_reason.as_deref(),
             Some("Sensitive private content was detected in the call window")
         );
+    }
+
+    #[test]
+    fn image_removal_metadata_scrubs_ocr_names_and_text() {
+        let metadata = json!({
+            "analysis": {
+                "isRelevant": true,
+                "visibleNames": ["Adrian Witaszak"],
+                "textSnippets": ["Adrian Witaszak", "Google Meet"],
+                "relevanceStatus": "kept"
+            },
+            "provider": "Google Meet",
+            "windowTitle": "Zoom Meeting - Adrian Witaszak / Acme Q3 Review"
+        })
+        .to_string();
+
+        let sanitized =
+            screenshot_metadata_after_image_removal(Some(metadata), "2026-06-20T09:00:00Z");
+        let value: serde_json::Value = serde_json::from_str(&sanitized).expect("metadata json");
+
+        assert_eq!(
+            value
+                .get("analysis")
+                .and_then(|analysis| analysis.get("visibleNames"))
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len),
+            Some(0)
+        );
+        assert_eq!(
+            value
+                .get("analysis")
+                .and_then(|analysis| analysis.get("textSnippets"))
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len),
+            Some(0)
+        );
+        assert_eq!(
+            value
+                .get("imageRemovedByUser")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert!(value.get("windowTitle").is_none());
     }
 
     #[test]

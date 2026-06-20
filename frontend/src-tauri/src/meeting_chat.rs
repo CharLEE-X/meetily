@@ -1192,7 +1192,7 @@ async fn index_screenshot_artifacts(
     let rows = sqlx::query_as::<_, (String, String, Option<f64>, String, Option<String>, Option<String>, String)>(
         "SELECT id, captured_at, recording_time, file_path, display_label, metadata_json, redaction_status
          FROM meeting_screenshots
-         WHERE meeting_id = ? AND deleted_at IS NULL AND status = 'captured'
+         WHERE meeting_id = ? AND deleted_at IS NULL AND status = 'captured' AND file_path IS NOT NULL
          ORDER BY COALESCE(recording_time, 999999999), captured_at ASC",
     )
     .bind(meeting_id)

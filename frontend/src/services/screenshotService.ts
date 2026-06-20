@@ -21,6 +21,9 @@ export interface MeetingScreenshot {
   source: string;
   provider?: string | null;
   relevanceConfidence?: number | null;
+  relevanceStatus?: string | null;
+  captureTrigger?: string | null;
+  speakerEvidence: boolean;
   skipReason?: string | null;
 }
 
@@ -99,8 +102,9 @@ export async function listMeetingScreenshots(meetingId: string): Promise<Meeting
 export async function deleteMeetingScreenshot(
   screenshotId: string,
   deleteFile = true,
+  removeMetadata = true,
 ): Promise<void> {
-  return invoke<void>('delete_meeting_screenshot', { screenshotId, deleteFile });
+  return invoke<void>('delete_meeting_screenshot', { screenshotId, deleteFile, removeMetadata });
 }
 
 export async function attachMeetingScreenshots(

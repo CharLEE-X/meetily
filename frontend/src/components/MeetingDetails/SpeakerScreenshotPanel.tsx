@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Camera, EyeOff, RefreshCw, Trash2, Users } from 'lucide-react';
+import { Camera, EyeOff, FileX, RefreshCw, Trash2, Users } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import {
@@ -124,15 +124,33 @@ export function SpeakerScreenshotPanel({
     }
   };
 
-  const handleDeleteScreenshot = async (screenshotId: string) => {
+  const handleRemoveScreenshotImage = async (screenshotId: string) => {
     try {
-      await deleteMeetingScreenshot(screenshotId);
-      setScreenshots((current) => current.filter((screenshot) => screenshot.id !== screenshotId));
-      toast.success('Screenshot deleted');
+      await deleteMeetingScreenshot(screenshotId, true, false);
+      await refreshScreenshots();
+      toast.success('Screenshot image removed');
     } catch (error) {
       console.error('Failed to delete screenshot:', error);
       toast.error('Failed to delete screenshot');
     }
+  };
+
+  const handleRemoveScreenshotMetadata = async (screenshotId: string) => {
+    try {
+      await deleteMeetingScreenshot(screenshotId, true, true);
+      setScreenshots((current) => current.filter((screenshot) => screenshot.id !== screenshotId));
+      toast.success('Screenshot metadata removed');
+    } catch (error) {
+      console.error('Failed to remove screenshot metadata:', error);
+      toast.error('Failed to remove screenshot metadata');
+    }
+  };
+
+  const statusLabel = (screenshot: MeetingScreenshot) => {
+    if (screenshot.status === 'captured') return 'Kept';
+    if (screenshot.status === 'skipped') return 'Skipped';
+    if (screenshot.status === 'deleted') return 'Deleted';
+    return screenshot.status || 'Failed';
   };
 
   return (
@@ -194,48 +212,71 @@ export function SpeakerScreenshotPanel({
         ) : (
           <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
             {screenshots.map((screenshot) => (
-              <div key={screenshot.id} className="w-36 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+              <div key={screenshot.id} className="w-44 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
                 {screenshot.filePath && screenshot.status === 'captured' ? (
                   <img
                     src={convertFileSrc(screenshot.filePath)}
                     alt={screenshot.displayLabel ?? 'Meeting screenshot'}
-                    className="h-20 w-full object-cover"
+                    className="h-24 w-full object-cover"
                   />
                 ) : (
-                  <div className="flex h-20 flex-col justify-center gap-1 bg-amber-50 px-2 text-amber-900">
+                  <div className={`flex h-24 flex-col justify-center gap-1 px-2 ${screenshot.status === 'deleted' ? 'bg-slate-100 text-slate-600' : 'bg-amber-50 text-amber-900'}`}>
                     <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide">
                       <EyeOff className="h-3.5 w-3.5" />
-                      Skipped
+                      {statusLabel(screenshot)}
                     </div>
                     <p
                       className="line-clamp-2 text-[11px] leading-snug"
-                      title={screenshot.skipReason ?? 'Capture did not look like a supported meeting window.'}
+                      title={screenshot.skipReason ?? 'No image payload is stored for this snapshot.'}
                     >
-                      {screenshot.skipReason ?? 'Capture did not look like a supported meeting window.'}
+                      {screenshot.skipReason ?? 'No image payload is stored for this snapshot.'}
                     </p>
                   </div>
                 )}
-                <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+                <div className="space-y-1 px-2 py-1.5">
                   <div className="min-w-0">
-                    <span className="block truncate text-xs font-medium text-slate-600">
+                    <span className="block truncate text-xs font-semibold text-slate-700">
                       {screenshot.displayLabel ?? new Date(screenshot.capturedAt).toLocaleTimeString()}
                     </span>
-                    {screenshot.provider || typeof screenshot.relevanceConfidence === 'number' ? (
-                      <span className="block truncate text-[10px] text-slate-400">
-                        {[screenshot.provider, typeof screenshot.relevanceConfidence === 'number' ? `${Math.round(screenshot.relevanceConfidence * 100)}%` : null]
+                    <span className="block truncate text-[10px] text-slate-400">
+                      {[
+                        statusLabel(screenshot),
+                        screenshot.captureTrigger,
+                        screenshot.provider,
+                        screenshot.relevanceStatus,
+                        typeof screenshot.relevanceConfidence === 'number' ? `${Math.round(screenshot.relevanceConfidence * 100)}%` : null,
+                      ]
                           .filter(Boolean)
                           .join(' · ')}
+                    </span>
+                    {screenshot.speakerEvidence ? (
+                      <span className="mt-1 inline-flex rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                        Speaker evidence
                       </span>
                     ) : null}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteScreenshot(screenshot.id)}
-                    className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                    aria-label="Delete screenshot"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex items-center justify-end gap-1">
+                    {screenshot.filePath ? (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveScreenshotImage(screenshot.id)}
+                        className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-amber-50 hover:text-amber-700"
+                        aria-label="Remove screenshot image but keep metadata"
+                        title="Remove image but keep metadata"
+                      >
+                        <FileX className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveScreenshotMetadata(screenshot.id)}
+                      className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                      aria-label="Remove screenshot metadata"
+                      title="Remove metadata"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
