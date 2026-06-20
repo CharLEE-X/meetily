@@ -28,7 +28,65 @@ The first screenshot confirmation must show:
   detected call window when fresh bounds are available, and skips capture rather
   than silently falling back to full-screen capture.
 
-Visual speaker identification is manual-only for this implementation track. Screenshots can be used as user-visible context for manual label correction, but the app must not infer a person's real identity from a face, name badge, participant tile, or other visual signal until a separate consent and model policy is approved.
+Visual speaker identification is bounded to visible meeting UI signals. Screenshots can be used as user-visible context for manual label correction and local speaker-label suggestions, but the app must not infer a person's real identity from a face, appearance, name badge, participant tile image, or other biometric signal.
+
+## Visual Speaker Signal Policy
+
+Allowed signals are meeting UI facts that the user could read from the call
+window during the meeting:
+
+* Visible participant display-name text.
+* Provider active-speaker UI, such as an active tile border, ring, glow, or
+  highlighted participant row.
+* Caption speaker labels when the provider displays the speaker name as text.
+* Participant-list active markers when the provider exposes them visually.
+* Recording-relative timing for the snapshot and nearby transcript/audio
+  segment.
+
+Prohibited signals are identity or biometric inferences:
+
+* Face recognition or face matching.
+* Inferring identity from appearance, clothing, background, profile photo, or
+  camera tile image.
+* Uploading screenshots to any cloud service for identity matching.
+* Storing raw OCR text, full screenshot descriptions, or visual features beyond
+  the minimal evidence fields below.
+* Treating a visible display name as a verified real-world identity without user
+  confirmation.
+
+Suggested labels are local derived data. The UI must distinguish:
+
+* `suggested`: generated from visual/audio evidence and awaiting review.
+* `confirmed`: accepted or edited by the user.
+* `manual`: created directly by the user.
+* `cleared`: removed from the transcript without deleting transcript text.
+
+## Speaker Evidence Model
+
+Each suggested speaker label should be backed by bounded evidence rather than a
+free-form screenshot description.
+
+| Field | Purpose | Privacy rule |
+| --- | --- | --- |
+| `snapshot_id` | Links to the local snapshot timeline row. | Do not expose image payload outside local review UI. |
+| `recording_time` | Recording-relative cue time in seconds. | Required for transcript alignment. |
+| `time_range` | Transcript/audio segment range affected by the suggestion. | Store numeric bounds only. |
+| `extracted_name` | Visible display-name text used for the suggestion. | Store only the selected name, not all OCR text. |
+| `active_marker` | Provider UI marker, such as `tile-ring`, `caption-label`, or `participant-list-active`. | Store marker type, not raw image features. |
+| `provider` | Meeting provider that produced the visual cue. | Store provider id only. |
+| `confidence` | 0-1 score from cue quality, timing proximity, and consistency. | Low confidence stays review-only. |
+| `confirmation_state` | `suggested`, `confirmed`, `manual`, or `cleared`. | Confirmation controls downstream trust. |
+| `created_from` | `screenshot`, `audio`, `manual`, or combined source ids. | Keep source ids bounded and local. |
+
+Evidence shown to the user should reveal the smallest useful context:
+
+* Prefer transcript timestamp, extracted display name, marker type, confidence,
+  and a local "view snapshot" affordance over embedding the image everywhere.
+* Show cropped/local snapshot preview only in the meeting detail evidence panel
+  after screenshot consent.
+* Never show hidden OCR snippets, unrelated screen text, or face-derived claims.
+* Clearing a suggestion must remove or mark its evidence as cleared without
+  deleting the transcript text.
 
 ## Call-Window Snapshot Contract
 

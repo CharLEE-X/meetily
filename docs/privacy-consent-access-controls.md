@@ -261,6 +261,9 @@ Private and unsupported capture contexts:
 Speaker labeling:
 
 * Screenshot-derived speaker labels are detected labels, not verified identities.
+* Visual speaker evidence is limited to the allowed signal and evidence model in
+  [Speaker Identification and Screenshots](speaker-identification-screenshots.md);
+  face recognition and appearance-based identity inference are prohibited.
 * The per-meeting prompt must say: "Allow Meetily to create detected speaker labels for this meeting?" and name the label source, such as screenshots or a future diarization model.
 * The prompt must disclose that labels are local derived data, can be wrong, can be edited or confirmed by the user, and can be cleared without deleting the meeting.
 * UI and exports must distinguish "detected speaker label" from "user-confirmed identity."
