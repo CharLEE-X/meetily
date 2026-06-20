@@ -3,13 +3,24 @@
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir } from '@tauri-apps/api/path';
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { Play, Pause, Square, Mic, AlertCircle, X } from 'lucide-react';
+import { Play, Pause, Square, Mic, AlertCircle, X, Camera, CameraOff, Users } from 'lucide-react';
 import { ProcessRequest, SummaryResponse } from '@/types/summary';
 import { listen } from '@tauri-apps/api/event';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import Analytics from '@/lib/analytics';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import {
+  getMeetingScreenshotCaptureStatus,
+  pauseMeetingScreenshotCapture,
+  resumeMeetingScreenshotCapture,
+  stopMeetingScreenshotCapture,
+  ScreenshotCaptureStatus,
+} from '@/services/screenshotService';
+import {
+  getSpeakerLabelingPreferences,
+  SpeakerLabelingPreferences,
+} from '@/services/speakerService';
 
 interface RecordingControlsProps {
   isRecording: boolean;
@@ -58,6 +69,10 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const [isValidatingModel, setIsValidatingModel] = useState(false);
   const [speechDetected, setSpeechDetected] = useState(false);
   const [deviceError, setDeviceError] = useState<{ title: string, message: string } | null>(null);
+  const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
+  const [screenshotStatus, setScreenshotStatus] = useState<ScreenshotCaptureStatus | null>(null);
+  const [speakerPreferences, setSpeakerPreferences] = useState<SpeakerLabelingPreferences | null>(null);
+  const [isUpdatingScreenshotCapture, setIsUpdatingScreenshotCapture] = useState(false);
 
   const currentTime = 0;
   const duration = 0;
@@ -69,6 +84,104 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     const seconds = Math.floor(time % 60);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
+
+  const formatNextCapture = (timestamp?: string | null) => {
+    if (!timestamp) return null;
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  const formatRuntimeError = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+  const refreshRuntimeCaptureStatus = useCallback(async () => {
+    const meetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
+    setCurrentMeetingId(meetingId);
+
+    if (!meetingId) {
+      setScreenshotStatus(null);
+      return;
+    }
+
+    try {
+      const status = await getMeetingScreenshotCaptureStatus(meetingId);
+      setScreenshotStatus(status);
+    } catch (error) {
+      console.warn('Failed to load screenshot capture runtime state:', error);
+      setScreenshotStatus((current) => current ? {
+        ...current,
+        active: false,
+        lastError: formatRuntimeError(error),
+      } : null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isRecording) {
+      setCurrentMeetingId(null);
+      setScreenshotStatus(null);
+      setSpeakerPreferences(null);
+      return;
+    }
+
+    getSpeakerLabelingPreferences()
+      .then(setSpeakerPreferences)
+      .catch((error) => {
+        console.warn('Failed to load speaker labeling runtime state:', error);
+      });
+    void refreshRuntimeCaptureStatus();
+    const interval = window.setInterval(() => {
+      void refreshRuntimeCaptureStatus();
+    }, 2500);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [isRecording, refreshRuntimeCaptureStatus]);
+
+  const handleScreenshotPauseResume = useCallback(async () => {
+    if (!currentMeetingId || !screenshotStatus || isUpdatingScreenshotCapture) return;
+    setIsUpdatingScreenshotCapture(true);
+    try {
+      const status = screenshotStatus.paused
+        ? await resumeMeetingScreenshotCapture(currentMeetingId)
+        : await pauseMeetingScreenshotCapture(currentMeetingId);
+      setScreenshotStatus(status);
+      await refreshRuntimeCaptureStatus();
+    } catch (error) {
+      console.warn('Failed to update screenshot capture:', error);
+      setScreenshotStatus((current) => current ? { ...current, lastError: formatRuntimeError(error) } : current);
+    } finally {
+      setIsUpdatingScreenshotCapture(false);
+    }
+  }, [currentMeetingId, isUpdatingScreenshotCapture, refreshRuntimeCaptureStatus, screenshotStatus]);
+
+  const handleScreenshotStop = useCallback(async () => {
+    if (!currentMeetingId || isUpdatingScreenshotCapture) return;
+    setIsUpdatingScreenshotCapture(true);
+    try {
+      const status = await stopMeetingScreenshotCapture(currentMeetingId);
+      setScreenshotStatus(status);
+      await refreshRuntimeCaptureStatus();
+    } catch (error) {
+      console.warn('Failed to stop screenshot capture:', error);
+      setScreenshotStatus((current) => current ? { ...current, lastError: formatRuntimeError(error) } : current);
+    } finally {
+      setIsUpdatingScreenshotCapture(false);
+    }
+  }, [currentMeetingId, isUpdatingScreenshotCapture, refreshRuntimeCaptureStatus]);
+
+  const screenshotLabel = (() => {
+    if (!screenshotStatus?.enabled) return 'Screenshots off';
+    if (screenshotStatus.captureMode === 'manualOnly') return 'Manual screenshots';
+    if (screenshotStatus.paused) return 'Screenshots paused';
+    if (screenshotStatus.active) return 'Screenshots active';
+    return 'Screenshots stopped';
+  })();
+  const nextCaptureLabel = formatNextCapture(screenshotStatus?.nextCaptureAt);
+  const speakerLabel = speakerPreferences?.autoApplyVisualSuggestions
+    ? 'Speaker labels auto'
+    : 'Speaker labels review';
 
   useEffect(() => {
     const checkTauri = async () => {
@@ -494,6 +607,49 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         {isValidatingModel && (
           <div className="mt-2 text-center text-xs font-medium text-slate-600">
             Validating speech recognition...
+          </div>
+        )}
+
+        {isRecording && (
+          <div className="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">
+                {screenshotStatus?.active ? <Camera className="h-3.5 w-3.5 text-emerald-700" /> : <CameraOff className="h-3.5 w-3.5 text-slate-500" />}
+                <span className="font-medium">{screenshotLabel}</span>
+                {nextCaptureLabel && !screenshotStatus?.paused ? (
+                  <span className="text-slate-500">next {nextCaptureLabel}</span>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">
+                <Users className="h-3.5 w-3.5 text-emerald-700" />
+                <span className="font-medium">{speakerLabel}</span>
+              </div>
+              {screenshotStatus?.enabled && screenshotStatus.captureMode !== 'manualOnly' && currentMeetingId && (screenshotStatus.active || screenshotStatus.paused) ? (
+                <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleScreenshotPauseResume}
+                    disabled={isUpdatingScreenshotCapture}
+                    className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {screenshotStatus.paused ? 'Resume shots' : 'Pause shots'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleScreenshotStop}
+                    disabled={isUpdatingScreenshotCapture}
+                    className="rounded-full border border-red-200 bg-red-50 px-2.5 py-1 font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Stop shots
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            {screenshotStatus?.lastError ? (
+              <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                Screenshot capture warning: {screenshotStatus.lastError}
+              </div>
+            ) : null}
           </div>
         )}
 

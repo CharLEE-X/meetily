@@ -721,6 +721,7 @@ pub fn run() {
             // Meeting screenshot commands
             screenshots::get_screenshot_preferences,
             screenshots::set_screenshot_preferences,
+            screenshots::get_meeting_screenshot_capture_status,
             screenshots::start_meeting_screenshot_capture,
             screenshots::stop_meeting_screenshot_capture,
             screenshots::pause_meeting_screenshot_capture,

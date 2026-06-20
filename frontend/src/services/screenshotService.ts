@@ -34,6 +34,10 @@ export interface ScreenshotCaptureStatus {
   enabled: boolean;
   intervalSeconds: number;
   lastError?: string | null;
+  paused: boolean;
+  captureMode?: ScreenshotPreferences['captureMode'] | null;
+  captureTarget?: ScreenshotPreferences['captureTarget'] | null;
+  nextCaptureAt?: string | null;
 }
 
 export async function getScreenshotPreferences(): Promise<ScreenshotPreferences> {
@@ -74,6 +78,12 @@ export async function startMeetingScreenshotCapture(
     },
   });
   return status;
+}
+
+export async function getMeetingScreenshotCaptureStatus(
+  meetingId: string,
+): Promise<ScreenshotCaptureStatus> {
+  return invoke<ScreenshotCaptureStatus>('get_meeting_screenshot_capture_status', { meetingId });
 }
 
 export async function stopMeetingScreenshotCapture(

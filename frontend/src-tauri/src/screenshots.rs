@@ -59,6 +59,7 @@ struct CaptureRuntimeState {
     stopped: bool,
     last_capture_at: Option<DateTime<Utc>>,
     capture_count: u32,
+    last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +91,10 @@ pub struct ScreenshotCaptureStatus {
     pub enabled: bool,
     pub interval_seconds: u64,
     pub last_error: Option<String>,
+    pub paused: bool,
+    pub capture_mode: Option<String>,
+    pub capture_target: Option<String>,
+    pub next_capture_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -187,6 +192,10 @@ pub async fn start_meeting_screenshot_capture<R: Runtime>(
             enabled: false,
             interval_seconds: preferences.interval_seconds,
             last_error: None,
+            paused: false,
+            capture_mode: Some(preferences.capture_mode),
+            capture_target: Some(preferences.capture_target),
+            next_capture_at: None,
         });
     }
 
@@ -205,6 +214,10 @@ pub async fn start_meeting_screenshot_capture<R: Runtime>(
             enabled: true,
             interval_seconds: preferences.interval_seconds,
             last_error: None,
+            paused: false,
+            capture_mode: Some(preferences.capture_mode),
+            capture_target: Some(preferences.capture_target),
+            next_capture_at: None,
         });
     }
 
@@ -239,6 +252,9 @@ pub async fn start_meeting_screenshot_capture<R: Runtime>(
                 )
                 .await
                 {
+                    if let Err(state_err) = set_capture_error(&runtime_state, Some(err.clone())) {
+                        log::warn!("Failed to update screenshot capture warning: {}", state_err);
+                    }
                     log::warn!(
                         "Periodic screenshot capture failed for meeting {}: {}",
                         meeting_for_task,
@@ -264,48 +280,134 @@ pub async fn start_meeting_screenshot_capture<R: Runtime>(
         enabled: true,
         interval_seconds: preferences.interval_seconds,
         last_error: None,
+        paused: false,
+        capture_mode: Some(preferences.capture_mode),
+        capture_target: Some(preferences.capture_target),
+        next_capture_at: None,
     })
 }
 
 #[tauri::command]
-pub async fn stop_meeting_screenshot_capture(
+pub async fn get_meeting_screenshot_capture_status<R: Runtime>(
+    app: AppHandle<R>,
     meeting_id: String,
 ) -> Result<ScreenshotCaptureStatus, String> {
-    let active = stop_capture_task(&meeting_id);
+    let preferences = load_screenshot_preferences(&app)
+        .await
+        .map_err(|err| format!("Failed to load screenshot preferences: {}", err))?;
+    let runtime_state = {
+        let states = CAPTURE_RUNTIME
+            .lock()
+            .map_err(|_| "Failed to access screenshot scheduler registry".to_string())?;
+        states.get(&meeting_id).cloned()
+    };
+
+    let Some(runtime_state) = runtime_state else {
+        return Ok(ScreenshotCaptureStatus {
+            meeting_id,
+            active: false,
+            enabled: preferences.enabled,
+            interval_seconds: preferences.interval_seconds,
+            last_error: None,
+            paused: false,
+            capture_mode: Some(preferences.capture_mode),
+            capture_target: Some(preferences.capture_target),
+            next_capture_at: None,
+        });
+    };
+
+    let state = runtime_state
+        .lock()
+        .map_err(|_| "Failed to read screenshot scheduler state".to_string())?;
+    let active = !state.stopped
+        && !state.paused
+        && preferences.enabled
+        && preferences.capture_mode != "manualOnly";
+    let next_capture_at = if active {
+        state
+            .last_capture_at
+            .map(|last| last + chrono::Duration::seconds(preferences.interval_seconds as i64))
+            .map(|value| value.to_rfc3339())
+    } else {
+        None
+    };
+
+    Ok(ScreenshotCaptureStatus {
+        meeting_id,
+        active,
+        enabled: preferences.enabled,
+        interval_seconds: preferences.interval_seconds,
+        last_error: state.last_error.clone(),
+        paused: state.paused,
+        capture_mode: Some(preferences.capture_mode),
+        capture_target: Some(preferences.capture_target),
+        next_capture_at,
+    })
+}
+
+#[tauri::command]
+pub async fn stop_meeting_screenshot_capture<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_id: String,
+) -> Result<ScreenshotCaptureStatus, String> {
+    let preferences = load_screenshot_preferences(&app)
+        .await
+        .map_err(|err| format!("Failed to load screenshot preferences: {}", err))?;
+    stop_capture_task(&meeting_id);
     Ok(ScreenshotCaptureStatus {
         meeting_id,
         active: false,
-        enabled: active,
-        interval_seconds: DEFAULT_INTERVAL_SECONDS,
+        enabled: preferences.enabled,
+        interval_seconds: preferences.interval_seconds,
         last_error: None,
+        paused: false,
+        capture_mode: Some(preferences.capture_mode),
+        capture_target: Some(preferences.capture_target),
+        next_capture_at: None,
     })
 }
 
 #[tauri::command]
-pub async fn pause_meeting_screenshot_capture(
+pub async fn pause_meeting_screenshot_capture<R: Runtime>(
+    app: AppHandle<R>,
     meeting_id: String,
 ) -> Result<ScreenshotCaptureStatus, String> {
-    let active = set_capture_paused(&meeting_id, true)?;
+    let preferences = load_screenshot_preferences(&app)
+        .await
+        .map_err(|err| format!("Failed to load screenshot preferences: {}", err))?;
+    let scheduler_exists = set_capture_paused(&meeting_id, true)?;
     Ok(ScreenshotCaptureStatus {
         meeting_id,
         active: false,
-        enabled: active,
-        interval_seconds: DEFAULT_INTERVAL_SECONDS,
+        enabled: preferences.enabled,
+        interval_seconds: preferences.interval_seconds,
         last_error: None,
+        paused: scheduler_exists,
+        capture_mode: Some(preferences.capture_mode),
+        capture_target: Some(preferences.capture_target),
+        next_capture_at: None,
     })
 }
 
 #[tauri::command]
-pub async fn resume_meeting_screenshot_capture(
+pub async fn resume_meeting_screenshot_capture<R: Runtime>(
+    app: AppHandle<R>,
     meeting_id: String,
 ) -> Result<ScreenshotCaptureStatus, String> {
+    let preferences = load_screenshot_preferences(&app)
+        .await
+        .map_err(|err| format!("Failed to load screenshot preferences: {}", err))?;
     let active = set_capture_paused(&meeting_id, false)?;
     Ok(ScreenshotCaptureStatus {
         meeting_id,
         active,
-        enabled: active,
-        interval_seconds: DEFAULT_INTERVAL_SECONDS,
+        enabled: preferences.enabled,
+        interval_seconds: preferences.interval_seconds,
         last_error: None,
+        paused: false,
+        capture_mode: Some(preferences.capture_mode),
+        capture_target: Some(preferences.capture_target),
+        next_capture_at: None,
     })
 }
 
@@ -327,6 +429,10 @@ pub async fn trigger_meeting_screenshot_capture<R: Runtime>(
             enabled: preferences.enabled,
             interval_seconds: preferences.interval_seconds,
             last_error: None,
+            paused: false,
+            capture_mode: Some(preferences.capture_mode),
+            capture_target: Some(preferences.capture_target),
+            next_capture_at: None,
         });
     }
 
@@ -344,6 +450,10 @@ pub async fn trigger_meeting_screenshot_capture<R: Runtime>(
             enabled: true,
             interval_seconds: preferences.interval_seconds,
             last_error: None,
+            paused: false,
+            capture_mode: Some(preferences.capture_mode),
+            capture_target: Some(preferences.capture_target),
+            next_capture_at: None,
         });
     };
 
@@ -354,6 +464,10 @@ pub async fn trigger_meeting_screenshot_capture<R: Runtime>(
             enabled: true,
             interval_seconds: preferences.interval_seconds,
             last_error: None,
+            paused: false,
+            capture_mode: Some(preferences.capture_mode),
+            capture_target: Some(preferences.capture_target),
+            next_capture_at: None,
         });
     }
 
@@ -374,6 +488,9 @@ pub async fn trigger_meeting_screenshot_capture<R: Runtime>(
         }
         Err(err) => Some(err),
     };
+    if let Err(err) = set_capture_error(&runtime_state, last_error.clone()) {
+        log::warn!("Failed to update screenshot capture warning: {}", err);
+    }
 
     Ok(ScreenshotCaptureStatus {
         meeting_id,
@@ -381,6 +498,10 @@ pub async fn trigger_meeting_screenshot_capture<R: Runtime>(
         enabled: true,
         interval_seconds: preferences.interval_seconds,
         last_error,
+        paused: false,
+        capture_mode: Some(preferences.capture_mode),
+        capture_target: Some(preferences.capture_target),
+        next_capture_at: None,
     })
 }
 
@@ -973,7 +1094,8 @@ fn build_visual_speaker_cues(
         return Vec::new();
     }
 
-    let use_active_marker = analysis.active_marker_type.is_some() && analysis.visible_names.len() == 1;
+    let use_active_marker =
+        analysis.active_marker_type.is_some() && analysis.visible_names.len() == 1;
     let active_marker = if use_active_marker {
         analysis
             .active_marker_type
@@ -1303,6 +1425,17 @@ fn set_capture_paused(meeting_id: &str, paused: bool) -> Result<bool, String> {
     Ok(true)
 }
 
+fn set_capture_error(
+    runtime_state: &Arc<Mutex<CaptureRuntimeState>>,
+    last_error: Option<String>,
+) -> Result<(), String> {
+    let mut state = runtime_state
+        .lock()
+        .map_err(|_| "Failed to update screenshot scheduler warning".to_string())?;
+    state.last_error = last_error;
+    Ok(())
+}
+
 fn reserve_capture_slot(
     runtime_state: &Arc<Mutex<CaptureRuntimeState>>,
     now: DateTime<Utc>,
@@ -1340,6 +1473,7 @@ fn mark_capture_completed(runtime_state: &Arc<Mutex<CaptureRuntimeState>>) -> Re
         .lock()
         .map_err(|_| "Failed to update screenshot scheduler state".to_string())?;
     state.capture_count = state.capture_count.saturating_add(1);
+    state.last_error = None;
     Ok(())
 }
 
@@ -1470,9 +1604,12 @@ end tell"#,
     }
 
     let active_tab_url = if app_name.map(is_supported_browser_app).unwrap_or(false) {
-        Some(resolve_browser_active_tab_url(app_name.ok_or_else(|| {
-            "Browser window metadata was unavailable; skipped call-window screenshot".to_string()
-        })?)?)
+        Some(resolve_browser_active_tab_url(app_name.ok_or_else(
+            || {
+                "Browser window metadata was unavailable; skipped call-window screenshot"
+                    .to_string()
+            },
+        )?)?)
     } else {
         None
     };
@@ -1603,9 +1740,10 @@ fn is_browser_meeting_url(url: &str, provider: &str) -> bool {
                 || url.contains("zoom.us/wc/")
                 || url.contains("zoom.com/wc/")
         }
-        "teams" => {
-            contains_any(url, &["teams.microsoft.com/l/meetup-join", "teams.live.com/meet"])
-        }
+        "teams" => contains_any(
+            url,
+            &["teams.microsoft.com/l/meetup-join", "teams.live.com/meet"],
+        ),
         "webex" => contains_any(url, &["webex.com/meet/", "webex.com/join/", ".webex.com/"]),
         "slack" => url.contains("slack.com/huddle"),
         _ => false,
@@ -1634,7 +1772,7 @@ fn resolve_browser_active_tab_url(app_name: &str) -> Result<String, String> {
         r#"tell application "Safari"
 return URL of front document as text
 end tell"#
-        .to_string()
+            .to_string()
     } else {
         format!(
             r#"tell application "{}"
@@ -1645,7 +1783,9 @@ end tell"#,
     };
     let url = run_osascript(&script)
         .map_err(|err| user_facing_call_window_error(&err))?
-        .ok_or_else(|| "Active browser tab URL was unavailable; skipped call-window screenshot".to_string())?;
+        .ok_or_else(|| {
+            "Active browser tab URL was unavailable; skipped call-window screenshot".to_string()
+        })?;
     if url.trim().is_empty() {
         return Err("Active browser tab URL was empty; skipped call-window screenshot".to_string());
     }
@@ -2095,6 +2235,7 @@ mod tests {
             stopped: false,
             last_capture_at: None,
             capture_count: MAX_SCREENSHOTS_PER_MEETING,
+            last_error: None,
         };
 
         assert!(!should_reserve_capture_slot(&mut state, Utc::now(), 0));
@@ -2139,10 +2280,8 @@ mod tests {
 
     #[test]
     fn visual_speaker_cues_skip_ambiguous_unsupported_frames() {
-        let analysis = analyze_recognized_text(&[
-            "Adrian Witaszak".to_string(),
-            "active speaker".to_string(),
-        ]);
+        let analysis =
+            analyze_recognized_text(&["Adrian Witaszak".to_string(), "active speaker".to_string()]);
 
         assert!(!analysis.is_relevant);
         assert_eq!(
