@@ -100,8 +100,23 @@ struct ScreenshotAnalysis {
     provider: Option<String>,
     visible_names: Vec<String>,
     text_snippets: Vec<String>,
+    active_marker_type: Option<String>,
     relevance_status: String,
     skip_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+struct VisualSpeakerCue {
+    snapshot_id: String,
+    provider: Option<String>,
+    recording_time: Option<f64>,
+    time_range: Option<[f64; 2]>,
+    extracted_name: String,
+    active_marker: String,
+    confidence: f64,
+    confirmation_state: String,
+    created_from: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -736,9 +751,11 @@ async fn capture_and_store_screenshot<R: Runtime>(
 
     let now = Utc::now().to_rfc3339();
     let file_path_string = file_path.to_string_lossy().to_string();
+    let speaker_cues = build_visual_speaker_cues(&analysis, &screenshot_id, recording_time);
 
     let metadata_json = json!({
         "analysis": analysis,
+        "speakerCues": speaker_cues,
         "captureTarget": capture_plan.capture_target,
         "provider": capture_plan
             .call_window
@@ -891,6 +908,7 @@ async fn analyze_screenshot(path: &Path) -> ScreenshotAnalysis {
 fn analyze_recognized_text(recognized_text: &[String]) -> ScreenshotAnalysis {
     let provider = detect_meeting_provider(recognized_text);
     let visible_names = extract_visible_names(recognized_text);
+    let active_marker_type = detect_active_speaker_marker(recognized_text);
     let sensitive_reason = detect_sensitive_frame_reason(recognized_text);
     let has_provider = provider.is_some();
     let has_visible_name = !visible_names.is_empty();
@@ -902,6 +920,7 @@ fn analyze_recognized_text(recognized_text: &[String]) -> ScreenshotAnalysis {
     });
 
     let mut confidence: f64 = match (has_provider, has_visible_name, has_call_controls) {
+        (true, true, _) if active_marker_type.is_some() => 0.96,
         (true, true, _) => 0.92,
         (true, false, true) => 0.78,
         (true, false, false) => 0.62,
@@ -938,14 +957,68 @@ fn analyze_recognized_text(recognized_text: &[String]) -> ScreenshotAnalysis {
         confidence,
         provider,
         visible_names,
-        text_snippets: recognized_text
-            .iter()
-            .filter(|text| !text.trim().is_empty())
-            .take(20)
-            .cloned()
-            .collect(),
+        text_snippets: Vec::new(),
+        active_marker_type,
         relevance_status,
         skip_reason,
+    }
+}
+
+fn build_visual_speaker_cues(
+    analysis: &ScreenshotAnalysis,
+    snapshot_id: &str,
+    recording_time: Option<f64>,
+) -> Vec<VisualSpeakerCue> {
+    if !analysis.is_relevant || analysis.visible_names.is_empty() {
+        return Vec::new();
+    }
+
+    let use_active_marker = analysis.active_marker_type.is_some() && analysis.visible_names.len() == 1;
+    let active_marker = if use_active_marker {
+        analysis
+            .active_marker_type
+            .clone()
+            .unwrap_or_else(|| "caption-label".to_string())
+    } else {
+        "visible-name".to_string()
+    };
+    let confidence = if use_active_marker {
+        analysis.confidence
+    } else {
+        analysis.confidence.min(0.65)
+    };
+
+    analysis
+        .visible_names
+        .iter()
+        .map(|name| VisualSpeakerCue {
+            snapshot_id: snapshot_id.to_string(),
+            provider: analysis.provider.clone(),
+            recording_time,
+            time_range: None,
+            extracted_name: name.clone(),
+            active_marker: active_marker.clone(),
+            confidence,
+            confirmation_state: "suggested".to_string(),
+            created_from: "screenshot".to_string(),
+        })
+        .collect()
+}
+
+fn detect_active_speaker_marker(recognized_text: &[String]) -> Option<String> {
+    let joined = recognized_text.join(" ").to_lowercase();
+    if contains_any(
+        &joined,
+        &[
+            "active speaker",
+            "is speaking",
+            "speaking now",
+            "caption speaker",
+        ],
+    ) {
+        Some("caption-label".to_string())
+    } else {
+        None
     }
 }
 
@@ -2034,8 +2107,59 @@ mod tests {
         assert!(analysis.is_relevant);
         assert_eq!(analysis.provider, Some("Google Meet".to_string()));
         assert_eq!(analysis.visible_names, vec!["Adrian Witaszak".to_string()]);
+        assert!(analysis.text_snippets.is_empty());
         assert_eq!(analysis.relevance_status, "kept");
         assert!(analysis.skip_reason.is_none());
+    }
+
+    #[test]
+    fn visual_speaker_cues_include_bounded_active_marker_evidence() {
+        let analysis = analyze_recognized_text(&[
+            "Google Meet".to_string(),
+            "Adrian Witaszak".to_string(),
+            "Adrian Witaszak is speaking".to_string(),
+        ]);
+
+        let cues = build_visual_speaker_cues(&analysis, "shot-1", Some(12.5));
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].snapshot_id, "shot-1");
+        assert_eq!(cues[0].provider.as_deref(), Some("Google Meet"));
+        assert_eq!(cues[0].recording_time, Some(12.5));
+        assert_eq!(cues[0].time_range, None);
+        assert_eq!(cues[0].extracted_name, "Adrian Witaszak");
+        assert_eq!(cues[0].active_marker, "caption-label");
+        assert_eq!(cues[0].confirmation_state, "suggested");
+        assert_eq!(cues[0].created_from, "screenshot");
+        assert!(cues[0].confidence >= 0.9);
+    }
+
+    #[test]
+    fn visual_speaker_cues_skip_ambiguous_unsupported_frames() {
+        let analysis = analyze_recognized_text(&[
+            "Adrian Witaszak".to_string(),
+            "active speaker".to_string(),
+        ]);
+
+        assert!(!analysis.is_relevant);
+        assert_eq!(
+            build_visual_speaker_cues(&analysis, "shot-2", Some(3.0)),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn visual_speaker_cues_do_not_boost_active_marker_when_multiple_names_are_visible() {
+        let analysis = analyze_recognized_text(&[
+            "Google Meet".to_string(),
+            "Adrian Witaszak".to_string(),
+            "Chris Johnson".to_string(),
+            "active speaker".to_string(),
+        ]);
+
+        let cues = build_visual_speaker_cues(&analysis, "shot-3", Some(8.0));
+        assert_eq!(cues.len(), 2);
+        assert!(cues.iter().all(|cue| cue.active_marker == "visible-name"));
+        assert!(cues.iter().all(|cue| cue.confidence <= 0.65));
     }
 
     #[test]

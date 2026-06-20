@@ -171,6 +171,9 @@ export function SpeakerScreenshotPanel({
             Detect
           </button>
         </div>
+        <p className="mt-1 text-xs text-slate-500">
+          Detected speaker labels are suggestions until you confirm or edit them.
+        </p>
 
         {labels.length === 0 ? (
           <p className="mt-2 text-xs text-slate-500">No speaker labels yet.</p>
