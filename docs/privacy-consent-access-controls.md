@@ -214,6 +214,8 @@ Periodic screenshot capture is high risk because it can include unrelated apps, 
 The implementation data model, runtime state machine, storage layout, and
 speaker-label boundary rules are specified in
 [Speaker Identification and Screenshots](speaker-identification-screenshots.md).
+Release notes and the provider QA matrix are maintained in
+[Call-Window Snapshot Capture Release Notes](call-window-snapshot-release-notes.md).
 Call-window snapshot capture must prefer the narrower call-window-only contract
 defined there. When fresh call-window bounds are unavailable, Meetily must skip
 capture or show an explicit fallback warning; it must not silently capture the
