@@ -123,15 +123,20 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 
 - **Local First:** All processing is done on your machine. No data ever leaves your computer.
 - **Real-time Transcription:** Get a live transcript of your meeting as it happens.
+- **Transcription Quality Profiles:** Choose local accuracy profiles and preprocessing presets for live recordings or retranscription, with guidance for laptop mics, noisy rooms, and critical meetings. See [Transcription Accuracy Release Notes](docs/transcription-accuracy-release-notes.md).
 - **AI-Powered Summaries:** Generate summaries of your meetings using powerful language models.
 - **Custom Summary Templates:** Create local summary templates, preview the markdown shape, import/export template JSON, and remember the selected template per meeting. See [Custom Summary Templates](docs/custom-summary-templates.md) and [Custom Summary Templates Release Notes](docs/custom-summary-templates-release-notes.md).
 - **Advanced Exports:** Export completed meetings as Markdown, PDF, or DOCX with selectable sections and local auto-export preferences. See [Advanced Exports](docs/advanced-exports.md).
 - **Meeting Chat:** Ask source-cited follow-up questions from meeting details using local retrieval over transcripts, summaries, actions, notes, and enabled screenshot metadata. See [Meeting Chat Release Notes](docs/meeting-chat-release-notes.md).
 - **Calendar Integration:** Connect Apple Calendar on macOS, sync upcoming event metadata locally, and select an event to prefill the next recording title and meeting-detection metadata. See [Calendar Integration Release Notes](docs/calendar-integration-release-notes.md).
+- **Meeting Detection and Assisted Join:** Review local meeting prompts from approved calendar/window signals, score likely meetings, and optionally open supported meeting links with explicit user approval. See [Meeting Detection Release Notes](docs/meeting-detection-release-notes.md).
+- **Recording Assistant:** Use recording preflight, runtime capture controls, privacy audit trails, and a post-recording review checklist to understand what will be captured and what follow-up actions are available. See [Recording Assistant Release Notes](docs/recording-assistant-release-notes.md).
 - **Apple Reminders Follow-Ups:** On macOS, connect Apple Reminders, review editable follow-up drafts, create only selected reminders, and return to meeting-linked reminder history. See [Apple Reminders Release Notes](docs/apple-reminders-release-notes.md).
 - **Apple Notes Export:** On macOS, export meeting summaries to Apple Notes after a destination preview, update app-managed notes instead of duplicating them, and link Notes exports with Apple Calendar artifacts when both integrations are enabled. See [Apple Notes Release Notes](docs/apple-notes-release-notes.md).
-- **Speaker Labels:** Detect local speaker labels from transcript timing/source metadata, review them in the meeting transcript, and rename labels as user-confirmed corrections.
-- **Optional Meeting Screenshots:** On macOS, periodic screenshots can be enabled in Settings and must be confirmed for each meeting before capture starts. Screenshots stay local and can be deleted from the meeting timeline. See [Speaker Identification and Screenshots Release Notes](docs/speaker-identification-release-notes.md).
+- **Speaker Labels and Active Speaker Timeline:** Detect local speaker labels from transcript timing/source metadata, review speaker confidence, align visual cues from meeting snapshots, and rename labels as user-confirmed corrections. See [Active Speaker Timeline](docs/active-speaker-timeline.md).
+- **Optional Meeting Screenshots:** On macOS, periodic screenshots and call-window snapshots can be enabled in Settings and must be confirmed for each meeting before capture starts. Screenshots stay local, irrelevant captures can be filtered, and retained screenshots can be deleted from the meeting timeline. See [Speaker Identification and Screenshots Release Notes](docs/speaker-identification-release-notes.md) and [Call-Window Snapshot Release Notes](docs/call-window-snapshot-release-notes.md).
+- **Local MCP and Post-Meeting Agents:** Start an opt-in local MCP server, prepare meeting context packages, and run reviewable Codex or Claude post-meeting workflows with run history. See [Post-Meeting Agent Orchestration Release Notes](docs/post-meeting-agent-orchestration-release-notes.md).
+- **Startup and Background Preferences:** On supported macOS installs, enable login startup and hidden-at-launch behavior without starting recordings, joining calls, or enabling microphone capture.
 - **Multi-Platform:** Works on macOS, Windows, and Linux.
 - **Open Source:** Meetily is open source and free to use.
 - **Flexible AI Provider Support:** Choose from Ollama (local), Claude, Groq, OpenRouter, or use your own OpenAI-compatible endpoint.
@@ -258,10 +263,19 @@ Shipped and planned feature areas:
   destination history, and retryable failures.
 - **Meeting detection and assisted join:** calendar-backed prompts and optional
   assisted join flows that remain opt-in. The first implementation supports
-  Google Meet, Zoom, and Microsoft Teams URLs from approved event metadata.
+  Google Meet, Zoom, and Microsoft Teams URLs from approved event metadata, plus
+  window-aware meeting signals and explainable scoring.
+- **Recording assistant:** preflight checks, runtime capture controls, privacy
+  audit records, and a post-recording review checklist for exports, reminders,
+  Apple Notes, and agent workflows. See
+  [Recording Assistant](docs/recording-assistant.md) and
+  [Recording Assistant Release Notes](docs/recording-assistant-release-notes.md).
 - **Speaker identification and screenshots:** diarization/speaker labels and
-  periodic screenshots with per-meeting confirmation, visible capture state, and
-  deletion controls.
+  periodic screenshots with per-meeting confirmation, visible capture state,
+  confidence review, user corrections, irrelevant-screenshot filtering,
+  call-window snapshots, and deletion controls. See
+  [Active Speaker Timeline](docs/active-speaker-timeline.md) and
+  [Call-Window Snapshot Release Notes](docs/call-window-snapshot-release-notes.md).
 - **Meeting chat:** local-first retrieval over transcripts, summaries, and
   enabled artifacts with citations back to meeting sources. See
   [Meeting Chat Retrieval](docs/meeting-chat-retrieval.md) and
@@ -277,8 +291,8 @@ Shipped and planned feature areas:
   [Apple Notes Release Notes](docs/apple-notes-release-notes.md).
 - **Local MCP server:** opt-in local agent access with trusted clients, scoped
   read-only tools, revocation, and audit logs.
-- **AI-agent skill setup:** reversible setup for supported agents and ask-first
-  post-meeting workflows.
+- **AI-agent skill setup:** reversible setup for supported agents, ask-first
+  post-meeting workflows, run history, and manual rerun controls.
 
 The implementation order, shared artifact model, service contracts, UI map, and
 packaging gates are tracked in
