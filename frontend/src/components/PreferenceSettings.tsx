@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
-import { CalendarClock, FolderOpen, Loader2, Minimize2, Monitor, Moon, Power, Sun, type LucideIcon } from "lucide-react"
+import { CalendarClock, FolderOpen, Loader2, Minimize2, Power } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
-import { ThemePreference, useConfig, NotificationSettings } from "@/contexts/ConfigContext"
+import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
 import {
   ApprovedCalendarEvent,
   MEETING_DETECTION_SETTINGS_EVENT,
@@ -31,9 +31,7 @@ export function PreferenceSettings() {
     storageLocations,
     isLoadingPreferences,
     loadPreferences,
-    updateNotificationSettings,
-    themePreference,
-    setThemePreference
+    updateNotificationSettings
   } = useConfig();
 
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
@@ -273,71 +271,9 @@ export function PreferenceSettings() {
 
   // Ensure we have a boolean value for the Switch component
   const notificationsEnabledValue = notificationsEnabled ?? false;
-  const themeOptions: Array<{
-    value: ThemePreference;
-    label: string;
-    description: string;
-    icon: LucideIcon;
-  }> = [
-    {
-      value: 'system',
-      label: 'System',
-      description: 'Follow the current macOS appearance and update automatically when it changes.',
-      icon: Monitor,
-    },
-    {
-      value: 'light',
-      label: 'Light',
-      description: 'Use the bright interface regardless of the system appearance.',
-      icon: Sun,
-    },
-    {
-      value: 'dark',
-      label: 'Dark',
-      description: 'Use the darker interface for low-light work and reduced glare.',
-      icon: Moon,
-    },
-  ];
 
   return (
     <div className="space-y-6">
-      {/* Theme Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">Appearance</h3>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
-            Choose how RecallX should look across the desktop app. System follows your macOS Light or Dark appearance, while Light and Dark keep the app pinned to that mode.
-          </p>
-        </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-3">
-          {themeOptions.map((option) => {
-            const Icon = option.icon;
-            const selected = themePreference === option.value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setThemePreference(option.value)}
-                className={`rounded-lg border p-4 text-left transition-colors ${
-                  selected
-                    ? 'border-blue-300 bg-blue-50 text-blue-950 ring-1 ring-blue-200'
-                    : 'border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-300 hover:bg-white'
-                }`}
-                aria-pressed={selected}
-              >
-                <div className="flex items-center gap-2">
-                  <Icon className={`h-4 w-4 ${selected ? 'text-blue-700' : 'text-gray-500'}`} />
-                  <span className="text-sm font-semibold">{option.label}</span>
-                </div>
-                <p className={`mt-2 text-xs leading-5 ${selected ? 'text-blue-800' : 'text-gray-600'}`}>
-                  {option.description}
-                </p>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Startup Section */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
         <div className="flex flex-col gap-2">

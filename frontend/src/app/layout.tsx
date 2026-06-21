@@ -298,31 +298,31 @@ export default function RootLayout({
 
   if (runtimeReady && !nativeRuntime) {
     return (
-      <html lang="en">
+      <html lang="en" className="dark" style={{ colorScheme: 'dark' }}>
         <body className={`${plusJakartaSans.variable} font-sans antialiased`}>
-          <main className="min-h-screen bg-background text-foreground">
+          <main className="min-h-screen bg-recallx-black text-recallx-text">
             <div className="mx-auto flex min-h-screen max-w-3xl flex-col justify-center px-6 py-16">
               <div className="space-y-5">
-                <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">Web preview</p>
-                <h1 className="text-4xl font-semibold tracking-normal text-slate-950">RecallX desktop app</h1>
-                <p className="max-w-2xl text-lg text-slate-600">
+                <p className="text-sm font-semibold uppercase tracking-wide text-recallx-acid">Web preview</p>
+                <h1 className="text-4xl font-semibold tracking-normal text-recallx-text">RecallX desktop app</h1>
+                <p className="max-w-2xl text-lg text-recallx-muted">
                   This localhost view is running outside the Tauri desktop shell, so native recording,
                   file system, updater, and model-management APIs are unavailable here.
                 </p>
               </div>
 
               <div className="mt-10 grid gap-4 sm:grid-cols-3">
-                <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
-                  <h2 className="text-sm font-semibold text-slate-950">Frontend</h2>
-                  <p className="mt-2 text-sm text-slate-600">Next.js is serving correctly on port 3118.</p>
+                <div className="rounded-lg border border-white/10 bg-white/[0.05] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.24)]">
+                  <h2 className="text-sm font-semibold text-recallx-text">Frontend</h2>
+                  <p className="mt-2 text-sm text-recallx-muted">Next.js is serving correctly on port 3118.</p>
                 </div>
-                <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
-                  <h2 className="text-sm font-semibold text-slate-950">Desktop runtime</h2>
-                  <p className="mt-2 text-sm text-slate-600">Run the Tauri app to test native workflows.</p>
+                <div className="rounded-lg border border-white/10 bg-white/[0.05] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.24)]">
+                  <h2 className="text-sm font-semibold text-recallx-text">Desktop runtime</h2>
+                  <p className="mt-2 text-sm text-recallx-muted">Run the Tauri app to test native workflows.</p>
                 </div>
-                <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
-                  <h2 className="text-sm font-semibold text-slate-950">Build status</h2>
-                  <p className="mt-2 text-sm text-slate-600">The app compiles with the configured toolchain.</p>
+                <div className="rounded-lg border border-white/10 bg-white/[0.05] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.24)]">
+                  <h2 className="text-sm font-semibold text-recallx-text">Build status</h2>
+                  <p className="mt-2 text-sm text-recallx-muted">The app compiles with the configured toolchain.</p>
                 </div>
               </div>
             </div>
@@ -334,7 +334,7 @@ export default function RootLayout({
   }
 
   return (
-    <html lang="en">
+    <html lang="en" className="dark" style={{ colorScheme: 'dark' }}>
       <body className={`${plusJakartaSans.variable} font-sans antialiased`}>
         <AnalyticsProvider>
           <RecordingStateProvider>
