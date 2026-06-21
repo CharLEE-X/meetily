@@ -14,6 +14,15 @@ export default {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        recallx: {
+          black: "#050505",
+          graphite: "#0B0B0A",
+          panel: "#10110F",
+          line: "rgba(255,255,255,0.10)",
+          text: "#F7F4EE",
+          muted: "rgba(247,244,238,0.68)",
+          acid: "#C8FF85",
+        },
         // Consistent color palette
         primary: "hsl(221, 83%, 53%)", // blue-600
         secondary: "hsl(210, 40%, 96%)", // gray-50

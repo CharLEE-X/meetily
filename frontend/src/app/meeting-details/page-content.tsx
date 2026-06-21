@@ -10,6 +10,7 @@ import { TranscriptPanel, TranscriptPanelHandle } from '@/components/MeetingDeta
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { MeetingChatCitation } from '@/services/meetingChatService';
+import { RecallXShell } from '@/components/recallx';
 
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
@@ -399,10 +400,10 @@ export default function PageContent({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex h-screen flex-col bg-[#f4f6f4]"
+      transition={{ duration: 0.7, ease: [0.32, 0.72, 0, 1] }}
+      className="flex h-screen flex-col bg-recallx-black text-recallx-text"
     >
-      <div className="flex flex-1 overflow-hidden">
+      <RecallXShell className="flex flex-1 overflow-hidden">
         <TranscriptPanel
           ref={transcriptPanelRef}
           transcripts={meetingData.transcripts}
@@ -443,7 +444,7 @@ export default function PageContent({
           onPointerDown={handleResizeStart}
           onKeyDown={handleResizeKeyDown}
         >
-          <span className="my-3 w-px rounded-full bg-slate-200 transition-colors group-hover:bg-emerald-600 group-focus:bg-emerald-700" />
+          <span className="my-3 w-px rounded-full bg-white/10 transition-colors duration-700 recallx-ease group-hover:bg-recallx-acid group-focus:bg-recallx-acid" />
         </div>
         <SummaryPanel
           meeting={meeting}
@@ -481,7 +482,7 @@ export default function PageContent({
           onOpenModelSettings={handleRegisterModalOpen}
           onTranscriptCitationSelect={handleTranscriptCitationSelect}
         />
-      </div>
+      </RecallXShell>
     </motion.div>
   );
 }

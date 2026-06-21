@@ -681,7 +681,7 @@ const Sidebar: React.FC = () => {
       {/* Floating collapse button */}
       <button
         onClick={toggleCollapse}
-        className="absolute -right-5 top-20 z-50 rounded-full border border-slate-200 bg-white p-1 text-slate-600 shadow-[0_10px_24px_rgba(15,23,42,0.14)] transition-colors hover:bg-slate-50 hover:text-slate-950"
+        className="absolute -right-5 top-20 z-50 rounded-full border border-white/10 bg-recallx-graphite p-1 text-recallx-muted shadow-[0_18px_42px_rgba(0,0,0,0.28)] transition-colors duration-700 recallx-ease hover:bg-white/[0.08] hover:text-recallx-text"
         style={{ transform: 'translateX(50%)' }}
       >
         {isCollapsed ? (
@@ -692,7 +692,7 @@ const Sidebar: React.FC = () => {
       </button>
 
       <div
-        className={`flex h-screen flex-col border-r border-slate-200/80 bg-white/95 shadow-[inset_-1px_0_0_rgba(15,23,42,0.03)] transition-all duration-300 ease-out ${isCollapsed ? 'w-[4.5rem]' : 'w-72'
+        className={`flex h-screen flex-col border-r border-white/10 bg-recallx-graphite/95 shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)] transition-all duration-700 recallx-ease ${isCollapsed ? 'w-[4.5rem]' : 'w-72'
           }`}
       >
         {/*  Header with traffic light spacing */}
@@ -737,10 +737,10 @@ const Sidebar: React.FC = () => {
           <div className="flex-shrink-0">
             {!isCollapsed && (
               <div className="px-3 pt-3">
-                <div className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Workspace</div>
+                <div className="px-2 pb-1 text-xs font-semibold uppercase tracking-[0.18em] text-recallx-muted">Workspace</div>
                 <div
                   onClick={() => router.push('/')}
-                  className={`flex h-10 cursor-pointer items-center rounded-xl p-3 text-sm font-semibold transition-colors ${pathname === '/' ? 'bg-slate-900 text-white shadow-[0_10px_24px_rgba(15,23,42,0.12)]' : 'text-slate-800 hover:bg-slate-100'}`}
+                  className={`flex h-10 cursor-pointer items-center rounded-xl p-3 text-sm font-semibold transition-colors duration-700 recallx-ease ${pathname === '/' ? 'bg-recallx-acid text-recallx-black shadow-[0_10px_24px_rgba(200,255,133,0.16)]' : 'text-recallx-muted hover:bg-white/[0.07] hover:text-recallx-text'}`}
                 >
                   <Home className="mr-2 h-4 w-4" />
                   <span>Dashboard</span>
@@ -750,10 +750,10 @@ const Sidebar: React.FC = () => {
             {!isCollapsed && (
               <div
                 onClick={() => router.push('/summary-chat')}
-                className={`mx-3 mt-1 flex h-10 cursor-pointer items-center rounded-xl p-3 text-sm font-semibold transition-colors ${pathname === '/summary-chat' ? 'bg-slate-900 text-white shadow-[0_10px_24px_rgba(15,23,42,0.12)]' : 'text-slate-800 hover:bg-slate-100'}`}
+                className={`mx-3 mt-1 flex h-10 cursor-pointer items-center rounded-xl p-3 text-sm font-semibold transition-colors duration-700 recallx-ease ${pathname === '/summary-chat' ? 'bg-recallx-acid text-recallx-black shadow-[0_10px_24px_rgba(200,255,133,0.16)]' : 'text-recallx-muted hover:bg-white/[0.07] hover:text-recallx-text'}`}
               >
                 <MessageCircle className="mr-2 h-4 w-4" />
-                <span>Ask meetings</span>
+                <span>Ask memory</span>
               </div>
             )}
           </div>
@@ -764,23 +764,23 @@ const Sidebar: React.FC = () => {
             {/* Meeting Notes folder header - fixed */}
             {!isCollapsed && (
               <div className="flex-shrink-0">
-                <div className="mx-3 mt-4 px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Meeting library
+                <div className="mx-3 mt-4 px-2 pb-1 text-xs font-semibold uppercase tracking-[0.18em] text-recallx-muted">
+                  Memory archive
                 </div>
                 {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
                   <div key={item.id}>
                     <div
                       className="mx-3 flex h-10 items-center rounded-xl p-3 text-sm font-semibold"
                     >
-                      <NotebookPen className="mr-2 h-4 w-4 text-slate-500" />
-                      <span className="text-slate-700">All meetings</span>
+                      <NotebookPen className="mr-2 h-4 w-4 text-recallx-muted" />
+                      <span className="text-recallx-text">All meetings</span>
                       {item.children && (
-                        <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+                        <span className="ml-2 rounded-full bg-white/[0.07] px-2 py-0.5 text-xs font-medium text-recallx-muted">
                           {item.children.length}
                         </span>
                       )}
                       {searchQuery && item.id === 'meetings' && isSearching && (
-                        <span className="ml-2 animate-pulse text-xs text-emerald-700">Searching...</span>
+                        <span className="ml-2 animate-pulse text-xs text-recallx-acid">Searching...</span>
                       )}
                     </div>
                   </div>
@@ -806,12 +806,12 @@ const Sidebar: React.FC = () => {
         {/* Footer */}
         {!isCollapsed && (
 
-          <div className="flex-shrink-0 border-t border-slate-200/80 p-3">
-            <div className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Actions</div>
+          <div className="flex-shrink-0 border-t border-white/10 p-3">
+            <div className="px-2 pb-2 text-xs font-semibold uppercase tracking-[0.18em] text-recallx-muted">Actions</div>
             <button
               onClick={handleRecordingToggle}
               disabled={isRecording}
-              className={`flex w-full items-center justify-center rounded-2xl px-3 py-2.5 text-sm font-semibold text-white ${isRecording ? 'cursor-not-allowed bg-red-400' : 'bg-red-600 hover:bg-red-700'} shadow-[0_10px_24px_rgba(220,38,38,0.16)] transition-colors`}
+              className={`flex w-full items-center justify-center rounded-2xl px-3 py-2.5 text-sm font-semibold ${isRecording ? 'cursor-not-allowed bg-red-400 text-white' : 'bg-recallx-acid text-recallx-black hover:bg-[#d8ff9f]'} shadow-[0_10px_24px_rgba(200,255,133,0.12)] transition-colors duration-700 recallx-ease`}
             >
               {isRecording ? (
                 <>
@@ -829,7 +829,7 @@ const Sidebar: React.FC = () => {
             {betaFeatures.importAndRetranscribe && (
               <button
                 onClick={() => openImportDialog()}
-                className="mt-2 flex w-full items-center justify-center rounded-2xl bg-emerald-50 px-3 py-2.5 text-sm font-semibold text-emerald-800 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:bg-emerald-100"
+                className="mt-2 flex w-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-2.5 text-sm font-semibold text-recallx-text shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-700 recallx-ease hover:bg-white/[0.08]"
               >
                 <Upload className="mr-2 h-4 w-4" />
                 <span>Import Audio</span>
@@ -838,13 +838,13 @@ const Sidebar: React.FC = () => {
 
             <button
               onClick={() => router.push('/settings')}
-              className="mb-1 mt-2 flex w-full items-center justify-center rounded-2xl bg-slate-100 px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:bg-slate-200 hover:text-slate-950"
+              className="mb-1 mt-2 flex w-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-2.5 text-sm font-semibold text-recallx-text shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-700 recallx-ease hover:bg-white/[0.08]"
             >
               <Settings className="mr-2 h-4 w-4" />
               <span>Settings</span>
             </button>
             <Info isCollapsed={isCollapsed} />
-            <div className="flex w-full items-center justify-center px-3 py-1 text-xs text-slate-400">
+            <div className="flex w-full items-center justify-center px-3 py-1 text-xs text-recallx-muted">
               v0.4.0
             </div>
           </div>

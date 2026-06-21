@@ -95,12 +95,12 @@ const TranscriptSegment = memo(function TranscriptSegment({
     return (
         <div
             id={`segment-${id}`}
-            className={`mb-3 scroll-mt-4 rounded-lg transition-colors duration-500 ${highlighted ? 'bg-emerald-50 ring-1 ring-emerald-200' : ''}`}
+            className={`mb-3 scroll-mt-4 rounded-lg transition-colors duration-500 ${highlighted ? 'bg-recallx-acid/10 ring-1 ring-recallx-acid/35' : ''}`}
         >
             <div className="flex items-start gap-2">
                 <Tooltip>
                     <TooltipTrigger>
-                        <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
+                        <span className="mt-1 min-w-[50px] flex-shrink-0 text-xs text-recallx-muted">
                             {formatRecordingTime(timestamp)}
                         </span>
                     </TooltipTrigger>
@@ -115,29 +115,29 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         <div className="mb-1 flex max-w-full flex-wrap items-center gap-1.5">
                             <span className={`inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                                 speakerLabel.status === 'confirmed'
-                                    ? 'bg-emerald-50 text-emerald-700'
+                                    ? 'bg-recallx-acid text-recallx-black'
                                     : speakerLabel.source === 'manual'
-                                      ? 'bg-blue-50 text-blue-700'
-                                      : 'bg-amber-50 text-amber-700'
+                                      ? 'bg-white/[0.08] text-recallx-text'
+                                      : 'bg-amber-300/20 text-amber-100'
                             }`}>
                                 <span className="truncate">{speakerLabel.displayName}</span>
                             </span>
-                            <span className="text-[10px] font-medium uppercase text-slate-400">
+                            <span className="text-[10px] font-medium uppercase text-recallx-muted">
                                 {speakerLabel.status === 'confirmed' ? 'Confirmed' : 'Suggested'}
                             </span>
                             {typeof speakerLabel.confidence === 'number' ? (
-                                <span className="text-[10px] text-slate-400">
+                                <span className="text-[10px] text-recallx-muted">
                                     {Math.round(speakerLabel.confidence * 100)}%
                                 </span>
                             ) : null}
                         </div>
                     )}
                     {isStreaming ? (
-                        <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
-                            <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                        <div className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2">
+                            <p className="text-base leading-relaxed text-recallx-text">{displayText}</p>
                         </div>
                     ) : (
-                        <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                        <p className="text-base leading-relaxed text-recallx-text">{displayText}</p>
                     )}
                 </div>
             </div>
@@ -302,11 +302,11 @@ export const VirtualizedTranscriptView = forwardRef<VirtualizedTranscriptViewHan
     }, [onLoadMore, hasMore, isLoadingMore, isRecording]);
 
     return (
-        <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">
+        <div ref={scrollRef} className="flex h-full flex-col overflow-y-auto px-4 py-2">
             {/* Recording Status Bar - Sticky at top, always visible when recording */}
             <AnimatePresence>
                 {isRecording && (
-                    <div className="sticky top-0 z-10 bg-white pb-2">
+                    <div className="sticky top-0 z-10 bg-recallx-graphite pb-2">
                         <RecordingStatusBar isPaused={isPaused} />
                     </div>
                 )}
@@ -319,23 +319,23 @@ export const VirtualizedTranscriptView = forwardRef<VirtualizedTranscriptViewHan
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="text-center text-gray-500 mt-8"
+                    className="mt-8 text-center text-recallx-muted"
                 >
                     {isRecording ? (
                         <>
                             <div className="flex items-center justify-center mb-3">
                                 <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-blue-500 animate-pulse'}`}></div>
                             </div>
-                            <p className="text-sm text-gray-600">
+                            <p className="text-sm text-recallx-muted">
                                 {isPaused ? 'Recording paused' : 'Listening for speech...'}
                             </p>
-                            <p className="text-xs mt-1 text-gray-400">
+                            <p className="mt-1 text-xs text-recallx-muted/70">
                                 {isPaused ? 'Click resume to continue recording' : 'Speak to see live transcription'}
                             </p>
                         </>
                     ) : (
                         <>
-                            <p className="text-lg font-semibold">Welcome to meetily!</p>
+                            <p className="text-lg font-semibold text-recallx-text">Welcome to RecallX</p>
                             <p className="text-xs mt-1">Start recording to see live transcription</p>
                         </>
                     )}
@@ -386,12 +386,12 @@ export const VirtualizedTranscriptView = forwardRef<VirtualizedTranscriptViewHan
                     {(hasMore || isLoadingMore) && !isRecording && segments.length > 0 && (
                         <div ref={loadMoreTriggerRef} className="flex justify-center items-center py-4 mt-2">
                             {isLoadingMore ? (
-                                <div className="flex items-center gap-2 text-gray-500">
-                                    <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                                <div className="flex items-center gap-2 text-recallx-muted">
+                                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-recallx-acid" />
                                     <span className="text-sm">Loading more...</span>
                                 </div>
                             ) : hasMore && totalCount > 0 ? (
-                                <span className="text-sm text-gray-400">
+                                <span className="text-sm text-recallx-muted">
                                     Showing {loadedCount} of {totalCount} segments
                                 </span>
                             ) : null}
@@ -404,9 +404,9 @@ export const VirtualizedTranscriptView = forwardRef<VirtualizedTranscriptViewHan
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className="flex items-center gap-2 mt-4 text-gray-500"
+                            className="mt-4 flex items-center gap-2 text-recallx-muted"
                         >
-                            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                            <div className="h-2 w-2 animate-pulse rounded-full bg-recallx-acid"></div>
                             <span className="text-sm">Listening...</span>
                         </motion.div>
                     )}
@@ -444,12 +444,12 @@ export const VirtualizedTranscriptView = forwardRef<VirtualizedTranscriptViewHan
                     {(hasMore || isLoadingMore) && !isRecording && segments.length > 0 && (
                         <div ref={loadMoreTriggerRef} className="flex justify-center items-center py-4 mt-2">
                             {isLoadingMore ? (
-                                <div className="flex items-center gap-2 text-gray-500">
-                                    <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                                <div className="flex items-center gap-2 text-recallx-muted">
+                                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-recallx-acid" />
                                     <span className="text-sm">Loading more...</span>
                                 </div>
                             ) : hasMore && totalCount > 0 ? (
-                                <span className="text-sm text-gray-400">
+                                <span className="text-sm text-recallx-muted">
                                     Showing {loadedCount} of {totalCount} segments
                                 </span>
                             ) : null}
@@ -462,9 +462,9 @@ export const VirtualizedTranscriptView = forwardRef<VirtualizedTranscriptViewHan
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className="flex items-center gap-2 mt-4 text-gray-500"
+                            className="mt-4 flex items-center gap-2 text-recallx-muted"
                         >
-                            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                            <div className="h-2 w-2 animate-pulse rounded-full bg-recallx-acid"></div>
                             <span className="text-sm">Listening...</span>
                         </motion.div>
                     )}

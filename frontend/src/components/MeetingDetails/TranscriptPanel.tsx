@@ -130,11 +130,11 @@ export const TranscriptPanel = forwardRef<TranscriptPanelHandle, TranscriptPanel
 
   return (
     <div
-      className={`relative hidden min-w-0 shrink-0 flex-col border-r border-slate-200/80 bg-white/95 md:flex ${className}`}
+      className={`relative hidden min-w-0 shrink-0 flex-col border-r border-white/10 bg-recallx-graphite/95 text-recallx-text md:flex ${className}`}
       style={style}
     >
       {/* Title area */}
-      <div className="border-b border-slate-200/80 bg-white/90 p-4">
+      <div className="border-b border-white/10 bg-recallx-graphite/90 p-4">
         <TranscriptButtonGroup
           transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
           onCopyTranscript={onCopyTranscript}
@@ -178,10 +178,10 @@ export const TranscriptPanel = forwardRef<TranscriptPanelHandle, TranscriptPanel
 
       {/* Custom prompt input at bottom of transcript section */}
       {!isRecording && convertedSegments.length > 0 && (
-        <div className="space-y-2 border-t border-slate-200/80 bg-white/95 p-3">
+        <div className="space-y-2 border-t border-white/10 bg-recallx-graphite/95 p-3">
           {customPromptHistory.length > 0 && (
             <select
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] outline-none transition-[border-color,box-shadow] focus:border-emerald-700/50 focus:ring-2 focus:ring-emerald-700/15"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-xs font-medium text-recallx-text shadow-[0_1px_2px_rgba(0,0,0,0.18)] outline-none transition-[border-color,box-shadow] focus:border-recallx-acid/60 focus:ring-2 focus:ring-recallx-acid/15"
               value=""
               onChange={(e) => {
                 if (e.target.value) {
@@ -203,7 +203,7 @@ export const TranscriptPanel = forwardRef<TranscriptPanelHandle, TranscriptPanel
           <textarea
             placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
             aria-label="Additional context for AI summary"
-            className="min-h-[88px] w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-900 shadow-[0_1px_2px_rgba(15,23,42,0.04)] outline-none transition-[border-color,box-shadow] placeholder:text-slate-400 focus:border-emerald-700/50 focus:ring-2 focus:ring-emerald-700/15"
+            className="min-h-[88px] w-full resize-y rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-sm leading-6 text-recallx-text shadow-[0_1px_2px_rgba(0,0,0,0.18)] outline-none transition-[border-color,box-shadow] placeholder:text-recallx-muted/60 focus:border-recallx-acid/60 focus:ring-2 focus:ring-recallx-acid/15"
             value={customPrompt}
             onChange={(e) => onPromptChange(e.target.value)}
           />

@@ -432,9 +432,9 @@ pub fn run() {
             if app_settings::should_start_minimized(_app.handle()) {
                 if let Some(window) = _app.handle().get_webview_window("main") {
                     if let Err(e) = window.hide() {
-                        log::error!("Failed to start Meetily minimized: {}", e);
+                        log::error!("Failed to start RecallX minimized: {}", e);
                     } else {
-                        log::info!("Meetily started minimized to the system tray");
+                        log::info!("RecallX started minimized to the system tray");
                     }
                 }
             }

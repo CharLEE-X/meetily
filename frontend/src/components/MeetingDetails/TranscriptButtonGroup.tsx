@@ -43,6 +43,7 @@ export function TranscriptButtonGroup({
         <Button
           variant="outline"
           size="sm"
+          className="border-white/10 bg-white/[0.05] text-recallx-text hover:bg-white/[0.08]"
           onClick={() => {
             Analytics.trackButtonClick('copy_transcript', 'meeting_details');
             onCopyTranscript();
@@ -57,7 +58,7 @@ export function TranscriptButtonGroup({
         <Button
           size="sm"
           variant="outline"
-          className="xl:px-4"
+          className="border-white/10 bg-white/[0.05] text-recallx-text hover:bg-white/[0.08] xl:px-4"
           onClick={() => {
             Analytics.trackButtonClick('open_recording_folder', 'meeting_details');
             onOpenMeetingFolder();
@@ -72,7 +73,7 @@ export function TranscriptButtonGroup({
           <Button
             size="sm"
             variant="outline"
-            className="border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100 xl:px-4"
+            className="border-recallx-acid/25 bg-recallx-acid/10 text-recallx-acid hover:border-recallx-acid/40 hover:bg-recallx-acid/15 xl:px-4"
             onClick={() => {
               Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
               setShowRetranscribeDialog(true);

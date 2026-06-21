@@ -186,7 +186,7 @@ export function ExportMeetingDialog({
             <Input
               value={destinationDir}
               onChange={(event) => setDestinationDir(event.target.value)}
-              placeholder="Meetily exports folder"
+              placeholder="RecallX exports folder"
             />
           </div>
 

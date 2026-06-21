@@ -25,6 +25,7 @@ import { useRouter } from 'next/navigation';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { AlertTriangle, Bot, CalendarClock, Camera, CheckCircle2, Clock3, FileText, MessageCircle, Mic, Monitor, Settings, ShieldCheck, Upload, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { RecallXButton, RecallXCard, RecallXShell } from '@/components/recallx';
 import {
   ApprovedCalendarEvent,
   getSelectedCalendarEventForRecording,
@@ -155,50 +156,48 @@ function HomeDashboard({
     : 'Review suggestions before applying';
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-background px-8 py-8">
+    <div className="flex min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-recallx-black px-4 py-6 text-recallx-text md:px-8 md:py-8">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-28">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
+        <RecallXCard innerClassName="p-6">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">Dashboard</p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">Start, review, and automate meetings</h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-                Use this home view to start the next recording, jump back into recent meetings, ask across summaries, or check whether the local recording setup is ready.
+              <p className="inline-flex rounded-full bg-white/[0.07] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-recallx-acid">RecallX memory desk</p>
+              <h1 className="mt-4 text-3xl font-semibold tracking-normal text-recallx-text">Start, review, and recall meetings</h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-recallx-muted">
+                Start the next private recording, return to recent meeting memory, ask across summaries, or verify the local capture setup.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={onOpenSummaryChat}>
-                <MessageCircle className="h-4 w-4" />
-                Ask meetings
-              </Button>
+              <RecallXButton type="button" onClick={onOpenSummaryChat} trailing={<MessageCircle className="h-4 w-4" />}>
+                Ask memory
+              </RecallXButton>
               {importEnabled && (
-                <Button type="button" variant="outline" onClick={onImportAudio}>
+                <Button type="button" variant="outline" onClick={onImportAudio} className="border-white/10 bg-white/[0.04] text-recallx-text hover:bg-white/[0.08]">
                   <Upload className="h-4 w-4" />
                   Import audio
                 </Button>
               )}
             </div>
           </div>
-        </section>
+        </RecallXCard>
 
-        <section className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+        <RecallXCard className="bg-recallx-acid/10 ring-recallx-acid/20" innerClassName="p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <div className="flex items-center gap-2 text-sm font-semibold text-emerald-900">
+              <div className="flex items-center gap-2 text-sm font-semibold text-recallx-acid">
                 <ShieldCheck className="h-4 w-4" />
                 Recording preflight
               </div>
-              <h2 className="mt-2 text-lg font-semibold text-slate-950">{preflightState}</h2>
-              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
-                Start audio recording now, or review the capture scope first. Sensitive context stays local and any external Notes, Reminders, or agent automation step remains review-only after the meeting.
+              <h2 className="mt-2 text-lg font-semibold text-recallx-text">{preflightState}</h2>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-recallx-muted">
+                Start audio capture now, or review the capture scope first. Sensitive context stays local and any external Notes, Reminders, or agent automation step remains review-only after the meeting.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={onStartRecording} className="bg-red-600 text-white hover:bg-red-700">
-                <Mic className="h-4 w-4" />
+              <RecallXButton type="button" onClick={onStartRecording} trailing={<Mic className="h-4 w-4" />}>
                 Start recording
-              </Button>
-              <Button type="button" variant="outline" onClick={onOpenSettings}>
+              </RecallXButton>
+              <Button type="button" variant="outline" onClick={onOpenSettings} className="border-white/10 bg-white/[0.04] text-recallx-text hover:bg-white/[0.08]">
                 <Settings className="h-4 w-4" />
                 Review settings
               </Button>
@@ -239,36 +238,36 @@ function HomeDashboard({
           </div>
 
           {missingPermissions.length > 0 ? (
-            <div className="mt-4 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-4 flex flex-col gap-2 rounded-xl border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
                   Missing setup: {missingPermissions.join(', ')}. Recording is still available, but review settings first if you need that capture source.
                 </span>
               </div>
-              <Button type="button" variant="outline" onClick={onOpenSettings} className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100">
+              <Button type="button" variant="outline" onClick={onOpenSettings} className="border-amber-300/40 bg-amber-200/10 text-amber-100 hover:bg-amber-200/20">
                 Open settings
               </Button>
             </div>
           ) : null}
-        </section>
+        </RecallXCard>
 
         <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+          <RecallXCard innerClassName="p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-slate-950">Recent meetings</h2>
-                <p className="mt-1 text-sm text-slate-500">Continue review, summary export, reminders, or agent automation.</p>
+                <h2 className="text-base font-semibold text-recallx-text">Recent meeting memory</h2>
+                <p className="mt-1 text-sm text-recallx-muted">Continue review, summary export, reminders, or agent automation.</p>
               </div>
-              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{meetings.length} total</span>
+              <span className="rounded-full bg-white/[0.07] px-2.5 py-1 text-xs font-medium text-recallx-muted">{meetings.length} total</span>
             </div>
 
-            <div className="mt-4 divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200">
+            <div className="mt-4 divide-y divide-white/10 overflow-hidden rounded-xl border border-white/10">
               {recentMeetings.length === 0 ? (
                 <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
-                  <FileText className="h-9 w-9 text-slate-300" />
-                  <h3 className="mt-3 text-sm font-semibold text-slate-950">No meetings yet</h3>
-                  <p className="mt-1 max-w-sm text-sm leading-6 text-slate-500">
+                  <FileText className="h-9 w-9 text-white/30" />
+                  <h3 className="mt-3 text-sm font-semibold text-recallx-text">No meetings yet</h3>
+                  <p className="mt-1 max-w-sm text-sm leading-6 text-recallx-muted">
                     Start a recording or import audio to create your first meeting transcript and summary.
                   </p>
                 </div>
@@ -277,57 +276,57 @@ function HomeDashboard({
                   key={meeting.id}
                   type="button"
                   onClick={() => onOpenMeeting(meeting.id)}
-                  className="flex w-full items-center justify-between gap-4 bg-white px-4 py-3 text-left transition hover:bg-slate-50"
+                  className="flex w-full items-center justify-between gap-4 bg-white/[0.03] px-4 py-3 text-left transition duration-700 recallx-ease hover:bg-white/[0.07]"
                 >
                   <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-slate-950">{meeting.title || 'Untitled meeting'}</span>
-                    <span className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                    <span className="block truncate text-sm font-medium text-recallx-text">{meeting.title || 'Untitled meeting'}</span>
+                    <span className="mt-1 flex items-center gap-1 text-xs text-recallx-muted">
                       <Clock3 className="h-3.5 w-3.5" />
                       Open details
                     </span>
                   </span>
-                  <FileText className="h-4 w-4 shrink-0 text-slate-400" />
+                  <FileText className="h-4 w-4 shrink-0 text-white/40" />
                 </button>
               ))}
             </div>
-          </section>
+          </RecallXCard>
 
           <div className="space-y-6">
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-              <h2 className="text-base font-semibold text-slate-950">Setup status</h2>
+            <RecallXCard innerClassName="p-5">
+              <h2 className="text-base font-semibold text-recallx-text">Setup status</h2>
               <div className="mt-4 space-y-3">
                 {setupItems.map((item) => (
-                  <div key={item.label} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${item.ready ? 'text-emerald-600' : 'text-amber-600'}`} />
+                  <div key={item.label} className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                    <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${item.ready ? 'text-recallx-acid' : 'text-amber-300'}`} />
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-950">{item.label}</p>
-                      <p className="mt-1 truncate text-xs text-slate-500">{item.detail}</p>
+                      <p className="text-sm font-medium text-recallx-text">{item.label}</p>
+                      <p className="mt-1 truncate text-xs text-recallx-muted">{item.detail}</p>
                     </div>
                   </div>
                 ))}
               </div>
-              <Button type="button" variant="outline" className="mt-4 w-full" onClick={onOpenSettings}>
+              <Button type="button" variant="outline" className="mt-4 w-full border-white/10 bg-white/[0.04] text-recallx-text hover:bg-white/[0.08]" onClick={onOpenSettings}>
                 <Settings className="h-4 w-4" />
                 Open settings
               </Button>
-            </section>
+            </RecallXCard>
 
-            <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+            <RecallXCard className="bg-recallx-acid/10 ring-recallx-acid/20" innerClassName="p-5">
               <div className="flex items-start gap-3">
-                <div className="rounded-xl bg-white p-2 text-emerald-700">
+                <div className="rounded-xl bg-recallx-acid p-2 text-recallx-black">
                   <Bot className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="text-base font-semibold text-emerald-950">Agent-ready workflows</h2>
-                  <p className="mt-2 text-sm leading-6 text-emerald-900">
-                    After summaries are generated, Meetily can prepare Codex, Claude, Cursor, Linear, reminders, notes, and calendar handoffs from the meeting context.
+                  <h2 className="text-base font-semibold text-recallx-text">Agent-ready workflows</h2>
+                  <p className="mt-2 text-sm leading-6 text-recallx-muted">
+                    After summaries are generated, RecallX can prepare Codex, Claude, Cursor, Linear, reminders, notes, and calendar handoffs from the meeting context.
                   </p>
-                  <Button type="button" variant="outline" className="mt-4 border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100" onClick={onOpenSettings}>
+                  <Button type="button" variant="outline" className="mt-4 border-white/10 bg-white/[0.04] text-recallx-text hover:bg-white/[0.08]" onClick={onOpenSettings}>
                     Configure automation
                   </Button>
                 </div>
               </div>
-            </section>
+            </RecallXCard>
           </div>
         </div>
       </div>
@@ -349,15 +348,15 @@ function PreflightItem({
   ready: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+    <div className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3">
       <div className="flex items-start gap-2">
-        <div className={`rounded-lg p-1.5 ${ready ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+        <div className={`rounded-lg p-1.5 ${ready ? 'bg-recallx-acid text-recallx-black' : 'bg-amber-300/20 text-amber-200'}`}>
           <Icon className="h-4 w-4" />
         </div>
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-          <div className="mt-1 break-words text-sm font-semibold text-slate-950">{value}</div>
-          <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>
+          <div className="text-xs font-semibold uppercase tracking-wide text-recallx-muted">{label}</div>
+          <div className="mt-1 break-words text-sm font-semibold text-recallx-text">{value}</div>
+          <p className="mt-1 text-xs leading-5 text-recallx-muted">{detail}</p>
         </div>
       </div>
     </div>
@@ -540,8 +539,8 @@ export default function Home() {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex h-screen flex-col bg-background"
+      transition={{ duration: 0.7, ease: [0.32, 0.72, 0, 1] }}
+      className="flex h-screen flex-col bg-recallx-black"
     >
       {/* All Modals supported*/}
       <SettingsModals
@@ -559,7 +558,7 @@ export default function Home() {
         onDelete={deleteRecoverableMeeting}
         onLoadPreview={loadMeetingTranscripts}
       />
-      <div className="flex flex-1 overflow-hidden">
+      <RecallXShell className="flex flex-1 overflow-hidden">
         {shouldShowTranscriptWorkspace ? (
           <TranscriptPanel
             isProcessingStop={isProcessingStop}
@@ -604,7 +603,7 @@ export default function Home() {
                 }}
               >
                 <div className="w-2/3 max-w-[750px] flex justify-center">
-                  <div className="flex items-center rounded-full border border-slate-200/80 bg-white/95 shadow-[0_22px_55px_rgba(15,23,42,0.16)]">
+                  <div className="flex items-center rounded-full border border-white/10 bg-recallx-graphite/95 shadow-[0_22px_55px_rgba(0,0,0,0.34)]">
                     <RecordingControls
                       isRecording={recordingState.isRecording}
                       onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
@@ -632,7 +631,7 @@ export default function Home() {
           isSaving={status === RecordingStatus.SAVING}
           sidebarCollapsed={sidebarCollapsed}
         />
-      </div>
+      </RecallXShell>
     </motion.div>
   );
 }

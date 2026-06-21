@@ -11,7 +11,7 @@ const baseInput = {
   meetingId: 'meeting-123',
   meetingTitle: 'Platform planning',
   meetingStartedAt: '2026-06-20T09:00:00.000Z',
-  summaryText: 'We agreed to let agents own GitHub and Linear work while Meetily prepares context.',
+  summaryText: 'We agreed to let agents own GitHub and Linear work while RecallX prepares context.',
   actionItems: [{
     id: 'action-1',
     text: 'Adrian will prepare the Codex handoff flow.',
@@ -20,7 +20,7 @@ const baseInput = {
   }],
   decisions: [{
     id: 'decision-1',
-    text: 'Meetily will not create Linear issues directly.',
+    text: 'RecallX will not create Linear issues directly.',
     timestamp: '00:08:14',
     sourceLabel: 'Key Decisions',
   }],
@@ -37,7 +37,7 @@ const baseInput = {
   ],
   screenshotsOcr: [{ id: 'shot-1', text: 'Visible dashboard text from screen OCR.' }],
   calendarMetadata: [{ id: 'cal-1', text: 'Calendar event: Platform planning at 09:00.' }],
-  artifacts: [{ id: 'notes-1', text: 'Apple Notes export exists in Meetily folder.' }],
+  artifacts: [{ id: 'notes-1', text: 'Apple Notes export exists in RecallX folder.' }],
 };
 
 test('builds source-cited summary, decisions, actions, and risks by default', () => {
@@ -100,7 +100,7 @@ test('serializes package for Codex and keeps source references visible', () => {
 
   assert.match(serialized, /Target: codex/);
   assert.match(serialized, /Meeting ID: meeting-123/);
-  assert.match(serialized, /\[decision-1\] Meetily will not create Linear issues directly\./);
+  assert.match(serialized, /\[decision-1\] RecallX will not create Linear issues directly\./);
   assert.match(serialized, /- \[segment-1\] transcript @ 00:01:00-00:01:08/);
   assert.match(serialized, /- \[cal-1\] calendar/);
 });

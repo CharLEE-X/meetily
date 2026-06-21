@@ -270,7 +270,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       <div>
         <h3 className="text-lg font-semibold mb-4">Recording Settings</h3>
         <p className="max-w-3xl text-sm leading-6 text-gray-600 mb-6">
-          Configure what Meetily keeps from a recording session. These choices affect local audio retention, screenshot timeline context, participant recording reminders, and the default audio devices selected when a new meeting starts.
+          Configure what RecallX keeps from a recording session. These choices affect local audio retention, screenshot timeline context, participant recording reminders, and the default audio devices selected when a new meeting starts.
         </p>
       </div>
 
@@ -295,7 +295,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
           <div className="p-4 border rounded-lg bg-gray-50">
             <div className="font-medium mb-2">Save Location</div>
             <p className="mb-3 text-sm leading-6 text-gray-600">
-              Meetily writes saved audio files to this local folder. Moving or deleting files here can affect playback and later export workflows for existing meetings.
+              RecallX writes saved audio files to this local folder. Moving or deleting files here can affect playback and later export workflows for existing meetings.
             </p>
             <div className="text-sm text-gray-600 mb-3 break-all">
               {preferences.save_folder || 'Default folder'}
@@ -317,7 +317,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
               Recordings are saved with timestamp: recording_YYYYMMDD_HHMMSS.{preferences.file_format}
             </div>
             <div className="mt-2 text-xs leading-5 text-blue-700">
-              The timestamped filename makes it easier to match a local audio file with the meeting timeline shown in Meetily.
+              The timestamped filename makes it easier to match a local audio file with the meeting timeline shown in RecallX.
             </div>
           </div>
         </div>
@@ -355,7 +355,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
               Meeting Screenshots
             </div>
             <div className="max-w-2xl text-sm leading-6 text-gray-600 mt-1">
-              Capture periodic snapshots during recordings for timeline context, speaker identification, and summary grounding. Meetily captures the detected call window by default and skips capture when the meeting window is unavailable.
+              Capture periodic snapshots during recordings for timeline context, speaker identification, and summary grounding. RecallX captures the detected call window by default and skips capture when the meeting window is unavailable.
             </div>
           </div>
           <Switch
@@ -433,7 +433,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <div className="flex-1">
           <div className="font-medium">Auto-apply Visual Speaker Labels</div>
           <div className="max-w-2xl text-sm leading-6 text-gray-600">
-            Let Meetily use high-confidence call-window speaker cues to label transcript segments
+            Let RecallX use high-confidence call-window speaker cues to label transcript segments
             automatically. Turn this off when you want screenshots to remain review evidence only
             and prefer assigning or confirming speaker names manually after the meeting.
           </div>
@@ -450,7 +450,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <div className="border-t pt-6">
           <h4 className="text-base font-medium text-gray-900 mb-4">Default Audio Devices</h4>
           <p className="max-w-3xl text-sm leading-6 text-gray-600 mb-4">
-            Set the microphone and system audio devices Meetily should prefer for new recordings. If a saved device is unplugged or unavailable, Meetily falls back to the current system default so recording can still start.
+            Set the microphone and system audio devices RecallX should prefer for new recordings. If a saved device is unplugged or unavailable, RecallX falls back to the current system default so recording can still start.
           </p>
 
           <div className="border rounded-lg p-4 bg-gray-50">

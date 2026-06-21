@@ -1898,7 +1898,7 @@ fn user_facing_call_window_error(error: &str) -> String {
         || normalized.contains("automation")
         || normalized.contains("-1743")
     {
-        "Meetily needs macOS Accessibility permission to detect meeting window bounds before capturing call-window screenshots".to_string()
+        "RecallX needs macOS Accessibility permission to detect meeting window bounds before capturing call-window screenshots".to_string()
     } else {
         format!("Could not detect active meeting window bounds: {}", error)
     }

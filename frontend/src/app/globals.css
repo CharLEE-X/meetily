@@ -78,6 +78,13 @@
 
 @layer base {
   :root {
+    --recallx-motion: cubic-bezier(0.32, 0.72, 0, 1);
+    --recallx-black: #050505;
+    --recallx-graphite: #0b0b0a;
+    --recallx-panel: #10110f;
+    --recallx-text: #f7f4ee;
+    --recallx-muted: rgba(247, 244, 238, 0.68);
+    --recallx-acid: #c8ff85;
     --background: 120 12% 96%;
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
@@ -238,6 +245,37 @@
 
   .dark :where(.shadow-sm, .shadow, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl) {
     --tw-shadow-color: rgb(0 0 0 / 0.35);
+  }
+
+  .recallx-ease {
+    transition-timing-function: var(--recallx-motion);
+  }
+
+  .recallx-settings-surface :where(.bg-white, .bg-gray-50, .bg-slate-50, .bg-blue-50, .bg-emerald-50) {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+  }
+
+  .recallx-settings-surface :where(.border-gray-200, .border-slate-200, .border-blue-100, .border-emerald-100, .border-emerald-200) {
+    border-color: rgba(255, 255, 255, 0.1) !important;
+  }
+
+  .recallx-settings-surface :where(.text-gray-950, .text-gray-900, .text-slate-950, .text-slate-900, .text-blue-950) {
+    color: var(--recallx-text) !important;
+  }
+
+  .recallx-settings-surface :where(.text-gray-700, .text-gray-600, .text-gray-500, .text-slate-700, .text-slate-600, .text-slate-500, .text-blue-900, .text-blue-800) {
+    color: var(--recallx-muted) !important;
+  }
+
+  .recallx-settings-surface :where(input, select, textarea) {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
+    color: var(--recallx-text) !important;
+  }
+
+  .recallx-settings-surface :where(button.bg-blue-600, button.bg-gray-900) {
+    background-color: var(--recallx-acid) !important;
+    color: var(--recallx-black) !important;
   }
 
   @media (prefers-reduced-motion: reduce) {

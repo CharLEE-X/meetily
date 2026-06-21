@@ -129,30 +129,30 @@ export default function SettingsPage() {
   }, [activeTab]);
 
   return (
-    <div className="h-screen bg-gray-50 flex flex-col">
+    <div className="flex h-screen flex-col bg-recallx-black text-recallx-text">
       {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
+      <div className="sticky top-0 z-10 border-b border-white/10 bg-recallx-black/95">
         <div className="max-w-6xl mx-auto px-8 py-6">
           <div className="flex items-center gap-4">
             <button
               onClick={() => router.back()}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+              className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-recallx-muted transition-colors duration-700 recallx-ease hover:bg-white/[0.08] hover:text-recallx-text"
             >
               <ArrowLeft className="w-5 h-5" />
               <span>Back</span>
             </button>
-            <h1 className="text-3xl font-bold">Settings</h1>
+            <h1 className="text-3xl font-bold">RecallX Settings</h1>
           </div>
         </div>
       </div>
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="max-w-6xl mx-auto p-8 pt-6">
+        <div className="recallx-settings-surface max-w-6xl mx-auto p-8 pt-6">
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <div className="-mx-8 overflow-x-auto px-8">
-              <TabsList className="relative flex h-auto min-w-full w-max justify-start rounded-none border-b border-gray-200 bg-transparent p-0">
+              <TabsList className="relative flex h-auto min-w-full w-max justify-start rounded-none border-b border-white/10 bg-transparent p-0">
                 {TABS.map((tab, index) => {
                   const Icon = tab.icon;
                   return (
@@ -160,7 +160,7 @@ export default function SettingsPage() {
                       key={tab.value}
                       value={tab.value}
                       ref={el => { tabRefs.current[index] = el }}
-                      className="flex shrink-0 items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-blue-600 data-[state=active]:shadow-none text-gray-600 hover:text-gray-900 relative z-10"
+                      className="relative z-10 flex shrink-0 items-center gap-2 rounded-none border-0 bg-transparent px-6 py-4 text-recallx-muted data-[state=active]:bg-transparent data-[state=active]:text-recallx-acid data-[state=active]:shadow-none hover:text-recallx-text"
                     >
                       <Icon className="w-4 h-4" />
                       {tab.label}
@@ -169,7 +169,7 @@ export default function SettingsPage() {
                 })}
 
                 <motion.div
-                  className="absolute bottom-0 z-20 h-0.5 bg-blue-600"
+                  className="absolute bottom-0 z-20 h-0.5 bg-recallx-acid"
                   layoutId="underline"
                   style={{ left: underlineStyle.left, width: underlineStyle.width }}
                   transition={{ type: 'spring', stiffness: 400, damping: 40 }}
@@ -177,14 +177,14 @@ export default function SettingsPage() {
               </TabsList>
             </div>
 
-            <div className="mt-6 rounded-lg border border-blue-100 bg-blue-50/70 p-5 text-blue-950">
+            <div className="mt-6 rounded-[1.5rem] border border-white/10 bg-white/[0.05] p-5 text-recallx-text shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)]">
               <h2 className="text-base font-semibold">{activeTabExplanation.title}</h2>
-              <p className="mt-2 max-w-4xl text-sm leading-6 text-blue-900">
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-recallx-muted">
                 {activeTabExplanation.description}
               </p>
-              <ul className="mt-4 grid gap-2 text-sm text-blue-900 md:grid-cols-3">
+              <ul className="mt-4 grid gap-2 text-sm text-recallx-muted md:grid-cols-3">
                 {activeTabExplanation.points.map((point) => (
-                  <li key={point} className="rounded-md bg-white/70 px-3 py-2 ring-1 ring-blue-100">
+                  <li key={point} className="rounded-xl bg-white/[0.05] px-3 py-2 ring-1 ring-white/10">
                     {point}
                   </li>
                 ))}

@@ -64,7 +64,7 @@ pub async fn update_app_settings<R: Runtime>(
     if settings.launch_at_login {
         install_login_item().map_err(|err| {
             format!(
-                "Failed to enable launch at login. Check that Meetily can write to LaunchAgents: {}",
+                "Failed to enable launch at login. Check that RecallX can write to LaunchAgents: {}",
                 err
             )
         })?;
@@ -238,7 +238,7 @@ fn resolve_login_executable_path() -> Result<PathBuf, String> {
     }
 
     Err(format!(
-        "Launch at login can only be enabled from an installed Meetily.app bundle. Current executable is {:?}.",
+        "Launch at login can only be enabled from an installed RecallX.app bundle. Current executable is {:?}.",
         executable
     ))
 }

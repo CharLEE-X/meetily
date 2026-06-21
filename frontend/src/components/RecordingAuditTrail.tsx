@@ -91,7 +91,7 @@ export function RecordingAuditTrail({
         <div>
           <h3 className="text-sm font-semibold text-slate-950">{title}</h3>
           <p className="mt-1 text-xs leading-5 text-slate-500">
-            Local audit entries for sensitive recording decisions. Meetily stores event type,
+            Local audit entries for sensitive recording decisions. RecallX stores event type,
             time, source, and safe metadata only, never transcript text, screenshot images,
             tokens, or private calendar descriptions.
           </p>

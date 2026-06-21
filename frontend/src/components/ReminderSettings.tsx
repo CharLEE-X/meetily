@@ -245,7 +245,7 @@ export function ReminderSettings() {
               <div>
                 <h3 className="text-lg font-semibold text-gray-950">Apple Reminders</h3>
                 <p className="max-w-3xl text-sm leading-6 text-gray-600">
-                  Prepare Apple Reminders destinations for action items discovered after meetings. Meetily uses this to offer reviewable follow-up drafts, so implementation tasks, PR reviews, Linear follow-ups, and clarification loops can become reminders without copying them manually.
+                  Prepare Apple Reminders destinations for action items discovered after meetings. RecallX uses this to offer reviewable follow-up drafts, so implementation tasks, PR reviews, Linear follow-ups, and clarification loops can become reminders without copying them manually.
                 </p>
               </div>
             </div>
@@ -452,7 +452,7 @@ export function ReminderSettings() {
         </div>
 
         <p className="mt-3 text-xs text-gray-500">
-          Presets only affect future local reminder drafts. Created Apple Reminders stay unchanged, and Meetily will still show drafts for review before creating new follow-ups.
+          Presets only affect future local reminder drafts. Created Apple Reminders stay unchanged, and RecallX will still show drafts for review before creating new follow-ups.
         </p>
       </div>
 
@@ -461,7 +461,7 @@ export function ReminderSettings() {
           <div>
             <h3 className="text-lg font-semibold text-gray-950">Follow-up history</h3>
             <p className="max-w-3xl text-sm leading-6 text-gray-600">
-              Recent Apple Reminders created from Meetily meetings. Use this history to confirm what was created, where it was placed, and whether any creation attempt failed.
+              Recent Apple Reminders created from RecallX meetings. Use this history to confirm what was created, where it was placed, and whether any creation attempt failed.
             </p>
           </div>
           {isLoading && <Loader2 className="h-5 w-5 animate-spin text-gray-400" />}
@@ -477,7 +477,7 @@ export function ReminderSettings() {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-gray-950">{reminder.title}</p>
-                  <p className="mt-1 truncate text-xs text-gray-500">{reminder.meetingTitle ?? "Meetily meeting"}</p>
+                  <p className="mt-1 truncate text-xs text-gray-500">{reminder.meetingTitle ?? "RecallX meeting"}</p>
                 </div>
                 <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${statusClassName(reminder.status)}`}>
                   {reminder.status}

@@ -237,7 +237,7 @@ export function CalendarSettings() {
       label: "Event creation",
       detail: autoCreateEvents
         ? `RecallX can create or update events in ${targetCalendarName.trim() || "RecallX"}.`
-        : "Meetily will not create calendar events until this is enabled.",
+        : "RecallX will not create calendar events until this is enabled.",
       status: autoCreateEvents ? "ready" : "disabled",
     },
     {
@@ -264,7 +264,7 @@ export function CalendarSettings() {
               <div>
                 <h3 className="text-lg font-semibold text-gray-950">Apple Calendar</h3>
                 <p className="max-w-3xl text-sm leading-6 text-gray-600">
-                  Read upcoming event metadata locally for meeting prompts, recording titles, assisted join links, and better post-meeting context. Meetily does not read private meeting content beyond the metadata needed for these workflows.
+                  Read upcoming event metadata locally for meeting prompts, recording titles, assisted join links, and better post-meeting context. RecallX does not read private meeting content beyond the metadata needed for these workflows.
                 </p>
               </div>
             </div>
@@ -349,7 +349,7 @@ export function CalendarSettings() {
         <div>
           <h3 className="text-lg font-semibold text-gray-950">Event creation</h3>
           <p className="max-w-3xl text-sm leading-6 text-gray-600">
-            Create or update Meetily-owned Apple Calendar events for completed recordings so meetings, summaries, notes, and follow-up records can stay linked. This is off by default, and Meetily only updates events it created or explicitly linked.
+            Create or update RecallX-owned Apple Calendar events for completed recordings so meetings, summaries, notes, and follow-up records can stay linked. This is off by default, and RecallX only updates events it created or explicitly linked.
           </p>
         </div>
         <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
@@ -382,7 +382,7 @@ export function CalendarSettings() {
             onChange={(event) => setAutoCreateEvents(event.target.checked)}
           />
           <span>
-            <span className="block text-sm font-medium text-gray-950">Allow Meetily to create calendar events</span>
+            <span className="block text-sm font-medium text-gray-950">Allow RecallX to create calendar events</span>
             <span className="mt-1 block text-xs leading-5 text-gray-500">Off by default. When enabled, completed recordings can create a calendar event in the target calendar and later attach linked summary/export metadata.</span>
           </span>
         </label>

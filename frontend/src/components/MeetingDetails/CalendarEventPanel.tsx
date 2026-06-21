@@ -71,7 +71,7 @@ export function CalendarEventPanel({ meetingId, hasSummary }: CalendarEventPanel
             </div>
             <div>
               <h3 className="text-sm font-semibold text-slate-950">Apple Calendar event</h3>
-              <p className="text-sm text-slate-600">Create or update a Meetily-owned calendar record.</p>
+              <p className="text-sm text-slate-600">Create or update a RecallX-owned calendar record.</p>
             </div>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">

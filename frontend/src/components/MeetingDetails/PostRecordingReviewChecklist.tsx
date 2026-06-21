@@ -104,7 +104,7 @@ export function PostRecordingReviewChecklist({
         {
           id: 'calendar',
           label: 'Review calendar link',
-          detail: 'Calendar actions remain manual and only create or update Meetily-owned records after review.',
+          detail: 'Calendar actions remain manual and only create or update RecallX-owned records after review.',
           targetId: 'calendar-review',
           icon: CalendarPlus,
         },

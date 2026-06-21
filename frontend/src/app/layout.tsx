@@ -304,7 +304,7 @@ export default function RootLayout({
             <div className="mx-auto flex min-h-screen max-w-3xl flex-col justify-center px-6 py-16">
               <div className="space-y-5">
                 <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">Web preview</p>
-                <h1 className="text-4xl font-semibold tracking-normal text-slate-950">Meetily desktop app</h1>
+                <h1 className="text-4xl font-semibold tracking-normal text-slate-950">RecallX desktop app</h1>
                 <p className="max-w-2xl text-lg text-slate-600">
                   This localhost view is running outside the Tauri desktop shell, so native recording,
                   file system, updater, and model-management APIs are unavailable here.

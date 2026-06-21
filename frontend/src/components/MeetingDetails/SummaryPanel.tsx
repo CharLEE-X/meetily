@@ -288,9 +288,9 @@ export function SummaryPanel({
   );
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white/95">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-recallx-black/70 text-recallx-text">
       {/* Title area */}
-      <div className="border-b border-slate-200/80 bg-white/90 p-4">
+      <div className="border-b border-white/10 bg-recallx-graphite/90 p-4">
         {/* <EditableTitle
           title={meetingTitle}
           isEditing={isEditingTitle}
@@ -300,7 +300,7 @@ export function SummaryPanel({
         /> */}
 
         <div className="flex w-full flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1" role="tablist" aria-label="Meeting details view">
+          <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.04] p-1" role="tablist" aria-label="Meeting details view">
             <button
               type="button"
               role="tab"
@@ -308,9 +308,9 @@ export function SummaryPanel({
               aria-selected={activeView === 'summary'}
               aria-controls="meeting-summary-panel"
               onClick={() => setActiveView('summary')}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${activeView === 'summary'
-                ? 'bg-white text-slate-950 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
+              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition duration-700 recallx-ease ${activeView === 'summary'
+                ? 'bg-recallx-acid text-recallx-black shadow-[0_10px_24px_rgba(200,255,133,0.12)]'
+                : 'text-recallx-muted hover:text-recallx-text'
                 }`}
             >
               <FileText size={16} />
@@ -323,9 +323,9 @@ export function SummaryPanel({
               aria-selected={activeView === 'chat'}
               aria-controls="meeting-chat-panel"
               onClick={() => setActiveView('chat')}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${activeView === 'chat'
-                ? 'bg-white text-slate-950 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
+              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition duration-700 recallx-ease ${activeView === 'chat'
+                ? 'bg-recallx-acid text-recallx-black shadow-[0_10px_24px_rgba(200,255,133,0.12)]'
+                : 'text-recallx-muted hover:text-recallx-text'
                 }`}
             >
               <MessageCircle size={16} />
@@ -444,8 +444,8 @@ export function SummaryPanel({
           {/* Loading spinner */}
           <div className="flex items-center justify-center flex-1">
             <div className="text-center">
-              <div className="mb-4 inline-block h-12 w-12 animate-spin rounded-full border-b-2 border-t-2 border-emerald-700"></div>
-              <p className="font-medium text-slate-600">Generating AI Summary...</p>
+              <div className="mb-4 inline-block h-12 w-12 animate-spin rounded-full border-b-2 border-t-2 border-recallx-acid"></div>
+              <p className="font-medium text-recallx-muted">Generating AI Summary...</p>
             </div>
           </div>
         </div>
@@ -556,8 +556,8 @@ export function SummaryPanel({
           <div id="reminders-review">
             <ReminderDraftReview meetingId={meeting.id} hasSummary={!!aiSummary} />
           </div>
-          <div id="agent-review" className="mx-6 mb-6 mt-2 rounded-2xl border border-gray-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-gray-900">Agent workflow runs</h3>
+          <div id="agent-review" className="mx-6 mb-6 mt-2 rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+            <h3 className="text-sm font-semibold text-recallx-text">Agent workflow runs</h3>
             <div className="mt-3">
               <AgentWorkflowRunsPanel meetingId={meeting.id} limit={4} />
             </div>

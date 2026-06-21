@@ -110,7 +110,7 @@ export function AppleNotesSettings() {
       const account = await appleNotesService.connectProvider()
       await refresh()
       setMessage(account.status === "connected"
-        ? "Apple Notes connected. Meetily can export summaries after you confirm the destination from a meeting."
+        ? "Apple Notes connected. RecallX can export summaries after you confirm the destination from a meeting."
         : account.lastError ?? "Apple Notes permission is needed. Allow access in macOS Privacy & Security, then connect again.")
     } catch (error) {
       setMessage(friendlyError(error))
@@ -204,7 +204,7 @@ export function AppleNotesSettings() {
               <div>
                 <h3 className="text-lg font-semibold text-gray-950">Apple Notes</h3>
                 <p className="max-w-3xl text-sm leading-6 text-gray-600">
-                  Export completed meeting summaries to app-managed Apple Notes folders. Exports are useful for long-term recall because they can include summary structure, action items, calendar links, and related Meetily records in one place.
+                  Export completed meeting summaries to app-managed Apple Notes folders. Exports are useful for long-term recall because they can include summary structure, action items, calendar links, and related RecallX records in one place.
                 </p>
               </div>
             </div>
@@ -285,7 +285,7 @@ export function AppleNotesSettings() {
         <div className="flex flex-col gap-2">
           <h3 className="text-lg font-semibold text-gray-950">Destination and automation</h3>
           <p className="max-w-3xl text-sm leading-6 text-gray-600">
-            Choose the root folder where Meetily-managed notes should live and decide whether summaries should export automatically. Manual export always asks for confirmation, while auto-export only runs after this destination has been confirmed from a meeting.
+            Choose the root folder where RecallX-managed notes should live and decide whether summaries should export automatically. Manual export always asks for confirmation, while auto-export only runs after this destination has been confirmed from a meeting.
           </p>
         </div>
 
@@ -331,7 +331,7 @@ export function AppleNotesSettings() {
           <div>
             <h3 className="text-lg font-semibold text-gray-950">Export history</h3>
             <p className="max-w-3xl text-sm leading-6 text-gray-600">
-              Recent Apple Notes exports created or updated by Meetily. Use this to confirm that automation ran, spot failed exports, and understand which account or folder received the note.
+              Recent Apple Notes exports created or updated by RecallX. Use this to confirm that automation ran, spot failed exports, and understand which account or folder received the note.
             </p>
           </div>
           {isLoading && <Loader2 className="h-5 w-5 animate-spin text-gray-400" />}

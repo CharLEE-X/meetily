@@ -175,7 +175,7 @@ export function SummaryTemplateSettings() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "meetily-summary-templates.json";
+      link.download = "recallx-summary-templates.json";
       link.click();
       URL.revokeObjectURL(url);
       toast.success("Custom templates exported");
@@ -218,7 +218,7 @@ export function SummaryTemplateSettings() {
           <div>
             <h3 className="text-lg font-semibold text-slate-950">Templates</h3>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Choose the structure used when Meetily generates or regenerates a meeting summary.
+              Choose the structure used when RecallX generates or regenerates a meeting summary.
             </p>
           </div>
           <Button size="icon" variant="outline" onClick={handleNew} title="Create template">

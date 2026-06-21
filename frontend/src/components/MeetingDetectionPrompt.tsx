@@ -181,7 +181,7 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
       .then(() => {
         markMeetingCandidateAutoOpened(candidate);
         toast.info("Meeting link opened", {
-          description: "Meetily opened only the meeting URL because auto-open is enabled.",
+          description: "RecallX opened only the meeting URL because auto-open is enabled.",
         });
       })
       .catch((error) => {
@@ -281,7 +281,7 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
               {attendeePreview ? ` · ${attendeePreview}` : ""}
             </p>
             <p className="mt-1 text-xs text-gray-500">
-              Meetily can {candidate.meetingUrl ? "open the meeting link or " : ""}{isReviewOnly ? "help you review setup" : "start recording with this title"}. It will not join or record silently.
+              RecallX can {candidate.meetingUrl ? "open the meeting link or " : ""}{isReviewOnly ? "help you review setup" : "start recording with this title"}. It will not join or record silently.
             </p>
             {candidate.reasons?.length ? (
               <div className="mt-3 flex flex-wrap gap-1.5">
@@ -301,7 +301,7 @@ export function MeetingDetectionPrompt({ sidebarCollapsed, onStartRecording, isR
                 <p className="mt-1">
                   {missingPermissions.length
                     ? `Open Settings to review ${missingPermissions.map(permissionLabel).join(", ")} permissions and improve detection confidence.`
-                    : "Meetily could not check every local signal, so this prompt is conservative. Open Settings to review detection setup."}
+                    : "RecallX could not check every local signal, so this prompt is conservative. Open Settings to review detection setup."}
                 </p>
               </div>
             ) : null}
