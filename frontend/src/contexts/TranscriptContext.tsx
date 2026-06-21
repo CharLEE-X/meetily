@@ -148,8 +148,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
                 const isManualOnly = screenshotPreferences.captureMode === 'manualOnly';
                 const confirmed = window.confirm(
                   isFullScreenCapture
-                    ? `Allow Meetily to capture ${isManualOnly ? 'manual' : 'scheduled'} full-screen screenshots for this meeting? Full-screen capture can include other visible apps. Screenshots are stored locally and can be deleted from the meeting timeline.`
-                    : `Allow Meetily to capture ${isManualOnly ? 'manual' : 'scheduled'} call-window screenshots for this meeting? Meetily uses the detected meeting window bounds and skips capture if the call window is unavailable. Screenshots are stored locally and can be deleted from the meeting timeline.`
+                    ? `Allow RecallX to capture ${isManualOnly ? 'manual' : 'scheduled'} full-screen screenshots for this meeting? Full-screen capture can include other visible apps. Screenshots are stored locally and can be deleted from the meeting timeline.`
+                    : `Allow RecallX to capture ${isManualOnly ? 'manual' : 'scheduled'} call-window screenshots for this meeting? RecallX uses the detected meeting window bounds and skips capture if the call window is unavailable. Screenshots are stored locally and can be deleted from the meeting timeline.`
                 );
 
                 if (confirmed) {

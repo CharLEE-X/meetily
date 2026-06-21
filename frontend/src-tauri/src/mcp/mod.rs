@@ -312,7 +312,7 @@ fn ensure_agent_client(agent: &AgentKind) -> Result<String> {
     let expires_at = now + chrono::Duration::days(DEFAULT_CLIENT_TTL_DAYS);
     let record = TrustedClientRecord {
         id: client_id.clone(),
-        name: format!("{} via Meetily MCP", agent_label(agent)),
+        name: format!("{} via RecallX MCP", agent_label(agent)),
         scopes: default_client_scopes(),
         token_fingerprint: token_fingerprint(&token_hash),
         token_hash,
@@ -593,12 +593,12 @@ fn tool_schema() -> Value {
         "tools": [
             {
                 "name": "meetily_status",
-                "description": "Read the local Meetily MCP server status without exposing meeting content.",
+                "description": "Read the local RecallX MCP server status without exposing meeting content.",
                 "inputSchema": { "type": "object", "properties": {} }
             },
             {
                 "name": "meetily_list_meetings",
-                "description": "List authorized Meetily meetings with basic metadata.",
+                "description": "List authorized RecallX meetings with basic metadata.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -609,7 +609,7 @@ fn tool_schema() -> Value {
             },
             {
                 "name": "meetily_search_transcripts",
-                "description": "Search Meetily transcripts and return bounded snippets.",
+                "description": "Search RecallX transcripts and return bounded snippets.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["query"],
@@ -2163,17 +2163,17 @@ fn agent_invocation_mode(agent: &AgentKind) -> &'static str {
 
 fn agent_fallback(agent: &AgentKind) -> &'static str {
     match agent {
-        AgentKind::Claude => "Open Claude Desktop and paste the prepared prompt. The prompt references Meetily MCP sources after setup.",
-        AgentKind::Codex => "Open Codex in the target workspace and paste the prepared prompt. The prompt references Meetily MCP sources after setup.",
-        AgentKind::Cursor => "Open Cursor and paste the prepared prompt. The prompt references Meetily MCP sources after setup.",
+        AgentKind::Claude => "Open Claude Desktop and paste the prepared prompt. The prompt references RecallX MCP sources after setup.",
+        AgentKind::Codex => "Open Codex in the target workspace and paste the prepared prompt. The prompt references RecallX MCP sources after setup.",
+        AgentKind::Cursor => "Open Cursor and paste the prepared prompt. The prompt references RecallX MCP sources after setup.",
     }
 }
 
 fn agent_setup_hint(agent: &AgentKind) -> &'static str {
     match agent {
-        AgentKind::Claude => "Install Claude Desktop or create its config file, then run setup to add the Meetily MCP server.",
-        AgentKind::Codex => "Install Codex or create ~/.codex/config.toml, then run setup to add the Meetily MCP server.",
-        AgentKind::Cursor => "Install Cursor or create ~/.cursor/mcp.json, then run setup to add the Meetily MCP server.",
+        AgentKind::Claude => "Install Claude Desktop or create its config file, then run setup to add the RecallX MCP server.",
+        AgentKind::Codex => "Install Codex or create ~/.codex/config.toml, then run setup to add the RecallX MCP server.",
+        AgentKind::Cursor => "Install Cursor or create ~/.cursor/mcp.json, then run setup to add the RecallX MCP server.",
     }
 }
 
@@ -2184,7 +2184,7 @@ fn agent_capabilities(agent: &AgentKind, configured: bool, working: bool) -> Vec
     ];
 
     if configured {
-        capabilities.push("Meetily MCP endpoint configured".to_string());
+        capabilities.push("RecallX MCP endpoint configured".to_string());
     }
 
     if working {
@@ -2249,7 +2249,7 @@ fn status_for_agent_at_path(
         message: match status {
             "working" => "Configured and MCP server is running.".to_string(),
             "configured" => "Configured. Start MCP to complete the working check.".to_string(),
-            "notConfigured" => "App config found, but Meetily MCP is not configured.".to_string(),
+            "notConfigured" => "App config found, but RecallX MCP is not configured.".to_string(),
             _ => "Config folder was not found on this machine.".to_string(),
         },
         invocation_mode: agent_invocation_mode(&agent).to_string(),

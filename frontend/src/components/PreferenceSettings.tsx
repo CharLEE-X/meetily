@@ -306,7 +306,7 @@ export function PreferenceSettings() {
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Appearance</h3>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
-            Choose how Meetily should look across the desktop app. System follows your macOS Light or Dark appearance, while Light and Dark keep the app pinned to that mode.
+            Choose how RecallX should look across the desktop app. System follows your macOS Light or Dark appearance, while Light and Dark keep the app pinned to that mode.
           </p>
         </div>
         <div className="mt-5 grid gap-3 md:grid-cols-3">
@@ -346,7 +346,7 @@ export function PreferenceSettings() {
             <h3 className="text-lg font-semibold text-gray-900">Startup</h3>
           </div>
           <p className="max-w-3xl text-sm leading-6 text-gray-600">
-            Choose whether Meetily should be ready as soon as you sign in and whether it should stay tucked away in the menu bar until you need it. These settings are local to this Mac.
+            Choose whether RecallX should be ready as soon as you sign in and whether it should stay tucked away in the menu bar until you need it. These settings are local to this Mac.
           </p>
         </div>
 
@@ -355,9 +355,9 @@ export function PreferenceSettings() {
             <div className="flex gap-3">
               <Power className="mt-0.5 h-4 w-4 text-gray-500" />
               <div>
-                <div className="text-sm font-medium text-gray-900">Open Meetily when you log in</div>
+                <div className="text-sm font-medium text-gray-900">Open RecallX when you log in</div>
                 <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-600">
-                  Adds Meetily to your macOS login startup using a local LaunchAgent. Changes take effect the next time you log in; Meetily will not start recordings, join calls, or enable microphone capture.
+                  Adds RecallX to your macOS login startup using a local LaunchAgent. Changes take effect the next time you log in; RecallX will not start recordings, join calls, or enable microphone capture.
                 </p>
                 {appSettings?.loginItemPath && (
                   <p className="mt-2 break-all font-mono text-xs text-gray-500">
@@ -384,7 +384,7 @@ export function PreferenceSettings() {
               <div>
                 <div className="text-sm font-medium text-gray-900">Start minimized to the menu bar</div>
                 <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-600">
-                  Keeps the main window hidden at launch while the tray/menu-bar actions remain available. Use this with login startup when you want Meetily ready in the background.
+                  Keeps the main window hidden at launch while the tray/menu-bar actions remain available. Use this with login startup when you want RecallX ready in the background.
                 </p>
               </div>
             </div>
@@ -432,7 +432,7 @@ export function PreferenceSettings() {
           <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Notifications</h3>
             <p className="max-w-2xl text-sm leading-6 text-gray-600">
-              Controls the local macOS notifications shown when Meetily starts and stops recording. These reminders help you confirm recording state and prompt consent conversations, but they do not start or stop recording by themselves.
+              Controls the local macOS notifications shown when RecallX starts and stops recording. These reminders help you confirm recording state and prompt consent conversations, but they do not start or stop recording by themselves.
             </p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
@@ -448,7 +448,7 @@ export function PreferenceSettings() {
               <h3 className="text-lg font-semibold text-gray-900">Meeting detection</h3>
             </div>
             <p className="mt-2 max-w-2xl text-sm text-gray-600">
-              Detect upcoming meetings from approved calendar metadata, meeting apps, active call windows, browser meeting tabs, and optional mic activity. Meetily uses this to suggest titles, prompts, and join actions; it never joins or records silently.
+              Detect upcoming meetings from approved calendar metadata, meeting apps, active call windows, browser meeting tabs, and optional mic activity. RecallX uses this to suggest titles, prompts, and join actions; it never joins or records silently.
             </p>
           </div>
           <div className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700">
@@ -473,7 +473,7 @@ export function PreferenceSettings() {
           </div>
           <div>
             <label className="text-sm font-medium text-gray-900" htmlFor="meeting-detection-lookahead">Lookahead minutes</label>
-            <p className="mt-1 text-xs leading-5 text-gray-500">How early Meetily should start considering an approved meeting relevant for prompts and metadata.</p>
+            <p className="mt-1 text-xs leading-5 text-gray-500">How early RecallX should start considering an approved meeting relevant for prompts and metadata.</p>
             <input
               id="meeting-detection-lookahead"
               type="number"
@@ -673,7 +673,7 @@ export function PreferenceSettings() {
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Data Storage Locations</h3>
         <p className="max-w-3xl text-sm leading-6 text-gray-600 mb-6">
-          View and open the local folders Meetily uses for recordings and app-managed data. Audio files, screenshots, transcripts, and summaries are stored on this Mac unless you explicitly export them or use a cloud AI provider.
+          View and open the local folders RecallX uses for recordings and app-managed data. Audio files, screenshots, transcripts, and summaries are stored on this Mac unless you explicitly export them or use a cloud AI provider.
         </p>
 
         <div className="space-y-4">
@@ -738,7 +738,7 @@ export function PreferenceSettings() {
         <div className="mb-4">
           <h3 className="text-lg font-semibold text-gray-900">Analytics privacy</h3>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
-            Decide whether Meetily can send product usage events that help prioritize fixes and features. Meeting audio, transcripts, summaries, screenshots, and note contents are not analytics payloads.
+            Decide whether RecallX can send product usage events that help prioritize fixes and features. Meeting audio, transcripts, summaries, screenshots, and note contents are not analytics payloads.
           </p>
         </div>
         <AnalyticsConsentSwitch />

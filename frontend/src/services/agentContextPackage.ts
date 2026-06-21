@@ -249,7 +249,7 @@ export function buildAgentContextPackage(
 
 export function serializeAgentContextPackage(pkg: AgentContextPackage, target: AgentContextTarget = 'prompt'): string {
   const header = [
-    `Meetily context package (${pkg.schemaVersion})`,
+    `RecallX context package (${pkg.schemaVersion})`,
     `Target: ${target}`,
     `Meeting: ${pkg.meeting.title}`,
     `Meeting ID: ${pkg.meeting.id}`,

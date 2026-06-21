@@ -78,7 +78,7 @@ export function CalendarEventPanel({ meetingId, hasSummary }: CalendarEventPanel
             <span className={`rounded-full px-2 py-0.5 font-medium ${canCreate ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-700"}`}>
               {canCreate ? "enabled" : "disabled"}
             </span>
-            <span className="text-slate-500">{account?.targetCalendarName ?? "Meetily"}</span>
+            <span className="text-slate-500">{account?.targetCalendarName ?? "RecallX"}</span>
             {result && <span className="text-slate-500">{result.status}</span>}
           </div>
           {message && (

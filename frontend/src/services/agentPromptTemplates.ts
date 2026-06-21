@@ -37,7 +37,7 @@ const safetyBlock = [
 ].join('\n');
 
 const mcpBlock = [
-  'Useful Meetily MCP tools when authorized:',
+  'Useful RecallX MCP tools when authorized:',
   '- meetily_get_latest_meeting',
   '- meetily_ask_meetings',
   '- meetily_get_open_loops',
@@ -53,7 +53,7 @@ export const DEFAULT_AGENT_PROMPT_TEMPLATES: AgentPromptTemplate[] = [
     agentLean: 'codex',
     description: 'Turn decisions and follow-ups into codebase work for Codex.',
     body: [
-      'You are Codex working from a Meetily meeting handoff.',
+      'You are Codex working from a RecallX meeting handoff.',
       'Goal: inspect the local repository, identify implementation tasks from the cited meeting context, make scoped code changes, test them, and prepare a concise result.',
       '',
       '{{safetyBlock}}',

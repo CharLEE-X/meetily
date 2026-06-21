@@ -41,7 +41,7 @@ const TAB_EXPLANATIONS: Record<string, { title: string; description: string; poi
   },
   recording: {
     title: 'Recording retention and capture inputs',
-    description: 'Use this page to decide what Meetily keeps after a meeting and which audio devices it should prefer when recording starts.',
+    description: 'Use this page to decide what RecallX keeps after a meeting and which audio devices it should prefer when recording starts.',
     points: ['Audio files and screenshots can contain sensitive meeting content.', 'Device defaults reduce setup time but can be changed before recording.', 'Screenshots support timeline context and speaker identification when enabled.'],
   },
   Transcriptionmodels: {
@@ -61,23 +61,23 @@ const TAB_EXPLANATIONS: Record<string, { title: string; description: string; poi
   },
   mcp: {
     title: 'Local MCP access for agents',
-    description: 'Use this page to expose approved Meetily meeting tools to local agents such as Codex, Claude, and Cursor, then configure post-meeting handoffs.',
+    description: 'Use this page to expose approved RecallX meeting tools to local agents such as Codex, Claude, and Cursor, then configure post-meeting handoffs.',
     points: ['The MCP server listens locally on this machine.', 'Agent setup writes client configuration and verifies readiness.', 'Automation rules prepare reviewable handoffs for follow-up work.'],
   },
   calendar: {
     title: 'Apple Calendar integration',
-    description: 'Use this page to sync upcoming calendar metadata, select the event for the next recording, and optionally create Meetily-owned calendar records.',
-    points: ['Calendar sync reads local event metadata for better meeting titles and prompts.', 'Event creation is off by default.', 'Meetily only updates calendar events it created or linked.'],
+    description: 'Use this page to sync upcoming calendar metadata, select the event for the next recording, and optionally create RecallX-owned calendar records.',
+    points: ['Calendar sync reads local event metadata for better meeting titles and prompts.', 'Event creation is off by default.', 'RecallX only updates calendar events it created or linked.'],
   },
   notes: {
     title: 'Apple Notes exports',
     description: 'Use this page to choose where completed meeting summaries are written in Apple Notes and whether export should happen automatically.',
-    points: ['Manual export remains available even when auto-export is off.', 'The first destination needs confirmation before automation runs.', 'Export history shows what Meetily created or updated.'],
+    points: ['Manual export remains available even when auto-export is off.', 'The first destination needs confirmation before automation runs.', 'Export history shows what RecallX created or updated.'],
   },
   reminders: {
     title: 'Apple Reminders follow-ups',
     description: 'Use this page to choose the default list for meeting action items and tune how developer-focused follow-up drafts are categorized.',
-    points: ['Meetily proposes reminders from action items after meetings.', 'List and preset choices affect future drafts only.', 'Created reminders stay in Apple Reminders.'],
+    points: ['RecallX proposes reminders from action items after meetings.', 'List and preset choices affect future drafts only.', 'Created reminders stay in Apple Reminders.'],
   },
   beta: {
     title: 'Experimental features',

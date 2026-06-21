@@ -84,7 +84,7 @@ export function CalendarSettings() {
   const [isLoading, setIsLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<"connect" | "sync" | "disconnect" | null>(null)
   const [writeLoading, setWriteLoading] = useState(false)
-  const [targetCalendarName, setTargetCalendarName] = useState("Meetily")
+  const [targetCalendarName, setTargetCalendarName] = useState("RecallX")
   const [autoCreateEvents, setAutoCreateEvents] = useState(false)
   const [selectedRecordingEventId, setSelectedRecordingEventId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -105,7 +105,7 @@ export function CalendarSettings() {
       setSettings(nextSettings)
       setEvents(nextEvents)
       const account = nextSettings.accounts.find((account) => account.provider === "apple")
-      setTargetCalendarName(account?.targetCalendarName ?? "Meetily")
+      setTargetCalendarName(account?.targetCalendarName ?? "RecallX")
       setAutoCreateEvents(account?.autoCreateEvents ?? false)
       if (nextEvents.length > 0) {
         saveSyncedCalendarEvents(nextEvents.map(calendarEventToApprovedEvent))
@@ -236,7 +236,7 @@ export function CalendarSettings() {
     {
       label: "Event creation",
       detail: autoCreateEvents
-        ? `Meetily can create or update events in ${targetCalendarName.trim() || "Meetily"}.`
+        ? `RecallX can create or update events in ${targetCalendarName.trim() || "RecallX"}.`
         : "Meetily will not create calendar events until this is enabled.",
       status: autoCreateEvents ? "ready" : "disabled",
     },
@@ -360,7 +360,7 @@ export function CalendarSettings() {
               value={targetCalendarName}
               disabled={writeLoading}
               onChange={(event) => setTargetCalendarName(event.target.value)}
-              placeholder="Meetily"
+              placeholder="RecallX"
             />
           </label>
           <button

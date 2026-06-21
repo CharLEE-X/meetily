@@ -1,6 +1,6 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "meetily",
+    "productName": "RecallX",
     "version": "0.4.0",
     "identifier": "com.meetily.ai",
     "build": {
@@ -13,7 +13,7 @@
         "withGlobalTauri": true,
         "windows": [
             {
-                "title": "meetily",
+                "title": "RecallX",
                 "width": 1100,
                 "height": 700,
                 "resizable": true,

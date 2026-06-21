@@ -46,7 +46,7 @@ export async function triggerMeetingAgentWorkflow({
   if (settings.mode === 'off' || !settings.skillPackInstalled) {
     if (manual) {
       toast.info('Agent automation is not enabled', {
-        description: 'Install the Meetily agent skill pack and choose a post-meeting mode in MCP settings.',
+        description: 'Install the RecallX agent skill pack and choose a post-meeting mode in MCP settings.',
       });
     }
     return false;

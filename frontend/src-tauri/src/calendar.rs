@@ -211,7 +211,7 @@ async fn connect_provider_account(
     .bind(label)
     .bind(status)
     .bind(error)
-    .bind("Meetily")
+    .bind("RecallX")
     .bind(&now)
     .bind(&now)
     .execute(pool)
@@ -557,7 +557,7 @@ pub async fn create_or_update_meeting_calendar_event(
         attendee_count: None,
         attendee_names: None,
         organizer_name: None,
-        description_excerpt: Some("Created by Meetily.".to_string()),
+        description_excerpt: Some("Created by RecallX.".to_string()),
         content_hash: content_hash(&[
             &write.apple_event_identifier,
             &meeting.title,
@@ -598,7 +598,7 @@ fn provider_infos() -> Vec<CalendarProviderInfo> {
             supports_write: cfg!(target_os = "macos"),
             notes: Some(
                 if cfg!(target_os = "macos") {
-                    "Reads Apple Calendar metadata and can create Meetily-owned events through the local macOS calendar bridge after explicit opt-in."
+                    "Reads Apple Calendar metadata and can create RecallX-owned events through the local macOS calendar bridge after explicit opt-in."
                 } else {
                     "Apple Calendar is available only on macOS."
                 }
@@ -866,7 +866,7 @@ fn parse_calendar_write_result(row: &str) -> Result<AppleCalendarWriteResult, St
     Ok(AppleCalendarWriteResult {
         apple_event_identifier: apple_event_identifier.to_string(),
         calendar_name: if parts[1].trim().is_empty() {
-            "Meetily"
+            "RecallX"
         } else {
             parts[1].trim()
         }
@@ -887,7 +887,7 @@ fn calendar_event_notes(
     notes_export: Option<&MeetingNotesExportLink>,
 ) -> String {
     let mut notes = format!(
-        "Created by Meetily\n\nMeeting ID: {}\nSummary status: {}\nTranscript: {}",
+        "Created by RecallX\n\nMeeting ID: {}\nSummary status: {}\nTranscript: {}",
         meeting_id,
         summary_status,
         if has_transcript {
@@ -921,7 +921,7 @@ fn sanitize_calendar_write_error(error: &str) -> String {
         || lower.contains("not authorized")
         || lower.contains("not permitted")
     {
-        return "Apple Calendar permission is required. Allow Meetily to control Calendar in System Settings > Privacy & Security > Automation, then retry.".to_string();
+        return "Apple Calendar permission is required. Allow RecallX to control Calendar in System Settings > Privacy & Security > Automation, then retry.".to_string();
     }
     let trimmed = error.trim();
     if trimmed.is_empty() {
@@ -1521,7 +1521,7 @@ mod tests {
         let notes_export = MeetingNotesExportLink {
             id: "export-1".to_string(),
             note_title: "2026-06-19 - Planning".to_string(),
-            folder_name: Some("Meetily".to_string()),
+            folder_name: Some("RecallX".to_string()),
             provider_note_id: Some("x-coredata://note/123".to_string()),
             status: "exported".to_string(),
         };
@@ -1530,7 +1530,7 @@ mod tests {
         assert!(notes.contains("Meeting ID: meeting-1"));
         assert!(notes.contains("Apple Notes export: exported"));
         assert!(notes.contains("Note title: 2026-06-19 - Planning"));
-        assert!(notes.contains("Notes folder: Meetily"));
+        assert!(notes.contains("Notes folder: RecallX"));
         assert!(notes.contains("Apple Notes ID: x-coredata://note/123"));
     }
 }

@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 const PROVIDER_APPLE_NOTES: &str = "apple_notes";
 const APPLE_NOTES_LABEL: &str = "Apple Notes";
-const DEFAULT_ROOT_FOLDER: &str = "Meetily";
+const DEFAULT_ROOT_FOLDER: &str = "RecallX";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -515,7 +515,7 @@ async fn build_export_payload(
             })?;
     let transcript_reference = if transcript_count > 0 {
         Some(format!(
-            "Meetily transcript available locally for meeting {}",
+            "RecallX transcript available locally for meeting {}",
             meeting_id
         ))
     } else {
@@ -529,7 +529,7 @@ async fn build_export_payload(
         "Transcript reference".to_string(),
     ];
     let body_text = format!(
-        "{}\n\nDate: {}\nMeeting ID: {}\n\n{}\n\n{}\n\nCreated by Meetily",
+        "{}\n\nDate: {}\nMeeting ID: {}\n\n{}\n\n{}\n\nCreated by RecallX",
         meeting.title,
         meeting_created_at,
         meeting_id,
@@ -646,7 +646,7 @@ fn render_note_html(
     transcript_reference: Option<&str>,
 ) -> String {
     format!(
-        "<h1>{}</h1><p><strong>Date:</strong> {}</p><p><strong>Meeting ID:</strong> {}</p><h2>Summary</h2>{}<h2>Transcript</h2><p>{}</p><hr><p>Created by Meetily</p>",
+        "<h1>{}</h1><p><strong>Date:</strong> {}</p><p><strong>Meeting ID:</strong> {}</p><h2>Summary</h2>{}<h2>Transcript</h2><p>{}</p><hr><p>Created by RecallX</p>",
         html_escape(meeting_title),
         html_escape(created_at),
         html_escape(meeting_id),
@@ -1129,7 +1129,7 @@ fn clean_optional(value: &str) -> Option<String> {
 fn sanitize_notes_error(error: &str) -> String {
     let lower = error.to_ascii_lowercase();
     if notes_error_status(error) == "permission_needed" {
-        return "Apple Notes permission is required. Allow Meetily to control Notes in System Settings > Privacy & Security > Automation, then retry.".to_string();
+        return "Apple Notes permission is required. Allow RecallX to control Notes in System Settings > Privacy & Security > Automation, then retry.".to_string();
     }
     if lower.contains("can’t get application")
         || lower.contains("can't get application")
@@ -1178,15 +1178,15 @@ mod tests {
     #[test]
     fn parse_write_result_maps_created_and_updated() {
         let created = parse_write_result(
-            "acct\u{1e}On My Mac\u{1e}folder\u{1e}Meetily\u{1e}note-1\u{1e}created",
+            "acct\u{1e}On My Mac\u{1e}folder\u{1e}RecallX\u{1e}note-1\u{1e}created",
         )
         .unwrap();
         assert_eq!(created.note_id, "note-1");
         assert_eq!(created.status, "exported");
-        assert_eq!(created.folder_name.as_deref(), Some("Meetily"));
+        assert_eq!(created.folder_name.as_deref(), Some("RecallX"));
 
         let updated = parse_write_result(
-            "acct\u{1e}On My Mac\u{1e}folder\u{1e}Meetily\u{1e}note-1\u{1e}updated",
+            "acct\u{1e}On My Mac\u{1e}folder\u{1e}RecallX\u{1e}note-1\u{1e}updated",
         )
         .unwrap();
         assert_eq!(updated.status, "updated");

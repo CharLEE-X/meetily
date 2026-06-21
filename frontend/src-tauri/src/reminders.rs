@@ -1707,7 +1707,7 @@ fn candidate_to_reminder_draft(
 ) -> ReminderDraft {
     let now = chrono::Utc::now().to_rfc3339();
     let notes = Some(format!(
-        "From Meetily meeting: {}\nWhy: {}\nPreset: {}",
+        "From RecallX meeting: {}\nWhy: {}\nPreset: {}",
         meeting_title,
         candidate
             .source_evidence
@@ -2062,7 +2062,7 @@ fn reminder_notes(meeting_title: &str, meeting_id: &str, draft_notes: Option<&st
     if let Some(notes) = draft_notes.map(str::trim).filter(|value| !value.is_empty()) {
         lines.push(notes.to_string());
     }
-    lines.push(format!("Source: Meetily meeting \"{}\"", meeting_title));
+    lines.push(format!("Source: RecallX meeting \"{}\"", meeting_title));
     lines.push(format!("Meeting ID: {}", meeting_id));
     lines.join("\n\n")
 }
@@ -2493,7 +2493,7 @@ fn sanitize_reminder_error(error: &str) -> String {
         || lower.contains("not permitted")
         || lower.contains("permission")
     {
-        return "Apple Reminders permission is required. Allow Meetily in macOS Privacy & Security settings, then refresh lists again.".to_string();
+        return "Apple Reminders permission is required. Allow RecallX in macOS Privacy & Security settings, then refresh lists again.".to_string();
     }
     if lower.contains("not available") {
         return "Apple Reminders is available only on macOS.".to_string();
@@ -2566,7 +2566,7 @@ mod tests {
     fn reminder_notes_include_meeting_backlink_context() {
         let notes = reminder_notes("API review", "meeting-123", Some("Check CI after deploy"));
         assert!(notes.contains("Check CI after deploy"));
-        assert!(notes.contains("Source: Meetily meeting \"API review\""));
+        assert!(notes.contains("Source: RecallX meeting \"API review\""));
         assert!(notes.contains("Meeting ID: meeting-123"));
     }
 

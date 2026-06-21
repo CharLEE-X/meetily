@@ -137,7 +137,7 @@ export interface PreparedAgentWorkflow {
   reason: string | null;
 }
 
-export const MEETILY_SKILL_PACK_VERSION = '2026.06.19';
+export const RECALLX_SKILL_PACK_VERSION = '2026.06.19';
 export { DEFAULT_AGENT_PROMPT_TEMPLATES, getAgentPromptTemplate };
 
 export const AGENT_WORKFLOW_ACTIONS: Array<{
@@ -230,22 +230,22 @@ export const AGENT_SUPPORT_MATRIX: Array<{
   {
     agent: 'codex',
     label: 'Codex',
-    setup: 'Meetily can write an MCP server entry to ~/.codex/config.toml.',
-    invocation: 'Direct task execution is not launched by Meetily in this release.',
+    setup: 'RecallX can write an MCP server entry to ~/.codex/config.toml.',
+    invocation: 'Direct task execution is not launched by RecallX in this release.',
     handoff: 'Copy the generated prompt into Codex; it references the local MCP server.',
   },
   {
     agent: 'claude',
     label: 'Claude Desktop',
-    setup: 'Meetily can write an MCP server entry to Claude Desktop config.',
-    invocation: 'Meetily does not drive Claude Desktop automatically.',
+    setup: 'RecallX can write an MCP server entry to Claude Desktop config.',
+    invocation: 'RecallX does not drive Claude Desktop automatically.',
     handoff: 'Open Claude and paste the generated prompt after setup.',
   },
   {
     agent: 'cursor',
     label: 'Cursor',
-    setup: 'Meetily can write an MCP server entry to ~/.cursor/mcp.json.',
-    invocation: 'Meetily does not start Cursor agent tasks automatically.',
+    setup: 'RecallX can write an MCP server entry to ~/.cursor/mcp.json.',
+    invocation: 'RecallX does not start Cursor agent tasks automatically.',
     handoff: 'Open Cursor and paste the generated prompt after setup.',
   },
   {
@@ -429,7 +429,7 @@ function readinessBlockReason(
   agentStatuses: AgentSetupStatus[]
 ): string | null {
   if (settings.mode === 'off') return 'Post-meeting workflows are disabled.';
-  if (!settings.skillPackInstalled) return 'Meetily skill pack is not installed.';
+  if (!settings.skillPackInstalled) return 'RecallX skill pack is not installed.';
   if (settings.defaultAgent === 'manual') return null;
 
   const selectedAgent = agentStatuses.find((agent) => agent.agent === settings.defaultAgent);
@@ -484,15 +484,15 @@ export function saveAgentWorkflowSettings(nextSettings: AgentWorkflowSettings): 
   return sanitized;
 }
 
-export function installMeetilySkillPack(current = getAgentWorkflowSettings()): AgentWorkflowSettings {
+export function installRecallXSkillPack(current = getAgentWorkflowSettings()): AgentWorkflowSettings {
   return saveAgentWorkflowSettings({
     ...current,
     skillPackInstalled: true,
-    skillPackVersion: MEETILY_SKILL_PACK_VERSION,
+    skillPackVersion: RECALLX_SKILL_PACK_VERSION,
   });
 }
 
-export function removeMeetilySkillPack(current = getAgentWorkflowSettings()): AgentWorkflowSettings {
+export function removeRecallXSkillPack(current = getAgentWorkflowSettings()): AgentWorkflowSettings {
   return saveAgentWorkflowSettings({
     ...current,
     skillPackInstalled: false,

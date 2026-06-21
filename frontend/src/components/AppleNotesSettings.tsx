@@ -66,7 +66,7 @@ function healthIconClass(status: HealthItem["status"]): string {
 export function AppleNotesSettings() {
   const [settings, setSettings] = useState<AppleNotesSettingsState | null>(null)
   const [recentExports, setRecentExports] = useState<AppleNotesExportRecord[]>([])
-  const [rootFolderName, setRootFolderName] = useState("Meetily")
+  const [rootFolderName, setRootFolderName] = useState("RecallX")
   const [autoExportEnabled, setAutoExportEnabled] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<"connect" | "save" | "disconnect" | null>(null)
@@ -90,7 +90,7 @@ export function AppleNotesSettings() {
       setSettings(nextSettings)
       setRecentExports(nextSettings.recentExports)
       const account = nextSettings.accounts.find((item) => item.provider === "apple_notes")
-      setRootFolderName(account?.rootFolderName ?? "Meetily")
+      setRootFolderName(account?.rootFolderName ?? "RecallX")
       setAutoExportEnabled(account?.autoExportEnabled ?? false)
     } catch (error) {
       setMessage(friendlyError(error))
@@ -297,7 +297,7 @@ export function AppleNotesSettings() {
               value={rootFolderName}
               disabled={isSaving}
               onChange={(event) => setRootFolderName(event.target.value)}
-              placeholder="Meetily"
+              placeholder="RecallX"
             />
           </label>
           <button

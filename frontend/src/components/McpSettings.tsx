@@ -15,10 +15,10 @@ import {
   WorkflowActionId,
   WorkflowMode,
   getAgentWorkflowSettings,
-  installMeetilySkillPack,
-  MEETILY_SKILL_PACK_VERSION,
+  installRecallXSkillPack,
+  RECALLX_SKILL_PACK_VERSION,
   getAgentPromptTemplate,
-  removeMeetilySkillPack,
+  removeRecallXSkillPack,
   resolveAgentWorkflowRule,
   saveAgentWorkflowSettings,
 } from "@/services/agentWorkflowService"
@@ -192,13 +192,13 @@ export function McpSettings() {
   }
 
   const handleSkillPackInstall = () => {
-    setWorkflowSettings(installMeetilySkillPack(workflowSettings))
-    setMessage("Meetily agent skill pack installed.")
+    setWorkflowSettings(installRecallXSkillPack(workflowSettings))
+    setMessage("RecallX agent skill pack installed.")
   }
 
   const handleSkillPackRemove = () => {
-    setWorkflowSettings(removeMeetilySkillPack(workflowSettings))
-    setMessage("Meetily agent skill pack removed and post-meeting workflows disabled.")
+    setWorkflowSettings(removeRecallXSkillPack(workflowSettings))
+    setMessage("RecallX agent skill pack removed and post-meeting workflows disabled.")
   }
 
   const handleDefaultAgentChange = (defaultAgent: AgentTarget) => {
@@ -330,7 +330,7 @@ export function McpSettings() {
           <div>
             <div className="flex items-center gap-2">
               <Bot className="h-5 w-5 text-blue-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Meetily MCP</h3>
+              <h3 className="text-lg font-semibold text-gray-900">RecallX MCP</h3>
             </div>
             <p className="mt-2 max-w-2xl text-sm text-gray-600">
               Local agent access is off by default. Enable it only for clients you trust on this machine because authorized agents can query approved meeting metadata, summaries, transcripts, and workflow context through the local MCP endpoint.
@@ -352,7 +352,7 @@ export function McpSettings() {
               <Power className="h-4 w-4" />
               Server URL
             </div>
-            <p className="mt-2 text-xs leading-5 text-gray-600">Agents use this local-only URL to call Meetily tools. It is not intended to be exposed on a public network.</p>
+            <p className="mt-2 text-xs leading-5 text-gray-600">Agents use this local-only URL to call RecallX tools. It is not intended to be exposed on a public network.</p>
             <p className="mt-2 break-all font-mono text-xs text-gray-600">{serverUrl}</p>
           </div>
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
@@ -373,7 +373,7 @@ export function McpSettings() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-medium text-gray-900">Auto-start</div>
-                <p className="mt-1 text-xs leading-5 text-gray-600">Start MCP when Meetily opens so configured agents can use meeting tools without manually toggling the server each time.</p>
+                <p className="mt-1 text-xs leading-5 text-gray-600">Start MCP when RecallX opens so configured agents can use meeting tools without manually toggling the server each time.</p>
               </div>
               <Switch
                 checked={Boolean(status?.settings.autoStart)}
@@ -401,7 +401,7 @@ export function McpSettings() {
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Agent setup</h3>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
-              Configure Claude, Codex, and Cursor to use the local Meetily MCP endpoint. Setup writes or repairs the agent configuration, then the readiness checks show whether the app is configured and working.
+              Configure Claude, Codex, and Cursor to use the local RecallX MCP endpoint. Setup writes or repairs the agent configuration, then the readiness checks show whether the app is configured and working.
             </p>
           </div>
           <div className="flex gap-2">
@@ -474,7 +474,7 @@ export function McpSettings() {
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Meetily agent skill pack</h3>
+            <h3 className="text-lg font-semibold text-gray-900">RecallX agent skill pack</h3>
             <p className="mt-1 max-w-2xl text-sm text-gray-600">
               Installs local workflow templates for meeting recall, daily and weekly digests, next-meeting prep, open-loop review, role briefs, Linear issue drafting, and manual agent handoff. The pack stores MCP references only; it does not embed meeting content or secrets.
             </p>
@@ -503,7 +503,7 @@ export function McpSettings() {
             <div className="text-sm font-medium text-gray-900">Status</div>
             <p className="mt-2 text-sm text-gray-600">
               {workflowSettings.skillPackInstalled
-                ? `Installed (${workflowSettings.skillPackVersion ?? MEETILY_SKILL_PACK_VERSION})`
+                ? `Installed (${workflowSettings.skillPackVersion ?? RECALLX_SKILL_PACK_VERSION})`
                 : "Not installed"}
             </p>
           </div>
@@ -795,19 +795,19 @@ export function McpSettings() {
         )}
         {selectedAgentNotReadyForAuto && (
           <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Auto mode is selected, but {selectedAgentLabel} is not working yet. Start Meetily MCP and confirm the agent readiness check before relying on automatic post-meeting handoffs.
+            Auto mode is selected, but {selectedAgentLabel} is not working yet. Start RecallX MCP and confirm the agent readiness check before relying on automatic post-meeting handoffs.
           </div>
         )}
 
         <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          External write workflows, including Linear issue creation, are proposal-only by default. Meetily prepares reviewable drafts and requires explicit approval before anything is created outside the app.
+          External write workflows, including Linear issue creation, are proposal-only by default. RecallX prepares reviewable drafts and requires explicit approval before anything is created outside the app.
         </div>
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <h3 className="text-lg font-semibold text-gray-900">Agent support matrix</h3>
         <p className="mt-1 text-sm text-gray-600">
-          Meetily can configure MCP for supported local agents, but direct task invocation depends on each client. Unsupported launch paths degrade to copyable handoff prompts so you can still pass meeting context manually.
+          RecallX can configure MCP for supported local agents, but direct task invocation depends on each client. Unsupported launch paths degrade to copyable handoff prompts so you can still pass meeting context manually.
         </p>
         <div className="mt-4 overflow-hidden rounded-lg border border-gray-200">
           <table className="w-full table-fixed text-left text-sm">
@@ -840,7 +840,7 @@ export function McpSettings() {
             <h3 className="text-lg font-semibold text-gray-900">Authorized clients</h3>
           </div>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
-            Clients listed here have been granted local access tokens for Meetily MCP. Revoke anything you no longer use or do not recognize.
+            Clients listed here have been granted local access tokens for RecallX MCP. Revoke anything you no longer use or do not recognize.
           </p>
           <div className="mt-4 space-y-3">
             {clients.length === 0 ? (
