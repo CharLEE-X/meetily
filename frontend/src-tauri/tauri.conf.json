@@ -104,7 +104,7 @@
         ],
         "macOS": {
             "entitlements": "entitlements.plist",
-            "signingIdentity": "-",
+            "signingIdentity": "Developer ID Application: Adrian Witaszak (35M6G2GGQB)",
             "hardenedRuntime": true
         },
         "windows": {
